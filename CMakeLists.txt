@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.10)
 project(fsp LANGUAGES CXX)
 
-# --- 1. Splošne nastavitve projekta ---
+# --- 1. General project settings ---
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -11,76 +11,104 @@ if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE "Debug" CACHE STRING "Choose build type" FORCE)
 endif()
 
-# --- 2. Definicija skupnih parametrov za prevajanje in linkanje ---
-# Te liste uporabimo za vse tarče, da zagotovimo identične pogoje gradnje.
-
+# --- 2. Common compilation and linking parameters ---
 if(MSVC)
     set(COMMON_RELEASE_FLAGS "/W4" "/WX" "/O2")
     set(COMMON_DEBUG_FLAGS   "/W4" "/Zi" "/Od")
     set(COMMON_LINK_FLAGS    "")
 else()
-    # Zastavice za Release (vse tarče)
     set(COMMON_RELEASE_FLAGS
         "-Wall" "-Wextra" "-Wpedantic" "-Werror"
         "-Wnarrowing" "-Wswitch-enum" "-O3"
     )
-
-    # Zastavice za Debug (vključno s sanitizerji)
     set(COMMON_DEBUG_FLAGS
         "-Wall" "-Wextra" "-Wpedantic" "-Werror"
         "-Wnarrowing" "-Wswitch-enum" "-g3" "-O1"
         "-fsanitize=address,undefined,leak"
         "-fno-omit-frame-pointer"
     )
-
-    # Zastavice za povezovanje (linkanje) - nujno za sanitizerje
     set(COMMON_LINK_FLAGS "-fsanitize=address,undefined,leak")
 endif()
 
-# --- 3. Iskanje paketov ---
+# --- 3. Find required packages ---
 find_package(XercesC REQUIRED)
 find_package(pugixml REQUIRED)
 
-# --- 4. fsp_lib tarča ---
-set(FSP_CPP_SOURCES
-  ${CMAKE_SOURCE_DIR}/src/lib/x_str.cpp
-  ${CMAKE_SOURCE_DIR}/src/lib/handler.cpp
-  ${CMAKE_SOURCE_DIR}/src/lib/queue.cpp
-  ${CMAKE_SOURCE_DIR}/src/lib/xml_segment.cpp
-)
-add_library(fsp_lib STATIC ${FSP_CPP_SOURCES})
-
-# --- 5. main executable tarča ---
-add_executable(${PROJECT_NAME} ${CMAKE_SOURCE_DIR}/src/main.cpp)
-
-# --- 6. Aplikacija parametrov na vse tarče ---
-# Uporabimo funkcijo, da se izognemo podvajanju kode
-set(ALL_TARGETS fsp_lib ${PROJECT_NAME})
-
-foreach(target ${ALL_TARGETS})
-    # Nastavitev vključnih poti
-    target_include_directories(${target} PUBLIC ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src/lib)
-
-    # Nastavitev compile opcij glede na build type
-    if(CMAKE_BUILD_TYPE STREQUAL "Release")
-        target_compile_options(${target} PRIVATE ${COMMON_RELEASE_FLAGS})
+# --- 4. Function to define a target with common settings ---
+function(add_fsp_target TARGET_NAME TYPE)
+    # TYPE can be STATIC, SHARED, or EXECUTABLE
+    if(TYPE STREQUAL "EXECUTABLE")
+        add_executable(${TARGET_NAME} ${ARGN})
     else()
-        target_compile_options(${target} PRIVATE ${COMMON_DEBUG_FLAGS})
-        # Link opcije dodamo samo, če gre za executable ali če knjižnica to zahteva
-        target_link_options(${target} PRIVATE ${COMMON_LINK_FLAGS})
+        add_library(${TARGET_NAME} ${TYPE} ${ARGN})
     endif()
-endforeach()
 
-# --- 7. Povezovanje knjižnic ---
-target_link_libraries(${PROJECT_NAME}
-    PRIVATE
-        XercesC::XercesC
-        pugixml
-        fsp_lib
-)
+    # Common include paths (can be extended as needed)
+    target_include_directories(${TARGET_NAME} PUBLIC
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/src/lib
+    )
 
-# --- 8. Makro definicije ---
-target_compile_definitions(${PROJECT_NAME} PRIVATE
-    $<$<CONFIG:Debug>:DEBUG_MODE>
-    $<$<CONFIG:Release>:RELEASE_MODE>
+    # Additional include paths provided by the caller via APPEND_INCLUDES
+    if(DEFINED FSP_TARGET_${TARGET_NAME}_INCLUDES)
+        target_include_directories(${TARGET_NAME} PRIVATE ${FSP_TARGET_${TARGET_NAME}_INCLUDES})
+    endif()
+
+    # Compile options based on build type
+    if(CMAKE_BUILD_TYPE STREQUAL "Release")
+        target_compile_options(${TARGET_NAME} PRIVATE ${COMMON_RELEASE_FLAGS})
+    else()
+        target_compile_options(${TARGET_NAME} PRIVATE ${COMMON_DEBUG_FLAGS})
+        if(NOT TYPE STREQUAL "STATIC")  # Only for executable and shared library
+            target_link_options(${TARGET_NAME} PRIVATE ${COMMON_LINK_FLAGS})
+        endif()
+    endif()
+
+    # Macro definitions based on configuration
+    target_compile_definitions(${TARGET_NAME} PRIVATE
+        $<$<CONFIG:Debug>:DEBUG_MODE>
+        $<$<CONFIG:Release>:RELEASE_MODE>
+    )
+
+    # Link with external libraries if provided
+    if(DEFINED FSP_TARGET_${TARGET_NAME}_LIBS)
+        target_link_libraries(${TARGET_NAME} PRIVATE ${FSP_TARGET_${TARGET_NAME}_LIBS})
+    endif()
+endfunction()
+
+# --- 5. Define targets ---
+
+# 5.1 fsp_lib (static library)
+set(FSP_LIB_SOURCES
+    ${CMAKE_SOURCE_DIR}/src/lib/x_str.cpp
+    ${CMAKE_SOURCE_DIR}/src/lib/handler.cpp
+    ${CMAKE_SOURCE_DIR}/src/lib/queue.cpp
+    ${CMAKE_SOURCE_DIR}/src/lib/xml_segment.cpp
 )
+# Specify additional libraries for fsp_lib (if needed)
+set(FSP_TARGET_fsp_lib_LIBS
+    XercesC::XercesC
+    pugixml
+)
+add_fsp_target(fsp_lib STATIC ${FSP_LIB_SOURCES})
+
+# 5.2 Main program (main executable)
+set(MAIN_SOURCES
+    ${CMAKE_SOURCE_DIR}/src/main.cpp
+    ${CMAKE_SOURCE_DIR}/src/lib/x_str.cpp
+    ${CMAKE_SOURCE_DIR}/src/lib/xerces_mgr.cpp
+)
+# Additional libraries for main program
+set(FSP_TARGET_${PROJECT_NAME}_LIBS
+    fsp_lib
+    XercesC::XercesC
+    pugixml
+)
+# If main needs any extra include paths
+# set(FSP_TARGET_${PROJECT_NAME}_INCLUDES ${CMAKE_SOURCE_DIR}/src/extra)
+
+add_fsp_target(${PROJECT_NAME} EXECUTABLE ${MAIN_SOURCES})
+
+# --- 6. (Optional) Display built targets ---
+message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
+message(STATUS "Targets defined: fsp_lib (static), ${PROJECT_NAME} (executable)")

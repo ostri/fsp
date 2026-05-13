@@ -18,35 +18,27 @@ namespace fsp
     x_str(const x_str& other);
     x_str(x_str&& other) noexcept;
     /// operators
-    x_str& operator=(const x_str& other);
-    x_str& operator=(x_str&& other) noexcept;
-
-    void reset() noexcept;
-
-    void reset(XMLCh* ptr) noexcept;
-
-    [[nodiscard]] std::string to_string() const;
-
+    x_str&                       operator=(const x_str& other);
+    x_str&                       operator=(x_str&& other) noexcept;
+    void                         reset() noexcept;
+    void                         reset(XMLCh* ptr) noexcept;
+    [[nodiscard]] std::string    to_string() const;
     [[nodiscard]] std::u16string to_u16string() const;
-
-    bool operator==(const x_str& other) const noexcept;
-    bool operator!=(const x_str& other) const noexcept;
-    auto operator<=>(const x_str& other) const noexcept;
-    bool operator==(const XMLCh* other) const noexcept;
-    bool operator!=(const XMLCh* other) const noexcept;
-    auto operator<=>(const XMLCh* other) const noexcept;
-    bool operator==(std::string_view utf8) const;
-    bool operator!=(std::string_view utf8) const;
-    bool operator==(std::u16string_view u16) const;
-
-    bool operator!=(std::u16string_view u16) const;
-
-    explicit operator const XMLCh*() const noexcept;
-
-    [[nodiscard]] const XMLCh* c_str() const noexcept;
-    [[nodiscard]] XMLCh*       data() const noexcept;
-    [[nodiscard]] bool         empty() const noexcept;
-    [[nodiscard]] std::size_t  length() const noexcept;
+    bool                         operator==(const x_str& other) const noexcept;
+    bool                         operator!=(const x_str& other) const noexcept;
+    auto                         operator<=>(const x_str& other) const noexcept;
+    bool                         operator==(const XMLCh* other) const noexcept;
+    bool                         operator!=(const XMLCh* other) const noexcept;
+    auto                         operator<=>(const XMLCh* other) const noexcept;
+    bool                         operator==(std::string_view utf8) const;
+    bool                         operator!=(std::string_view utf8) const;
+    bool                         operator==(std::u16string_view u16) const;
+    bool                         operator!=(std::u16string_view u16) const;
+    explicit                     operator const XMLCh*() const noexcept;
+    [[nodiscard]] const XMLCh*   c_str() const noexcept;
+    [[nodiscard]] XMLCh*         data() const noexcept;
+    [[nodiscard]] bool           empty() const noexcept;
+    [[nodiscard]] std::size_t    length() const noexcept;
   private:
     XMLCh* m_data = nullptr;
   };

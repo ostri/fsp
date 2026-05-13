@@ -2,14 +2,13 @@
 #include <string>
 #include <vector>
 #include <thread>
-#include <memory>
-#include <xercesc/util/PlatformUtils.hpp>
-#include <xercesc/sax2/XMLReaderFactory.hpp>
+// #include <memory>
 #include "pugixml.hpp"
-#include "lib/x_str.hpp"
-#include "lib/queue.hpp"
-#include "lib/handler.hpp"
-#include <array>
+#include "x_str.hpp"
+#include "queue.hpp"
+#include "handler.hpp"
+#include "xerces_mgr.hpp"
+// #include <array>
 
 namespace
 {
@@ -20,18 +19,6 @@ namespace
       delete p; // NOLINT(cppcoreguidelines-owning-memory)
     }
   };
-  class xerces_mgr
-  {
-  public:
-    xerces_mgr() { xercesc::XMLPlatformUtils::Initialize(); }
-    ~xerces_mgr() { xercesc::XMLPlatformUtils::Terminate(); }
-    // Disable copying
-    xerces_mgr(const xerces_mgr&)            = delete;
-    xerces_mgr& operator=(const xerces_mgr&) = delete;
-    // Disable moving (to satisfy Rule of Five)
-    xerces_mgr(xerces_mgr&&)            = delete;
-    xerces_mgr& operator=(xerces_mgr&&) = delete;
-  }; // namespace class XercesManager
 
 
   // --- Main Worker Logic ---
@@ -58,7 +45,7 @@ int main(int argc, char* argv[])
 
   try
   {
-    xerces_mgr               xerces_life;
+    fsp::xerces_mgr          xerces_life;
     fsp::segment_queue       s_queue;
     std::vector<std::string> targets;
     std::string              xml_file = argv[1]; // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic)

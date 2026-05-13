@@ -4,7 +4,7 @@
 #include <vector>
 #include <string>
 #include <xercesc/sax2/DefaultHandler.hpp>
-#include "lib/queue.hpp"
+#include "queue.hpp"
 // --- SAX Handler ---
 namespace fsp
 {

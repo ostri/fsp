@@ -1,5 +1,5 @@
-#include "lib/handler.hpp"
-#include "lib/x_str.hpp"
+#include "handler.hpp"
+#include "x_str.hpp"
 namespace fsp
 {
   fsp::Handler::Handler(const std::vector<std::string>& t, segment_queue& q)
