@@ -74,11 +74,9 @@ namespace fsp
     m_data = ptr;
   }
 
-  // === Popravljena to_string() - exception safe ===
   [[nodiscard]] std::string x_str::to_string() const
   {
     if (empty()) return {};
-
     char* utf8 = xercesc::XMLString::transcode(m_data);
     if (utf8 == nullptr) throw std::runtime_error("XMLString::transcode failed");
 
@@ -98,7 +96,6 @@ namespace fsp
     return {reinterpret_cast<const char16_t*>(m_data)}; // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
   }
 
-  // Primerjave (ostanejo enake)
   bool x_str::operator==(const x_str& other) const noexcept { return xercesc::XMLString::equals(m_data, other.m_data); }
   bool x_str::operator!=(const x_str& other) const noexcept { return ! (*this == other); }
   auto x_str::operator<=>(const x_str& other) const noexcept { return xercesc::XMLString::compareString(m_data, other.m_data) <=> 0; }
