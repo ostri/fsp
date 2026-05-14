@@ -18,6 +18,9 @@ Checks: |
   -readability-avoid-do-while-macro,                    # <<< Catch2
   -readability-static-definition-in-anonymous-namespace, # <<< Catch2
   -unused-includes,
+  -cppcoreguidelines-avoid-magic-numbers,
+  -cppcoreguidelines-avoid-c-arrays,
+  -modernize-avoid-c-arrays,
 
 WarningsAsErrors: '*'
 HeaderFilterRegex: ^(?!.*catch2)

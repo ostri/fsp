@@ -1,9 +1,6 @@
 #pragma once
 
-// #include <iostream>
 #include <string>
-// #include <string_view>
-// #include <memory>
 
 #include <xercesc/parsers/XercesDOMParser.hpp>
 #include <xercesc/dom/DOMDocument.hpp>
@@ -23,35 +20,26 @@
 namespace fsp
 {
   // Error handler for validation with UTF-8 support
-  class ValidationErrorHandler : public xercesc::ErrorHandler
+  class EH : public xercesc::ErrorHandler
   {
+  public:
+    explicit EH(bool quiet);
+
+    void                             warning(const xercesc::SAXParseException& exc) override;
+    void                             error(const xercesc::SAXParseException& exc) override;
+    void                             fatalError(const xercesc::SAXParseException& exc) override;
+    void                             resetErrors() override;
+    [[nodiscard]] bool               hasValidationErrors() const;
+    [[nodiscard]] const std::string& getLastErrorLocation() const;
+    [[nodiscard]] const std::string& getLastErrorMessage() const;
   private:
     bool        hasErrors{};
     bool        quietMode;
     std::string lastErrorLocation;
     std::string lastErrorMessage;
-  public:
-    explicit ValidationErrorHandler(bool quiet);
-
-    void warning(const xercesc::SAXParseException& exc) override;
-
-    void error(const xercesc::SAXParseException& exc) override;
-
-    void fatalError(const xercesc::SAXParseException& exc) override;
-
-    void resetErrors() override;
-
-    [[nodiscard]] bool hasValidationErrors() const;
-
-    [[nodiscard]] const std::string& getLastErrorLocation() const;
-
-    [[nodiscard]] const std::string& getLastErrorMessage() const;
-  private:
-    void handleError(const char* type, const xercesc::SAXParseException& exc);
+    void        handleError(const char* type, const xercesc::SAXParseException& exc);
   };
-
   bool validateXML(const std::string& xmlFile, const std::string& xsdFile, bool quietMode);
-
   void printUsage(const char* programName);
 }; // namespace fsp
 

@@ -91,24 +91,55 @@ set(FSP_TARGET_fsp_lib_LIBS
     pugixml
 )
 add_fsp_target(fsp_lib STATIC ${FSP_LIB_SOURCES})
-
-# 5.2 Main program (main executable)
-set(MAIN_SOURCES
+#
+# target: fsp
+#
+set(b_target fsp) # name of the target
+set(${b_target}_SOURCES
     ${CMAKE_SOURCE_DIR}/src/main.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/x_str.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/xerces_mgr.cpp
+    ${CMAKE_SOURCE_DIR}/src/lib/handler.cpp
+    ${CMAKE_SOURCE_DIR}/src/lib/queue.cpp
+    ${CMAKE_SOURCE_DIR}/src/lib/xml_segment.cpp
 )
 # Additional libraries for main program
 set(FSP_TARGET_${PROJECT_NAME}_LIBS
-    fsp_lib
+#    fsp_lib
     XercesC::XercesC
     pugixml
 )
 # If main needs any extra include paths
 # set(FSP_TARGET_${PROJECT_NAME}_INCLUDES ${CMAKE_SOURCE_DIR}/src/extra)
 
-add_fsp_target(${PROJECT_NAME} EXECUTABLE ${MAIN_SOURCES})
+add_fsp_target(${b_target} EXECUTABLE ${${b_target}_SOURCES})
+#
+# --- target: validate --------------------------------------------------
+#
+set(b_target validate) # name of the target
+set(${b_target}_SOURCES
+    ${CMAKE_SOURCE_DIR}/src/auxiliary/validate.cpp
+    ${CMAKE_SOURCE_DIR}/src/lib/xerces_mgr.cpp
+    ${CMAKE_SOURCE_DIR}/src/lib/x_str.cpp
+)
+set(FSP_TARGET_${b_target}_INCLUDES ${CMAKE_SOURCE_DIR}/src/auxiliary)
+set(FSP_TARGET_${b_target}_LIBS
+    XercesC::XercesC
+)
+add_fsp_target(${b_target} EXECUTABLE ${${b_target}_SOURCES})
+#
+# --- target: gen
+#
+set(b_target gen) # name of the target
+set(${b_target}_SOURCES
+    ${CMAKE_SOURCE_DIR}/src/auxiliary/gen.cpp
+)
+set(FSP_TARGET_${b_target}_INCLUDES ${CMAKE_SOURCE_DIR}/src/auxiliary)
+# set(FSP_TARGET_${b_target}_LIBS
+#     XercesC::XercesC
+#)
+add_fsp_target(${b_target} EXECUTABLE ${${b_target}_SOURCES})
 
 # --- 6. (Optional) Display built targets ---
 message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
-message(STATUS "Targets defined: fsp_lib (static), ${PROJECT_NAME} (executable)")
+message(STATUS "fsp sources: ${${b_target}_SOURCES}")

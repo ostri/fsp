@@ -9,29 +9,29 @@
 
 namespace fsp
 {
-  ValidationErrorHandler::ValidationErrorHandler(bool quiet)
+  EH::EH(bool quiet)
   : quietMode(quiet)
   {
   }
 
-  void ValidationErrorHandler::warning(const xercesc::SAXParseException& exc) { handleError("Warning", exc); }
-  void ValidationErrorHandler::error(const xercesc::SAXParseException& exc)
+  void EH::warning(const xercesc::SAXParseException& exc) { handleError("Warning", exc); }
+  void EH::error(const xercesc::SAXParseException& exc)
   {
     hasErrors = true;
     handleError("Error", exc);
   }
 
-  void ValidationErrorHandler::fatalError(const xercesc::SAXParseException& exc)
+  void EH::fatalError(const xercesc::SAXParseException& exc)
   {
     hasErrors = true;
     handleError("Fatal error", exc);
   }
 
-  void                             ValidationErrorHandler::resetErrors() { hasErrors = false; }
-  [[nodiscard]] bool               ValidationErrorHandler::hasValidationErrors() const { return hasErrors; }
-  [[nodiscard]] const std::string& ValidationErrorHandler::getLastErrorLocation() const { return lastErrorLocation; }
-  [[nodiscard]] const std::string& ValidationErrorHandler::getLastErrorMessage() const { return lastErrorMessage; }
-  void                             ValidationErrorHandler::handleError(const char* type, const xercesc::SAXParseException& exc)
+  void                             EH::resetErrors() { hasErrors = false; }
+  [[nodiscard]] bool               EH::hasValidationErrors() const { return hasErrors; }
+  [[nodiscard]] const std::string& EH::getLastErrorLocation() const { return lastErrorLocation; }
+  [[nodiscard]] const std::string& EH::getLastErrorMessage() const { return lastErrorMessage; }
+  void                             EH::handleError(const char* type, const xercesc::SAXParseException& exc)
   {
     // Convert from UTF-16 to UTF-8 for console output
     auto system_id = fsp::x_str(exc.getSystemId()).to_string();
@@ -72,7 +72,7 @@ namespace fsp
     parser->setHandleMultipleImports(true);
     parser->setLoadExternalDTD(false);
     // Create error handler
-    ValidationErrorHandler errorHandler(quietMode);
+    EH errorHandler(quietMode);
     parser->setErrorHandler(&errorHandler);
     // Load and validate XML file
     try

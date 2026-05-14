@@ -3,7 +3,7 @@
 
 namespace fsp
 {
-  fsp::xerces_mgr::xerces_mgr()
+  xerces_mgr::xerces_mgr()
   {
     try
     {
