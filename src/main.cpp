@@ -1,93 +1,102 @@
 #include <iostream>
 #include <string>
 #include <vector>
-#include <thread>
-// #include <memory>
-#include "pugixml.hpp"
-#include "x_str.hpp"
-#include "queue.hpp"
-#include "handler.hpp"
-#include "xerces_mgr.hpp"
-#include "mmap_file.hpp"
-// #include <array>
+#include "xml_processor.hpp"
+#include <fmt/format.h>
 
-namespace
-{
-  struct XercesDeleter
-  {
-    void operator()(xercesc::SAX2XMLReader* p) const
-    {
-      delete p; // NOLINT(cppcoreguidelines-owning-memory)
-    }
-  };
-
-
-  // --- Main Worker Logic ---
-  static void worker_proc(const std::stop_token& st, fsp::segment_queue& q)
-  {
-    while (! st.stop_requested())
-    {
-      xml_segment seg;
-      if (! q.pop(seg)) break;
-
-      pugi::xml_document doc;
-      if (doc.load_string(seg.raw_content.c_str()))
-      {
-        // Business logic here
-      }
-    }
-  }
-
-} // namespace
 
 int main(int argc, char* argv[])
 {
-  if (argc < 4) return 1;
-  const std::vector<std::string> args(argv, argv + argc); // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic)
+  std::vector<std::string> args(argv, argv + argc); // NOLINT (cppcoreguidelines-pro-bounds-pointer-arithmetic)
+  if (argc < 4)
+  {
+    static constexpr auto* msg = "Usage: {0} <xml_file> <xsd_file> <xpath1> [xpath2 ...]\n"
+                                 "Example: {0} data.xml schema.xsd /root/item /root/other\n";
+    std::cerr << fmt::format(msg, args[0]);
+    return 1;
+  }
+
   try
   {
-    fsp::xerces_mgr          xerces_life;
-    fsp::segment_queue       s_queue;
-    std::vector<std::string> targets;
-    const auto&              xml_file = args[1];
-    const auto&              xsd_file = args[2];
+    const std::string& xml_file = args[1];
+    const std::string& xsd_file = args[2];
 
-    for (int i = 3; i < argc; ++i) targets.emplace_back(args[i]);
+    std::vector<std::string> xpath_strings;
+    for (int i = 3; i < argc; ++i) { xpath_strings.push_back(args[i]); }
 
-    // Start Workers (jthread handles cleanup automatically)
-    std::vector<std::jthread> workers;
-    workers.reserve(std::thread::hardware_concurrency());
-    for (unsigned int i = 0; i < std::thread::hardware_concurrency(); ++i) //
+    // Configure logging
+    fsp::logger_config log_cfg;
+    log_cfg.enable_console = true;
+    log_cfg.enable_file    = true;
+    log_cfg.log_file_path  = "xml_processor.log";
+    log_cfg.log_level      = spdlog::level::debug;
+    log_cfg.logger_name    = "main_app";
+
+    // Use the convenience function
+    auto result = fsp::process_xml_file(xml_file, xsd_file, xpath_strings, 0, log_cfg);
+
+    if (! result)
     {
-      workers.emplace_back(worker_proc, std::ref(s_queue));
+      std::cerr << "Processing failed: " << result.error().to_string() << "\n";
+      return 1;
     }
 
-    std::unique_ptr<xercesc::SAX2XMLReader, XercesDeleter> parser(xercesc::XMLReaderFactory::createXMLReader());
+    auto& [results, errors] = *result;
 
-    // NOLINTBEGIN(hicpp-no-array-decay)
-    // Setup validation
-    parser->setFeature(xercesc::XMLUni::fgSAX2CoreValidation, true);        // perform core validation
-    parser->setFeature(xercesc::XMLUni::fgXercesSchema, true);              // use xsd scheme
-    parser->setFeature(xercesc::XMLUni::fgXercesCalculateSrcOfs, true);     // enable locator object
-    parser->setFeature(xercesc::XMLUni::fgSAX2CoreNameSpacePrefixes, true); // xmlns as attribute
-    parser->setProperty(xercesc::XMLUni::fgXercesSchemaExternalNoNameSpaceSchemaLocation,
-                        static_cast<void*>(fsp::x_str(xsd_file).to_u16string().data()));
-    // NOLINTEND(hicpp-no-array-decay)
+    std::cout << "\n=== Processing Results ===\n";
+    std::cout << "Processed segments: " << results.size() << "\n";
+    std::cout << "Errors: " << errors.size() << "\n";
 
-    fsp::Handler handler(targets, s_queue);
-    parser->setContentHandler(&handler);
-    parser->setErrorHandler(&handler);
+    for (const auto& err : errors)
+    {
+      std::cerr << "  ✗ Error in segment " << err.segment_id << " (XPath index " << err.xpath_index << "): " << err.error_message << "\n";
+    }
 
-    parser->parse(xml_file.data());
-    s_queue.set_finished();
+    for (const auto& res : results)
+    {
+      std::cout << "  ✓ Segment " << res.segment_id << " (XPath index " << res.xpath_index << ") processed\n";
+    }
+
+    // Example of using the processor directly
+    std::cout << "\n=== Advanced usage with custom config ===\n";
+
+    fsp::processor_config config;
+    for (const auto& xpath_str : xpath_strings)
+    {
+      auto xpath = fsp::xpath_helpers::from_string(xpath_str);
+      if (xpath) config.targets.push_back(std::move(*xpath));
+    }
+    config.num_workers            = 4;
+    config.validate_against_xsd   = true;
+    config.log_config             = log_cfg;
+    config.log_config.logger_name = "advanced_processor";
+
+    fsp::xml_processor processor(config);
+
+    auto process_result = processor.process_file(xml_file, xsd_file);
+    if (! process_result)
+    {
+      std::cerr << "Advanced processing failed: " << process_result.error().to_string() << "\n";
+      return 1;
+    }
+
+    auto advanced_results = processor.get_results();
+    auto advanced_errors  = processor.get_errors();
+    auto stats            = processor.get_stats();
+
+    std::cout << "\n=== Processing Statistics ===\n";
+    std::cout << fmt::format("  Total segments: {}\n", stats.total_segments);
+    std::cout << fmt::format("  Successful: {}\n", stats.successful_segments);
+    std::cout << fmt::format("  Failed: {}\n", stats.failed_segments);
+    std::cout << fmt::format("  Active workers: {}\n", stats.active_workers);
+    std::cout << fmt::format("  Processing time: {:.2f} ms\n", stats.processing_time_ms);
+
+    auto logger = processor.get_logger();
+    if (logger) logger->info("Application completed successfully");
   }
   catch (const std::exception& e)
   {
-    std::cerr << "Runtime Error: '" << e.what() << "'\n";
-    return 1;
-  }
-  catch (...)
-  {
+    std::cerr << "Fatal error: " << e.what() << "\n";
     return 1;
   }
 

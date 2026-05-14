@@ -33,6 +33,9 @@ endif()
 # --- 3. Find required packages ---
 find_package(XercesC REQUIRED)
 find_package(pugixml REQUIRED)
+find_package(fmt REQUIRED)
+find_package(spdlog REQUIRED)
+find_package(magic_enum REQUIRED)
 
 # --- 4. Function to define a target with common settings ---
 function(add_fsp_target TARGET_NAME TYPE)
@@ -103,10 +106,18 @@ set(${b_target}_SOURCES
     ${CMAKE_SOURCE_DIR}/src/lib/queue.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/xml_segment.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/mmap_file.cpp
+    ${CMAKE_SOURCE_DIR}/src/lib/xml_processor.cpp
+    ${CMAKE_SOURCE_DIR}/src/lib/e_tag.cpp
+    ${CMAKE_SOURCE_DIR}/src/lib/error_info.cpp
+    ${CMAKE_SOURCE_DIR}/src/lib/mem_buf_holder.cpp
+
 )
 # Additional libraries for main program
 set(FSP_TARGET_${PROJECT_NAME}_LIBS
 #    fsp_lib
+    fmt::fmt
+    spdlog::spdlog
+    magic_enum::magic_enum
     XercesC::XercesC
     pugixml
 )

@@ -1,0 +1,34 @@
+#pragma once
+
+#include <cstddef>
+#include <memory>
+#include <spdlog/logger.h>
+#include <xercesc/framework/MemBufInputSource.hpp>
+#include <string>
+namespace fsp
+{
+  class mem_buf_holder
+  {
+  public:
+    mem_buf_holder(const void* data, size_t size, const std::string& name, std::shared_ptr<spdlog::logger> logger);
+    //    mem_buf_holder(const void* data, size_t size, const std::string& name, const std::shared_ptr<spdlog::logger>& log);
+    ~mem_buf_holder();
+    mem_buf_holder(const mem_buf_holder&)                                      = delete;
+    mem_buf_holder(mem_buf_holder&&)                                           = delete;
+    mem_buf_holder&                           operator=(const mem_buf_holder&) = delete;
+    mem_buf_holder&                           operator=(mem_buf_holder&&)      = delete;
+    [[nodiscard]] xercesc::MemBufInputSource* source();
+    [[nodiscard]] spdlog::logger*             logger();
+
+    void reset();
+
+    [[nodiscard]] bool is_valid() const;
+
+    // void set_source(const xercesc::MemBufInputSource>& source);
+    // void set_logger(const std::shared_ptr<spdlog::logger>& logger);
+  private:
+    std::unique_ptr<xercesc::MemBufInputSource> source_;
+    std::shared_ptr<spdlog::logger>             logger_;
+    std::string                                 name_;
+  };
+} // namespace fsp
