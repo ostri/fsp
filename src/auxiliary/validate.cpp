@@ -64,7 +64,7 @@ namespace fsp
     }
 
     // Create parser
-    auto parser = std::make_unique<xercesc::XercesDOMParser>();
+    auto parser = std::make_unique<xercesc::XercesDOMParser>(); // TODO: bug 1 - use SAX parser
     // Configure schema validation
     parser->setValidationScheme(xercesc::XercesDOMParser::Val_Always);
     parser->setDoNamespaces(true);

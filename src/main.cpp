@@ -42,16 +42,16 @@ namespace
 int main(int argc, char* argv[])
 {
   if (argc < 4) return 1;
-
+  const std::vector<std::string> args(argv, argv + argc); // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic)
   try
   {
     fsp::xerces_mgr          xerces_life;
     fsp::segment_queue       s_queue;
     std::vector<std::string> targets;
-    std::string              xml_file = argv[1]; // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic)
-    std::string              xsd_file = argv[2]; // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic)
-    ;
-    for (int i = 3; i < argc; ++i) targets.emplace_back(argv[i]); // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic)
+    const auto&              xml_file = args[1];
+    const auto&              xsd_file = args[2];
+
+    for (int i = 3; i < argc; ++i) targets.emplace_back(args[i]);
 
     // Start Workers (jthread handles cleanup automatically)
     std::vector<std::jthread> workers;
@@ -80,7 +80,7 @@ int main(int argc, char* argv[])
   }
   catch (const std::exception& e)
   {
-    std::cerr << "Runtime Error: " << e.what() << "\n";
+    std::cerr << "Runtime Error: '" << e.what() << "'\n";
     return 1;
   }
   catch (...)
