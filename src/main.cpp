@@ -8,6 +8,7 @@
 #include "queue.hpp"
 #include "handler.hpp"
 #include "xerces_mgr.hpp"
+#include "mmap_file.hpp"
 // #include <array>
 
 namespace
@@ -63,13 +64,15 @@ int main(int argc, char* argv[])
 
     std::unique_ptr<xercesc::SAX2XMLReader, XercesDeleter> parser(xercesc::XMLReaderFactory::createXMLReader());
 
+    // NOLINTBEGIN(hicpp-no-array-decay)
     // Setup validation
-    parser->setFeature(xercesc::XMLUni::fgSAX2CoreValidation, true); // NOLINT(hicpp-no-array-decay)
-    parser->setFeature(xercesc::XMLUni::fgXercesSchema, true);       // NOLINT(hicpp-no-array-decay)
-
-    fsp::x_str xsd_path(xsd_file);
-    parser->setProperty(xercesc::XMLUni::fgXercesSchemaExternalNoNameSpaceSchemaLocation, // NOLINT(hicpp-no-array-decay)
-                        static_cast<void*>(xsd_path.to_u16string().data()));
+    parser->setFeature(xercesc::XMLUni::fgSAX2CoreValidation, true);        // perform core validation
+    parser->setFeature(xercesc::XMLUni::fgXercesSchema, true);              // use xsd scheme
+    parser->setFeature(xercesc::XMLUni::fgXercesCalculateSrcOfs, true);     // enable locator object
+    parser->setFeature(xercesc::XMLUni::fgSAX2CoreNameSpacePrefixes, true); // xmlns as attribute
+    parser->setProperty(xercesc::XMLUni::fgXercesSchemaExternalNoNameSpaceSchemaLocation,
+                        static_cast<void*>(fsp::x_str(xsd_file).to_u16string().data()));
+    // NOLINTEND(hicpp-no-array-decay)
 
     fsp::Handler handler(targets, s_queue);
     parser->setContentHandler(&handler);

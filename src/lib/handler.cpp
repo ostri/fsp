@@ -1,5 +1,8 @@
 #include "handler.hpp"
 #include "x_str.hpp"
+#include <iostream>
+
+
 namespace fsp
 {
   fsp::Handler::Handler(const std::vector<std::string>& t, segment_queue& q)
@@ -13,6 +16,13 @@ namespace fsp
                              [[maybe_unused]] const XMLCh* const         qname,
                              [[maybe_unused]] const xercesc::Attributes& attrs)
   {
+    if (m_locator != nullptr)
+    {
+      // Pridobivanje odmika v bajtih
+      XMLFilePos offset = m_locator->getByteOffset();
+      std::cout << "Element: '" << x_str(qname).to_string() << ":" << x_str(localname).to_string() << "' starts on byte: " << offset
+                << "\n";
+    }
     x_str name(localname);
     for (size_t i = 0; i < targets_.size(); ++i)
     {
@@ -50,5 +60,7 @@ namespace fsp
   {                                                             //
     throw std::runtime_error(x_str(e.getMessage()).to_string());
   }
+
+  void Handler::setDocumentLocator(const xercesc::Locator* locator) { m_locator = dynamic_cast<const xercesc::DOMLocator*>(locator); }
 
 }; // namespace fsp

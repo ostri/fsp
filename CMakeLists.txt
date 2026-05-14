@@ -102,6 +102,7 @@ set(${b_target}_SOURCES
     ${CMAKE_SOURCE_DIR}/src/lib/handler.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/queue.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/xml_segment.cpp
+    ${CMAKE_SOURCE_DIR}/src/lib/mmap_file.cpp
 )
 # Additional libraries for main program
 set(FSP_TARGET_${PROJECT_NAME}_LIBS
