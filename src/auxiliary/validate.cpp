@@ -67,10 +67,23 @@ namespace fsp
     auto parser = std::make_unique<xercesc::XercesDOMParser>();
     // Configure schema validation
     parser->setValidationScheme(xercesc::XercesDOMParser::Val_Always);
+    parser->setDoNamespaces(true);
     parser->setDoSchema(true);
     parser->setValidationSchemaFullChecking(true);
     parser->setHandleMultipleImports(true);
     parser->setLoadExternalDTD(false);
+    parser->useCachedGrammarInParse(true);
+    try
+    {
+      parser->loadGrammar(xsdFile.c_str(), xercesc::Grammar::SchemaGrammarType,
+                          true); // true = naloži tudi imported sheme
+    }
+    catch (const xercesc::XMLException& e)
+    {
+      auto msg = fsp::x_str(e.getMessage()).to_string();
+      if (! quietMode) std::cerr << "Failed to load grammar: '" << msg << "\n";
+      return false;
+    }
     // Create error handler
     EH errorHandler(quietMode);
     parser->setErrorHandler(&errorHandler);
@@ -83,7 +96,7 @@ namespace fsp
     catch (const xercesc::XMLException& e)
     {
       auto msg = fsp::x_str(e.getMessage()).to_string();
-      if (! quietMode) { std::cerr << "XML Exception: " << msg << "\n"; }
+      if (! quietMode) { std::cerr << "XML Exception: '" << msg << "'\n"; }
       return false;
     }
     catch (const xercesc::SAXParseException& e)
@@ -92,15 +105,15 @@ namespace fsp
       auto system_id = fsp::x_str(e.getSystemId()).to_string();
       if (! quietMode)
       {
-        std::cerr << "Parse error in " << system_id << " line " << e.getLineNumber() << ", column " << e.getColumnNumber() << ": '" << msg
-                  << "'\n";
+        std::cerr << "Parse error in '" << system_id << "' line: " << e.getLineNumber() << " column: " << e.getColumnNumber() << "-> '"
+                  << msg << "'\n";
       }
       return false;
     }
     catch (const xercesc::SAXException& e)
     {
       auto msg = fsp::x_str(e.getMessage()).to_string();
-      if (! quietMode) { std::cerr << "SAX Exception: " << msg << "\n"; }
+      if (! quietMode) { std::cerr << "SAX Exception: '" << msg << "'\n"; }
       return false;
     }
     catch (...)
