@@ -105,9 +105,10 @@ namespace fsp
     // Get logger instance
     [[nodiscard]] std::shared_ptr<spdlog::logger> get_logger() const { return logger_; }
   private:
+    // NOLINTBEGIN(cppcoreguidelines-avoid-const-or-ref-data-members)
     struct worker_context
     {
-      segment_queue&                  segment_queue;
+      segment_queue&                  seg_queue;
       std::vector<segment_result>&    results;
       std::vector<segment_result>&    errors;
       std::mutex&                     results_mutex;
@@ -117,7 +118,7 @@ namespace fsp
       std::atomic<bool>&              cancel_flag;
       std::shared_ptr<spdlog::logger> logger;
     };
-
+    // NOLINTEND(cppcoreguidelines-avoid-const-or-ref-data-members)
     processor_config                        config_;
     std::unique_ptr<xercesc::SAX2XMLReader> parser_;
     std::unique_ptr<Handler>                handler_;

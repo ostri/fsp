@@ -23,7 +23,7 @@ else()
     )
     set(COMMON_DEBUG_FLAGS
         "-Wall" "-Wextra" "-Wpedantic" "-Werror"
-        "-Wnarrowing" "-Wswitch-enum" "-g3" "-O1"
+        "-Wnarrowing" "-Wswitch-enum" "-g" "-O0" "-gdwarf-4"
         "-fsanitize=address,undefined,leak"
         "-fno-omit-frame-pointer"
     )

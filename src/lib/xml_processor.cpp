@@ -370,7 +370,7 @@ namespace fsp
     while (! st.stop_requested() && ! ctx.cancel_flag.load())
     {
       xml_segment seg;
-      if (! ctx.segment_queue.pop(seg)) break;
+      if (! ctx.seg_queue.pop(seg)) break;
 
       auto process_result = process_segment(seg, ctx.logger);
 
@@ -424,7 +424,7 @@ namespace fsp
 
     log_info(fmt::format("Starting {} worker threads", config_.num_workers));
 
-    worker_context ctx{.segment_queue   = seg_queue_,
+    worker_context ctx{.seg_queue       = seg_queue_,
                        .results         = results_,
                        .errors          = errors_,
                        .results_mutex   = results_mutex_,

@@ -1,5 +1,6 @@
 {
   "cSpell.words": [
     "xerces"
-  ]
+  ],
+  "lldb.library": "/usr/lib64/liblldb.so.20.1.8",
 }

@@ -1,0 +1,23 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "fsp-core",
+      "type": "lldb",
+      "request": "launch",
+      "program": "${workspaceRoot}/build/fsp",
+      "args": [
+        "../xml-data/pacs8-2.xml",
+        "../xsd/pacs.008.xsd",
+        "/a/b",
+        "/b/c"
+      ],
+      "cwd": "${workspaceRoot}/build",
+      "preLaunchTask": "build", // Najprej požene task "build" v tasks.json
+      "console": "integratedTerminal",
+      "env": {
+        "ASAN_OPTIONS": "detect_leaks=0"
+      },
+    }
+  ]
+}
