@@ -6,13 +6,14 @@
 #include <stop_token>
 #include <atomic>
 #include <expected>
-#include <optional>
 #include <fmt/format.h>
 #include <magic_enum.hpp>
 #include <spdlog/spdlog.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <spdlog/sinks/basic_file_sink.h>
 #include "e_tag.hpp"
+#include "logger_config.hpp"
+#include "processor_config.hpp"
 #include "queue.hpp"
 #include "handler.hpp"
 #include "xerces_mgr.hpp"
@@ -22,6 +23,8 @@
 #include <xercesc/framework/MemBufInputSource.hpp>
 #include "error_info.hpp"
 #include "mem_buf_holder.hpp"
+#include "xpath_helpers.hpp"
+
 
 namespace fsp
 {
@@ -32,35 +35,6 @@ namespace fsp
     int         xpath_index;
     bool        success;
     std::string error_message;
-  };
-
-  // Type aliases for expected patterns
-  template <typename T>
-  using result      = std::expected<T, error_info>;
-  using void_result = std::expected<void, error_info>;
-
-  // Logger configuration
-  struct logger_config
-  {
-    bool                      enable_console = true;
-    bool                      enable_file    = false;
-    std::string               log_file_path  = "xml_processor.log";
-    spdlog::level::level_enum log_level      = spdlog::level::info;
-    std::string               logger_name    = "xml_processor";
-  };
-
-  // Forward declarations
-  class xml_processor;
-
-  // Configuration for the processor
-  struct processor_config
-  {
-    std::vector<xpath_t>       targets;
-    size_t                     num_workers          = 0;
-    bool                       validate_against_xsd = true;
-    bool                       strict_validation    = true;
-    std::optional<std::string> schema_namespace;
-    logger_config              log_config;
   };
 
   class xml_processor
@@ -159,24 +133,6 @@ namespace fsp
     void log_warning(const std::string& msg);
   };
 
-  // Helper functions for working with e_tag and xpath_t
-  namespace xpath_helpers
-  {
-    // Parse XPath string like "/ns:root/child/grandchild" or "root/child"
-    result<xpath_t> from_string(const std::string& xpath_str);
-
-    // Convert xpath_t to string representation
-    std::string to_string(const xpath_t& xpath);
-
-    // Validate xpath_t (no empty tags, valid characters, etc.)
-    bool validate(const xpath_t& xpath, std::string* error_msg = nullptr);
-
-    // Get the last tag from xpath
-    std::optional<e_tag> last_tag(const xpath_t& xpath);
-
-    // Get depth of xpath
-    size_t depth(const xpath_t& xpath);
-  } // namespace xpath_helpers
 
   // Result type for the entire processing operation
   using processing_result = std::expected<std::pair<std::vector<segment_result>, std::vector<segment_result>>, error_info>;

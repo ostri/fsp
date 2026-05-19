@@ -63,7 +63,7 @@ int main(int argc, char* argv[])
     {
       std::cout << "  ✓ Segment " << res.segment_id << " (XPath index " << res.xpath_index << ") processed\n";
     }
-
+    ///===============================================================================
     // Example of using the processor directly
     std::cout << "\n=== Advanced usage with custom config ===\n";
 

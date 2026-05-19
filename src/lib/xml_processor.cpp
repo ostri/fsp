@@ -705,7 +705,7 @@ namespace fsp
     {
       auto xpath_result = xpath_helpers::from_string(xpath_str);
       if (! xpath_result) { return std::unexpected(xpath_result.error()); }
-      targets.push_back(std::move(*xpath_result));
+      targets.push_back(std::move(xpath_result.value()));
     }
 
     processor_config config;

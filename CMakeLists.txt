@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.10)
 project(fsp LANGUAGES CXX)
 
 # --- 1. General project settings ---
-set(CMAKE_CXX_STANDARD 23)
+set(CMAKE_CXX_STANDARD 26)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON CACHE BOOL "" FORCE)
@@ -110,7 +110,9 @@ set(${b_target}_SOURCES
     ${CMAKE_SOURCE_DIR}/src/lib/e_tag.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/error_info.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/mem_buf_holder.cpp
-
+    ${CMAKE_SOURCE_DIR}/src/lib/logger_config.cpp
+    ${CMAKE_SOURCE_DIR}/src/lib/processor_config.cpp
+    ${CMAKE_SOURCE_DIR}/src/lib/xpath_helpers.cpp
 )
 # Additional libraries for main program
 set(FSP_TARGET_${PROJECT_NAME}_LIBS
