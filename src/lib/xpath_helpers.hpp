@@ -17,6 +17,9 @@ namespace fsp
 
 namespace fsp::xpath_helpers
 {
+  // split xx:yy
+  result<e_tag> parse_e_tag(const std::string& etag_str);
+
   // Parse XPath string like "/ns:root/child/grandchild" or "root/child"
   result<xpath_t> from_string(const std::string& xpath_str);
 

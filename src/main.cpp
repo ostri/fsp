@@ -8,13 +8,6 @@
 int main(int argc, char* argv[])
 {
   std::vector<std::string> args(argv, argv + argc); // NOLINT (cppcoreguidelines-pro-bounds-pointer-arithmetic)
-  // std::vector<std::string> args;
-  // args.reserve(argc);
-  // for (auto cnt = 0; cnt < argc; cnt++)
-  // {
-  //   args.emplace_back(argv[cnt]); // NOLINT (cppcoreguidelines-pro-bounds-pointer-arithmetic)
-  //   std::cerr << fmt::format("argv[{}] = '{}'\n", cnt, args.at(cnt));
-  // }
   if (argc < 4)
   {
     static constexpr auto* msg = "Usage: {0} <xml_file> <xsd_file> <xpath1> [xpath2 ...]\n"
