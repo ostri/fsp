@@ -144,7 +144,7 @@ void generateXML(int numTransactions)
   std::string nbOfTxs          = std::to_string(numTransactions);
   std::string intrBkSttlmDt    = getCurrentDate();
   // NOLINTNEXTLINE(readability-magic-numbers)
-  std::string ttlIntrBkSttlmAmt = randomAmount(0.01, 999999999999999.99);
+  std::string ttlIntrBkSttlmAmt = std::to_string(numTransactions); // randomAmount(0.01, 999999999999999.99);
   std::string instgAgtBIC       = randomBICFI();
   std::string instdAgtBIC       = randomBICFI();
 
@@ -192,7 +192,7 @@ void generateXML(int numTransactions)
     // NOLINTNEXTLINE(readability-magic-numbers)
     std::string txId = "TXN" + randomNumericString(15);
     // NOLINTNEXTLINE(readability-magic-numbers)
-    std::string intrBkSttlmAmtTx = randomAmount(0.01, 999999999.99);
+    std::string intrBkSttlmAmtTx = "1.00";        // randomAmount(0.01, 999999999.99);
     std::string dbtrNm           = randomBICFI(); // Originator PSP BIC
     std::string dbtrId           = randomBICFI(); // Originator PSP AnyBIC
     std::string dbtrAcct         = randomIBAN();
