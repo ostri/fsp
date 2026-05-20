@@ -114,6 +114,8 @@ set(${b_target}_SOURCES
     ${CMAKE_SOURCE_DIR}/src/lib/processor_config.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/xpath_helpers.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/common.cpp
+    ${CMAKE_SOURCE_DIR}/src/lib/dom_parser.cpp
+    ${CMAKE_SOURCE_DIR}/src/lib/dom_handler.cpp
 )
 # Additional libraries for main program
 set(FSP_TARGET_${PROJECT_NAME}_LIBS

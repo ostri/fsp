@@ -10,13 +10,14 @@ namespace fsp
   class mem_buf_holder
   {
   public:
-    mem_buf_holder(const void* data, size_t size, const std::string& name, std::shared_ptr<spdlog::logger> logger);
-    //    mem_buf_holder(const void* data, size_t size, const std::string& name, const std::shared_ptr<spdlog::logger>& log);
+    mem_buf_holder(const void* data, size_t size, std::string_view name, std::shared_ptr<spdlog::logger> logger);
     ~mem_buf_holder();
-    mem_buf_holder(const mem_buf_holder&)                                      = delete;
-    mem_buf_holder(mem_buf_holder&&)                                           = delete;
-    mem_buf_holder&                           operator=(const mem_buf_holder&) = delete;
-    mem_buf_holder&                           operator=(mem_buf_holder&&)      = delete;
+    /// no helper constructors
+    mem_buf_holder(const mem_buf_holder&)            = delete;
+    mem_buf_holder(mem_buf_holder&&)                 = delete;
+    mem_buf_holder& operator=(const mem_buf_holder&) = delete;
+    mem_buf_holder& operator=(mem_buf_holder&&)      = delete;
+    ///
     [[nodiscard]] xercesc::MemBufInputSource* source();
     [[nodiscard]] spdlog::logger*             logger();
 

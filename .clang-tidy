@@ -22,6 +22,7 @@ Checks: |
   -readability-convert-member-functions-to-static,
   -readability-avoid-do-while-macro,                    # <<< Catch2
   -readability-static-definition-in-anonymous-namespace, # <<< Catch2
+  -readability-redundant-access-specifiers,
   -unused-includes,
 
 WarningsAsErrors: '*'

@@ -4,7 +4,7 @@
 namespace fsp
 {
 
-  mem_buf_holder::mem_buf_holder(const void* data, size_t size, const std::string& name, std::shared_ptr<spdlog::logger> logger)
+  mem_buf_holder::mem_buf_holder(const void* data, size_t size, std::string_view name, std::shared_ptr<spdlog::logger> logger)
   : logger_(std::move(logger))
   , name_(name)
   {
@@ -13,7 +13,7 @@ namespace fsp
       source_ = std::make_unique<xercesc::MemBufInputSource>( //
         reinterpret_cast<const XMLByte*>(data),               // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
         static_cast<XMLSize_t>(size),
-        name.c_str(),
+        name_.data(),
         false);
 
       if (logger_) { logger_->debug("Created buffer holder for '{}' ({} bytes)", name_, size); }
@@ -34,11 +34,7 @@ namespace fsp
   {
     if (logger_)
     {
-      if (source_)
-      {
-        // POPRAVLJENO: Pretvori XMLCh* v string preko x_str
-        logger_->debug("Destroying '{}' buffer holder)", name_.data());
-      }
+      if (source_) { logger_->debug("Destroying '{}' buffer holder)", name_.data()); }
       else
       {
         logger_->debug("Destroying empty buffer holder '{}'", name_);

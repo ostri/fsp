@@ -9,7 +9,7 @@
       "args": [
         "../xml-data/pacs8-2.xml",
         "../xsd/pacs.008.xsd",
-        "/a/b",
+        "/Document/FIToFICstmrCdtTrf/GrpHdr",
         "/b/c"
       ],
       "cwd": "${workspaceRoot}/build",

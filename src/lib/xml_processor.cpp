@@ -1,22 +1,20 @@
 #include "xml_processor.hpp"
+#include "dom_parser.hpp"
 #include "x_str.hpp"
-#include "pugixml.hpp"
-#include <thread>
+#include "xpath_helpers.hpp"
+
 #include <chrono>
 #include <fmt/format.h>
 #include <magic_enum.hpp>
+#include <pugixml.hpp>
 #include <spdlog/spdlog.h>
+#include <thread>
 
 namespace fsp
 {
 
   // ============================================================================
-  // xpath_helpers implementation
-  // ============================================================================
-
-
-  // ============================================================================
-  // xml_processor implementation
+  // Logger
   // ============================================================================
 
   void xml_processor::setup_logger()
@@ -25,340 +23,339 @@ namespace fsp
 
     if (config_.log_config.enable_console)
     {
-      auto console_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
-      console_sink->set_pattern("[%Y-%m-%d %H:%M:%S.%e] [%^%l%$] [%n] %v");
-      sinks.push_back(console_sink);
+      auto s = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
+      s->set_pattern("[%Y-%m-%d %H:%M:%S.%e] [%^%l%$] [%n] %v");
+      sinks.push_back(s);
     }
-
     if (config_.log_config.enable_file)
     {
-      auto file_sink = std::make_shared<spdlog::sinks::basic_file_sink_mt>(config_.log_config.log_file_path, true);
-      file_sink->set_pattern("[%Y-%m-%d %H:%M:%S.%e] [%l] [%n] %v");
-      sinks.push_back(file_sink);
+      auto s = std::make_shared<spdlog::sinks::basic_file_sink_mt>(config_.log_config.log_file_path, true);
+      s->set_pattern("[%Y-%m-%d %H:%M:%S.%e] [%l] [%n] %v");
+      sinks.push_back(s);
     }
-
     if (sinks.empty())
     {
-      // Default to console if no sinks configured
-      auto console_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
-      console_sink->set_pattern("[%Y-%m-%d %H:%M:%S.%e] [%^%l%$] [%n] %v");
-      sinks.push_back(console_sink);
+      auto s = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
+      s->set_pattern("[%Y-%m-%d %H:%M:%S.%e] [%^%l%$] [%n] %v");
+      sinks.push_back(s);
     }
 
     logger_ = std::make_shared<spdlog::logger>(config_.log_config.logger_name, sinks.begin(), sinks.end());
     logger_->set_level(config_.log_config.log_level);
     logger_->flush_on(spdlog::level::err);
-
-    log_info(fmt::format("Logger initialized with level: {}", magic_enum::enum_name(config_.log_config.log_level)));
   }
 
-  void xml_processor::log_error(const error_info& error)
+  void xml_processor::log_error(const error_info& e)
   {
-    if (logger_) logger_->error(error.to_string());
+    if (logger_) logger_->error(e.to_string());
+  }
+  void xml_processor::log_info(const std::string& m)
+  {
+    if (logger_) logger_->info(m);
+  }
+  void xml_processor::log_debug(const std::string& m)
+  {
+    if (logger_) logger_->debug(m);
+  }
+  void xml_processor::log_warning(const std::string& m)
+  {
+    if (logger_) logger_->warn(m);
   }
 
-  void xml_processor::log_info(const std::string& msg)
-  {
-    if (logger_) logger_->info(msg);
-  }
-
-  void xml_processor::log_debug(const std::string& msg)
-  {
-    if (logger_) logger_->debug(msg);
-  }
-
-  void xml_processor::log_warning(const std::string& msg)
-  {
-    if (logger_) logger_->warn(msg);
-  }
+  // ============================================================================
+  // Konstrukcija / destrukcija
+  // ============================================================================
 
   xml_processor::xml_processor(processor_config cfg)
   : config_(std::move(cfg))
   {
     setup_logger();
 
-    if (config_.num_workers == 0)
-    {
-      config_.num_workers = std::thread::hardware_concurrency();
-      log_debug(fmt::format("Auto-detected {} hardware threads", config_.num_workers));
-    }
+    if (config_.num_workers == 0) config_.num_workers = std::thread::hardware_concurrency();
+    if (config_.num_workers == 0) config_.num_workers = 1;
 
-    if (config_.num_workers == 0)
-    {
-      config_.num_workers = 1;
-      log_warning("Could not detect hardware concurrency, using 1 worker");
-    }
-
-    log_info(fmt::format("XML Processor initialized with {} workers, validation: {}", config_.num_workers, config_.validate_against_xsd));
+    log_info(fmt::format("XML Processor: {} workers, validation: {}", config_.num_workers, config_.validate_against_xsd));
   }
 
   xml_processor::~xml_processor()
   {
-    log_info("Shutting down XML processor");
     cancel();
     stop_workers();
-
+    parser_.reset();
     if (logger_) logger_->flush();
   }
+
+  // ============================================================================
+  // Parser setup
+  // ============================================================================
 
   void_result xml_processor::setup_parser()
   {
     try
     {
-      log_debug("Creating XML parser");
       parser_.reset(xercesc::XMLReaderFactory::createXMLReader());
-
       // NOLINTBEGIN(hicpp-no-array-decay)
+      // === KRITIČNO ZA DOMLocator + byte offset ===
+      parser_->setFeature(xercesc::XMLUni::fgXercesCalculateSrcOfs, true);
       if (config_.validate_against_xsd)
       {
         parser_->setFeature(xercesc::XMLUni::fgSAX2CoreValidation, true);
         parser_->setFeature(xercesc::XMLUni::fgXercesSchema, true);
-        log_debug("XSD validation enabled");
+        parser_->setFeature(xercesc::XMLUni::fgXercesValidationErrorAsFatal, true);
+        parser_->setFeature(xercesc::XMLUni::fgXercesUseCachedGrammarInParse, true);
       }
-
+      else
+      {
+        parser_->setFeature(xercesc::XMLUni::fgSAX2CoreValidation, false);
+      }
+      // Kritično za DOMLocator::getByteOffset()
       parser_->setFeature(xercesc::XMLUni::fgXercesCalculateSrcOfs, true);
+      parser_->setFeature(xercesc::XMLUni::fgSAX2CoreNameSpaces, true);
       parser_->setFeature(xercesc::XMLUni::fgSAX2CoreNameSpacePrefixes, true);
       // NOLINTEND(hicpp-no-array-decay)
-      log_info("XML parser setup completed");
+
+      log_debug("Parser setup ok");
       return {};
     }
     catch (const xercesc::XMLException& e)
     {
-      auto error = error_info{
-        processor_error::internal_error, fmt::format("Failed to create XML parser: {}", x_str(e.getMessage()).to_string()), "", 0};
-      log_error(error);
-      return std::unexpected(error);
-    }
-    catch (const std::exception& e)
-    {
-      auto error = error_info{processor_error::internal_error, fmt::format("Failed to create XML parser: {}", e.what()), "", 0};
-      log_error(error);
-      return std::unexpected(error);
+      auto err = error_info{processor_error::internal_error, fmt::format("Parser init: {}", x_str(e.getMessage()).to_string()), "", 0};
+      log_error(err);
+      return std::unexpected(err);
     }
   }
 
   void_result xml_processor::setup_validation(fsp::mmap_file& xsd_mmap)
   {
     if (! config_.validate_against_xsd || ! xsd_mmap.is_open()) return {};
-
-    log_debug(fmt::format("Setting up validation with XSD ({} bytes)", xsd_mmap.size()));
-    return setup_validation_from_buffer(xsd_mmap.data(), xsd_mmap.size());
+    return setup_validation_from_buffer(xsd_mmap.data(), xsd_mmap.size(), xsd_mmap.path());
   }
 
-  void_result xml_processor::setup_validation_from_buffer(const void* data, size_t size)
+  void_result xml_processor::setup_validation_from_buffer(const void* data, std::size_t size, std::string_view schema_name)
   {
     if (! config_.validate_against_xsd) return {};
-
     if (data == nullptr || size == 0)
     {
-      auto error = error_info{processor_error::schema_not_found, "XSD buffer is empty or null", "", 0};
-      log_error(error);
-      return std::unexpected(error);
+      auto err = error_info{processor_error::schema_not_found, "XSD buffer is empty.", "", 0};
+      log_error(err);
+      return std::unexpected(err);
     }
-
     try
     {
-      log_debug(fmt::format("Creating XSD buffer holder ({} bytes)", size));
-      xsd_holder_ = std::make_unique<mem_buf_holder>(data, size, "schema.xsd", logger_);
+      xsd_holder_ = std::make_unique<mem_buf_holder>(data, size, schema_name, logger_);
 
-      if (nullptr != xsd_holder_->source())
+      if (xsd_holder_->source() != nullptr)
       {
-        // NOLINTNEXTLINE(hicpp-no-array-decay)
-        parser_->setProperty(xercesc::XMLUni::fgXercesSchemaExternalNoNameSpaceSchemaLocation, static_cast<void*>(xsd_holder_->source()));
-        log_info("XSD schema successfully loaded and configured");
+        parser_->loadGrammar(*xsd_holder_->source(), xercesc::Grammar::SchemaGrammarType, true);
+        log_info(fmt::format("XSD schema '{}' loaded.", schema_name));
       }
-
       return {};
     }
     catch (const xercesc::XMLException& e)
     {
-      auto error =
-        error_info{processor_error::xsd_validation_failed, fmt::format("Failed to load XSD: {}", x_str(e.getMessage()).to_string()), "", 0};
-      log_error(error);
-      return std::unexpected(error);
+      auto err = error_info{processor_error::xsd_validation_failed, fmt::format("XSD load: {}", x_str(e.getMessage()).to_string()), "", 0};
+      log_error(err);
+      return std::unexpected(err);
     }
   }
 
-  result<segment_result> xml_processor::process_segment( //
-    const xml_segment&                     seg,
-    const std::shared_ptr<spdlog::logger>& logger)
-  {
-    segment_result result;
-    result.segment_id  = seg.id;
-    result.xpath_index = seg.xpath_index;
+  // ============================================================================
+  // Worker
+  // ============================================================================
 
-    auto start = std::chrono::steady_clock::now();
+  result<segment_result> xml_processor::process_segment(int                                    worker_id,
+                                                        const xml_segment&                     seg,
+                                                        const fsp::mmap_file&                  xml_mmap,
+                                                        const std::shared_ptr<spdlog::logger>& logger,
+                                                        dom_parser*                            parser)
+  {
+    segment_result res;
+    res.segment_id  = seg.get_id();
+    res.xpath_index = seg.get_xpath_index();
+
+    auto t0 = std::chrono::steady_clock::now();
 
     try
     {
-      pugi::xml_document     doc;
-      pugi::xml_parse_result status = doc.load_string(seg.raw_content.c_str());
+      if (logger) logger->trace(fmt::format("WORKER: {}\n'{}'", worker_id, seg.dump(xml_mmap.data())));
+      auto view     = seg.view(xml_mmap.data()); // whole xml subtree but the initial start tag
+      auto tmp_view = seg.subtree_str(view);     // merging together initial start tag and the rest of the xml tree
+      auto r        = parser->exec(tmp_view);    // make DOM document
 
-      auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - start);
+      auto us = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - t0).count();
 
-      if (static_cast<int>(status) == pugi::status_ok)
-      {
-        result.success = true;
-        if (logger) logger->debug("Segment {} processed successfully in {} μs", seg.id, elapsed.count());
-        return result;
+      if (r)
+      { /// DOM parsing je ok r.value() vsebuje DOM drevo xercesc::DOMDocument*
+        res.success = true;
+        if (logger)
+          logger->debug("Segment '{}' DOM processing '{}'µs (offset={}, len={})", seg.get_id(), us, seg.get_offset(), seg.get_length());
+        return res;
       }
 
-      result.success       = false;
-      result.error_message = fmt::format("Failed to parse XML segment: {}", status.description());
-      if (logger) logger->warn("Segment {} failed: {}", seg.id, result.error_message);
-      return result;
+      res.success       = false;
+      res.error_message = fmt::format("Parse error: {}", r.error().message);
+      if (logger) logger->warn("Segment {}: {} :: {}", seg.get_id(), res.error_message, seg.dump(xml_mmap.data()));
+      return res;
     }
     catch (const std::exception& e)
     {
-      result.success       = false;
-      result.error_message = fmt::format("Exception in segment {}: {}", seg.id, e.what());
-      if (logger) logger->error("Segment {} exception: {}", seg.id, e.what());
-      return result;
+      res.success       = false;
+      res.error_message = fmt::format("Exception in segment {}: '{}'", seg.get_id(), e.what());
+      if (logger) logger->error("{}", res.error_message);
+      return res;
     }
   }
 
-  void xml_processor::worker_function(const std::stop_token& st, worker_context ctx)
+  void xml_processor::worker_function([[maybe_unused]] const std::stop_token& st, int worker_id, [[maybe_unused]] worker_context ctx)
   {
-    if (ctx.logger) ctx.logger->info("Worker thread started");
-
+    if (ctx.logger) ctx.logger->debug(fmt::format("Worker {:02} established.", worker_id));
+    auto parser = std::make_unique<dom_parser>(ctx.logger, worker_id);
+    auto res    = parser->init();
+    if (! res)
+    {
+      auto msg = fmt::format("Error initializing worker '{:02}' dom parser: '{}'", worker_id, res.error().message);
+      if (ctx.logger)
+      {
+        ctx.logger->error(msg);
+        ctx.logger->debug(fmt::format("Worker {:02} finished.", worker_id));
+      }
+      return;
+    }
     while (! st.stop_requested() && ! ctx.cancel_flag.load())
     {
-      xml_segment seg;
+      xml_segment seg{};
       if (! ctx.seg_queue.pop(seg)) break;
 
-      auto process_result = process_segment(seg, ctx.logger);
+      auto res = process_segment(worker_id, seg, ctx.xml_mmap, ctx.logger, parser.get());
 
-      if (process_result)
+      if (res)
       {
-        if (process_result->success)
+        if (res->success)
         {
-          std::lock_guard<std::mutex> lock(ctx.results_mutex);
-          ctx.results.push_back(std::move(*process_result));
+          std::lock_guard lock(ctx.results_mutex);
+          ctx.results.push_back(std::move(*res));
           ctx.processed_count++;
         }
         else
         {
-          std::lock_guard<std::mutex> lock(ctx.errors_mutex);
-          ctx.errors.push_back(std::move(*process_result));
+          std::lock_guard lock(ctx.errors_mutex);
+          ctx.errors.push_back(std::move(*res));
           ctx.error_count++;
         }
       }
       else
       {
-        segment_result error_result;
-        error_result.segment_id    = seg.id;
-        error_result.xpath_index   = seg.xpath_index;
-        error_result.success       = false;
-        error_result.error_message = process_result.error().to_string();
-
-        std::lock_guard<std::mutex> lock(ctx.errors_mutex);
-        ctx.errors.push_back(std::move(error_result));
-        ctx.error_count++;
-
-        if (ctx.logger) ctx.logger->error("Unexpected error in worker: {}", process_result.error().to_string());
+        segment_result err_res;
+        err_res.segment_id    = seg.get_id();
+        err_res.xpath_index   = seg.get_xpath_index();
+        err_res.success       = false;
+        err_res.error_message = res.error().to_string();
+        std::lock_guard lock(ctx.errors_mutex);
+        ctx.errors.push_back(std::move(err_res));
+        ctx.error_count++; // do we need errors per thread?
       }
     }
-
-    if (ctx.logger) ctx.logger->info("Worker thread stopping");
+    auto x = parser->done();
+    if (! x && ctx.logger) ctx.logger->error(fmt::format("Error releasing dom parser: '{}'", x.error().message));
+    if (ctx.logger) ctx.logger->debug(fmt::format("Worker {:02} finished.", worker_id));
   }
 
   void_result xml_processor::start_workers()
   {
     {
-      std::lock_guard<std::mutex> lock(results_mutex_);
+      std::lock_guard lock(results_mutex_);
       results_.clear();
     }
     {
-      std::lock_guard<std::mutex> lock(errors_mutex_);
+      std::lock_guard lock(errors_mutex_);
       errors_.clear();
     }
     processed_count_ = 0;
     error_count_     = 0;
     cancel_flag_     = false;
 
-    log_info(fmt::format("Starting {} worker threads", config_.num_workers));
+    if (active_mmap_ == nullptr)
+    {
+      auto err = error_info{processor_error::internal_error, "mmap is null before 'start_workers()'", active_mmap_->path(), 0};
+      log_error(err);
+      return std::unexpected(err);
+    }
 
-    worker_context ctx{.seg_queue       = seg_queue_,
-                       .results         = results_,
-                       .errors          = errors_,
-                       .results_mutex   = results_mutex_,
-                       .errors_mutex    = errors_mutex_,
-                       .processed_count = processed_count_,
-                       .error_count     = error_count_,
-                       .cancel_flag     = cancel_flag_,
-                       .logger          = logger_};
+    worker_context ctx{
+      .seg_queue       = seg_queue_,
+      .xml_mmap        = *active_mmap_,
+      .results         = results_,
+      .errors          = errors_,
+      .results_mutex   = results_mutex_,
+      .errors_mutex    = errors_mutex_,
+      .processed_count = processed_count_,
+      .error_count     = error_count_,
+      .cancel_flag     = cancel_flag_,
+      .logger          = logger_,
+    };
 
     workers_.reserve(config_.num_workers);
-    for (size_t i = 0; i < config_.num_workers; ++i) { workers_.emplace_back(worker_function, ctx); }
+    for (std::size_t i = 0; i < config_.num_workers; ++i) workers_.emplace_back(worker_function, i, ctx);
 
-    log_debug("All worker threads started");
+    log_debug(fmt::format("{} workers started.", config_.num_workers));
     return {};
   }
 
   void xml_processor::stop_workers()
   {
-    log_debug("Stopping workers");
     seg_queue_.set_finished();
     workers_.clear();
-    log_info("All workers stopped");
+    active_mmap_ = nullptr;
+    log_debug("All workers stopped.");
   }
 
   void xml_processor::cancel()
   {
-    log_warning("Processing cancelled by user request");
     cancel_flag_ = true;
     seg_queue_.set_finished();
   }
 
+  // ============================================================================
+  // Procesiranje
+  // ============================================================================
+
   void_result xml_processor::process_file(const std::string& xml_path, const std::string& xsd_path)
   {
     start_time_ = std::chrono::steady_clock::now();
-    log_info(fmt::format("Processing XML file: '{}'", xml_path));
+    log_info(fmt::format("XML file: '{}'", xml_path));
 
     fsp::mmap_file xml_mmap;
     try
     {
       xml_mmap.open(xml_path);
-      log_debug(fmt::format("XML file mmapped: {} bytes", xml_mmap.size()));
     }
     catch (const std::exception& e)
     {
-      auto error = error_info{processor_error::file_open_failed, e.what(), xml_path, 0};
-      log_error(error);
-      return std::unexpected(error);
+      auto err = error_info{processor_error::file_open_failed, e.what(), xml_path, 0};
+      log_error(err);
+      return std::unexpected(err);
     }
 
     if (! xml_mmap.is_open() || xml_mmap.empty())
     {
-      auto error =
-        error_info{processor_error::mmap_failed, fmt::format("Failed to mmap XML file '{}' or file is empty", xml_path), xml_path, 0};
-      log_error(error);
-      return std::unexpected(error);
+      auto err = error_info{processor_error::mmap_failed, fmt::format("mmap neuspešen: '{}'", xml_path), xml_path, 0};
+      log_error(err);
+      return std::unexpected(err);
     }
 
     std::optional<fsp::mmap_file> xsd_mmap;
     if (! xsd_path.empty() && config_.validate_against_xsd)
     {
-      log_debug(fmt::format("Loading XSD file: '{}'", xsd_path));
       xsd_mmap.emplace();
       try
       {
         xsd_mmap->open(xsd_path);
-        log_debug(fmt::format("XSD file mmapped: {} bytes", xsd_mmap->size()));
       }
       catch (const std::exception& e)
       {
-        auto error = error_info{processor_error::file_open_failed, e.what(), xsd_path, 0};
-        log_error(error);
-        return std::unexpected(error);
-      }
-
-      if (! xsd_mmap->is_open() || xsd_mmap->empty())
-      {
-        auto error =
-          error_info{processor_error::mmap_failed, fmt::format("Failed to mmap XSD file '{}' or file is empty", xsd_path), xsd_path, 0};
-        log_error(error);
-        return std::unexpected(error);
+        auto err = error_info{processor_error::file_open_failed, e.what(), xsd_path, 0};
+        log_error(err);
+        return std::unexpected(err);
       }
     }
 
@@ -367,223 +364,141 @@ namespace fsp
 
   void_result xml_processor::process_from_buffer(fsp::mmap_file& xml_mmap, fsp::mmap_file* xsd_mmap)
   {
-    auto parser_setup = setup_parser();
-    if (! parser_setup) return std::unexpected(parser_setup.error());
+    auto ps = setup_parser();
+    if (! ps) return std::unexpected(ps.error());
 
-    if (nullptr != xsd_mmap)
+    if (xsd_mmap != nullptr)
     {
-      auto validation_setup = setup_validation(*xsd_mmap);
-      if (! validation_setup) return std::unexpected(validation_setup.error());
-    }
-
-    std::vector<std::string> target_strings;
-    target_strings.reserve(config_.targets.size());
-    for (const auto& xpath : config_.targets)
-    {
-      target_strings.push_back(xpath_helpers::to_string(xpath));
-      log_debug(fmt::format("Target XPath: {}", xpath_helpers::to_string(xpath)));
+      auto vs = setup_validation(*xsd_mmap);
+      if (! vs) return std::unexpected(vs.error());
     }
 
     try
     {
-      handler_ = std::make_unique<Handler>(target_strings, seg_queue_);
-      parser_->setContentHandler(handler_.get());
-      parser_->setErrorHandler(handler_.get());
-      log_debug("SAX handler configured");
-    }
-    catch (const std::exception& e)
-    {
-      auto error = error_info{processor_error::internal_error, fmt::format("Failed to create SAX handler: {}", e.what()), "", 0};
-      log_error(error);
-      return std::unexpected(error);
-    }
-
-    auto workers_started = start_workers();
-    if (! workers_started) return workers_started;
-
-    try
-    {
-      log_info("Starting XML parsing");
-      xercesc::MemBufInputSource xml_source                  //
-        (                                                    //
-          reinterpret_cast<const XMLByte*>(xml_mmap.data()), // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
-          static_cast<XMLSize_t>(xml_mmap.size()),
-          "xml_input",
-          false);
-
-      parser_->parse(xml_source);
-      log_info("XML parsing completed");
-    }
-    catch (const xercesc::XMLException& e)
-    {
-      cancel();
-      auto error = error_info{//
-                              processor_error::parse_failed,
-                              x_str(e.getMessage()).to_string(),
-                              "",
-                              static_cast<size_t>(e.getSrcLine())};
-      log_error(error);
-      return std::unexpected(error);
-    }
-    catch (const std::exception& e)
-    {
-      cancel();
-      auto error = error_info{processor_error::parse_failed, e.what(), "", 0};
-      log_error(error);
-      return std::unexpected(error);
-    }
-
-    seg_queue_.set_finished();
-
-    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start_time_);
-    log_info(fmt::format("Processing completed in {} ms", elapsed.count()));
-
-    success_ = true;
-    return {};
-  }
-
-  void_result xml_processor::process_buffer(const void* data, size_t size, const void* xsd_data, size_t xsd_size)
-  {
-    start_time_ = std::chrono::steady_clock::now();
-    log_info(fmt::format("Processing XML from memory buffer ({} bytes)", size));
-
-    if (data == nullptr || size == 0)
-    {
-      auto error = error_info{processor_error::xml_empty, "XML buffer is empty or null", "", 0};
-      log_error(error);
-      return std::unexpected(error);
-    }
-
-    auto parser_setup = setup_parser();
-    if (! parser_setup) return std::unexpected(parser_setup.error());
-
-    if ((xsd_data != nullptr) && (xsd_size > 0))
-    {
-      auto validation_setup = setup_validation_from_buffer(xsd_data, xsd_size);
-      if (! validation_setup) return std::unexpected(validation_setup.error());
-    }
-
-    std::vector<std::string> target_strings;
-    target_strings.reserve(config_.targets.size());
-    for (const auto& xpath : config_.targets) { target_strings.push_back(xpath_helpers::to_string(xpath)); }
-
-    try
-    {
-      handler_ = std::make_unique<Handler>(target_strings, seg_queue_);
+      handler_ = std::make_unique<Handler>(config_.targets, seg_queue_, logger_, parser_.get(), xml_mmap.view());
       parser_->setContentHandler(handler_.get());
       parser_->setErrorHandler(handler_.get());
     }
     catch (const std::exception& e)
     {
-      auto error = error_info{processor_error::internal_error, fmt::format("Failed to create SAX handler: {}", e.what()), "", 0};
-      log_error(error);
-      return std::unexpected(error);
+      auto err = error_info{processor_error::internal_error, fmt::format("Handler init: {}", e.what()), "", 0};
+      log_error(err);
+      return std::unexpected(err);
     }
 
-    auto workers_started = start_workers();
-    if (! workers_started) return workers_started;
+    // Nastavimo mmap referenco za workerje
+    active_mmap_ = &xml_mmap;
+
+    auto ws = start_workers();
+    if (! ws) return std::unexpected(ws.error());
 
     try
     {
-      xercesc::MemBufInputSource xml_source(    //
-        reinterpret_cast<const XMLByte*>(data), // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
-        static_cast<XMLSize_t>(size),
-        "memory_buffer",
+      log_debug("SAX parsing started.");
+      xercesc::MemBufInputSource src(
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
+        reinterpret_cast<const XMLByte*>(xml_mmap.data()),
+        static_cast<XMLSize_t>(xml_mmap.size()),
+        "xml_input",
         false);
-
-      parser_->parse(xml_source);
+      // // NOLINTNEXTLINE
+      // log_info(std::string(reinterpret_cast<const char*>(xml_mmap.data()), xml_mmap.size()));
+      parser_->parse(src);
+      log_debug("SAX parsing finished.");
     }
     catch (const xercesc::XMLException& e)
     {
       cancel();
-      auto error = error_info{//
-                              processor_error::parse_failed,
-                              x_str(e.getMessage()).to_string(),
-                              "",
-                              static_cast<size_t>(e.getSrcLine())};
-      log_error(error);
-      return std::unexpected(error);
+      auto err = error_info{processor_error::parse_failed, x_str(e.getMessage()).to_string(), "", static_cast<std::size_t>(e.getSrcLine())};
+      log_error(err);
+      return std::unexpected(err);
     }
     catch (const std::exception& e)
     {
       cancel();
-      auto error = error_info{processor_error::parse_failed, e.what(), "", 0};
-      log_error(error);
-      return std::unexpected(error);
+      auto err = error_info{processor_error::parse_failed, e.what(), "", 0};
+      log_error(err);
+      return std::unexpected(err);
     }
 
     seg_queue_.set_finished();
+    // Počakamo da workerji končajo
+    workers_.clear();
+    active_mmap_ = nullptr;
 
-    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start_time_);
-    log_info(fmt::format("Buffer processing completed in {} ms", elapsed.count()));
+    // auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start_time_).count();
+    // log_info(fmt::format("Finished in {} ms {} bytes in document.", ms, xml_mmap.size()));
+    auto stat = get_stats();
+    log_info(fmt::format("Processing time:{:.2f} ms workers:{} segments:{} (ok:{} err:{}) bytes:{}",
+                         stat.processing_time_ms,
+                         stat.active_workers,
+                         stat.total_segments,
+                         stat.successful_segments,
+                         stat.failed_segments,
+                         xml_mmap.size()));
 
     success_ = true;
     return {};
   }
+
+  // ============================================================================
+  // Rezultati
+  // ============================================================================
 
   std::vector<segment_result> xml_processor::get_results()
   {
-    std::lock_guard<std::mutex> lock(results_mutex_);
-    log_info(fmt::format("Returning {} results", results_.size()));
+    std::lock_guard lock(results_mutex_);
     return std::move(results_);
   }
 
   std::vector<segment_result> xml_processor::get_errors()
   {
-    std::lock_guard<std::mutex> lock(errors_mutex_);
-    log_warning(fmt::format("Returning {} errors", errors_.size()));
+    std::lock_guard lock(errors_mutex_);
     return std::move(errors_);
   }
 
   xml_processor::stats xml_processor::get_stats() const
   {
-    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start_time_);
-
-    return stats{.total_segments      = processed_count_.load() + error_count_.load(),
-                 .successful_segments = processed_count_.load(),
-                 .failed_segments     = error_count_.load(),
-                 .active_workers      = workers_.size(),
-                 .processing_time_ms  = static_cast<double>(elapsed.count())};
+    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start_time_).count();
+    return {
+      .total_segments      = processed_count_.load() + error_count_.load(),
+      .successful_segments = processed_count_.load(),
+      .failed_segments     = error_count_.load(),
+      .active_workers      = workers_.size() > 0 ? workers_.size() : config_.num_workers,
+      .processing_time_ms  = static_cast<double>(ms),
+    };
   }
+
+  // ============================================================================
+  // Convenience function
+  // ============================================================================
 
   processing_result process_xml_file(const std::string&              xml_path,
                                      const std::string&              xsd_path,
                                      const std::vector<std::string>& xpath_strings,
-                                     size_t                          num_workers,
+                                     std::size_t                     num_workers,
                                      const logger_config&            log_cfg)
   {
     std::vector<xpath_t> targets;
     targets.reserve(xpath_strings.size());
-
-    for (const auto& xpath_str : xpath_strings)
+    for (const auto& s : xpath_strings)
     {
-      auto xpath_result = xpath_helpers::from_string(xpath_str);
-      if (! xpath_result) { return std::unexpected(xpath_result.error()); }
-      targets.push_back(std::move(xpath_result.value()));
+      auto r = xpath_helpers::from_string(s);
+      if (! r) return std::unexpected(r.error());
+      targets.push_back(std::move(*r));
     }
 
-    processor_config config;
-    config.targets              = std::move(targets);
-    config.num_workers          = num_workers;
-    config.validate_against_xsd = ! xsd_path.empty();
-    config.log_config           = log_cfg;
+    processor_config cfg;
+    cfg.targets              = std::move(targets);
+    cfg.num_workers          = num_workers;
+    cfg.validate_against_xsd = ! xsd_path.empty();
+    cfg.log_config           = log_cfg;
 
-    xml_processor processor(config);
+    xml_processor proc(cfg);
+    auto          res = proc.process_file(xml_path, xsd_path);
+    if (! res) return std::unexpected(res.error());
 
-    auto result = processor.process_file(xml_path, xsd_path);
-    if (! result) { return std::unexpected(result.error()); }
-
-    auto stats  = processor.get_stats();
-    auto logger = processor.get_logger();
-    if (logger)
-    {
-      logger->info("Processing statistics: {} total segments, {} successful, {} failed in {:.2f} ms",
-                   stats.total_segments,
-                   stats.successful_segments,
-                   stats.failed_segments,
-                   stats.processing_time_ms);
-    }
-
-    return std::make_pair(processor.get_results(), processor.get_errors());
+    return std::make_pair(proc.get_results(), proc.get_errors());
   }
+
 } // namespace fsp

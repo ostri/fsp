@@ -1,4 +1,5 @@
 #include "mmap_file.hpp"
+#include <stdexcept>
 namespace fsp
 {
 
@@ -8,10 +9,12 @@ namespace fsp
   : data_(other.data_)
   , size_(other.size_)
   , fd_(other.fd_)
+  , path_(std::move(other.path_))
   {
     other.data_ = nullptr;
     other.size_ = 0;
     other.fd_   = -1;
+    other.path_.clear();
   }
 
   mmap_file& mmap_file::operator=(mmap_file&& other) noexcept
@@ -25,6 +28,7 @@ namespace fsp
       other.data_ = nullptr;
       other.size_ = 0;
       other.fd_   = -1;
+      other.path_ = "";
     }
     return *this;
   }
@@ -64,6 +68,7 @@ namespace fsp
     {
       data_ = nullptr;
     }
+    path_ = path;
   }
 
   void mmap_file::close() noexcept
@@ -79,6 +84,13 @@ namespace fsp
       fd_ = -1;
     }
     size_ = 0;
+    path_.clear();
+  }
+
+  [[nodiscard]] std::string_view mmap_file::view() const //
+  {                                                      //
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
+    return {reinterpret_cast<const char*>(data()), size()};
   }
 
   [[nodiscard]] mmap_file::const_pointer mmap_file::data() const noexcept { return data_; }
@@ -108,8 +120,9 @@ namespace fsp
   [[nodiscard]] mmap_file::const_iterator mmap_file::cend() const noexcept
   { return data_ + size_; } // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic)
 
+  std::string_view mmap_file::path() const { return path_; }
+
   [[nodiscard]] std::span<const std::byte> mmap_file::span() const noexcept { return {data_, size_}; }
 
   mmap_file::operator bool() const noexcept { return is_open(); }
-
 }; // namespace fsp

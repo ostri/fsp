@@ -4,7 +4,6 @@
 #include <fmt/format.h>
 #include <magic_enum.hpp>
 #include <string>
-#include <utility>
 
 
 namespace fsp
@@ -26,18 +25,12 @@ namespace fsp
   class error_info
   {
   public:
-    error_info(processor_error code, std::string msg, std::string file, size_t line)
-    : code_(code)
-    , message_(std::move(msg))
-    , file_(std::move(file))
-    , line_(line)
-    {
-    }
+    error_info(processor_error code, std::string msg, std::string_view path, size_t line);
     [[nodiscard]] std::string to_string() const;
   private:
     processor_error code_;
     std::string     message_;
-    std::string     file_;
+    std::string     path_;
     size_t          line_ = 0;
   };
 }; // namespace fsp

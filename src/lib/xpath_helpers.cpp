@@ -1,88 +1,60 @@
 #include "xpath_helpers.hpp"
-#include "common.hpp"
-
+#include <fmt/format.h>
 
 namespace fsp::xpath_helpers
 {
-  result<e_tag> parse_e_tag(const std::string& etag_str)
-  {
-    e_tag  result;
-    size_t colon_pos = etag_str.find(':');
 
-    if (colon_pos == 0)
-    {
-      return std::unexpected(error_info{processor_error::invalid_xpath, fmt::format("Empty namespace in tag: '{}'", etag_str), "", 0});
-    }
-
-    if (colon_pos != std::string::npos)
-    {
-      result.set_ns(etag_str.substr(0, colon_pos));
-      result.set_tag(etag_str.substr(colon_pos + 1));
-
-      if (result.tag().empty())
-      {
-        return std::unexpected(
-          error_info{processor_error::invalid_xpath, fmt::format("Empty tag name after namespace: '{}'", etag_str), "", 0});
-      }
-    }
-    else
-    {
-      result.set_tag(etag_str);
-    }
-
-    if (result.tag().empty()) //
-    {
-      return std::unexpected(error_info{processor_error::invalid_xpath, "Empty tag name", "", 0});
-    }
-
-    return result;
-  }
-
+  // Razčleni XPath string v xpath_t (vector<e_tag>).
+  // Podpira:
+  //   /Document/iso:FIToFICstmrCdtTrf/CdtTrfTxInf
+  //   Document/child/grandchild
+  //   /root
   result<xpath_t> from_string(const std::string& xpath_str)
   {
-    xpath_t result;
-    auto    path = static_cast<std::string>(fsp::trim(xpath_str));
+    if (xpath_str.empty()) { return std::unexpected(error_info{processor_error::invalid_xpath, "XPath je prazen", "", 0}); }
 
-    // Remove leading slash if present
-    if (! path.empty() && path[0] == '/') path = path.substr(1);
+    xpath_t          result;
+    std::string_view path = xpath_str;
 
-    // Remove trailing slash if present
-    if (! path.empty() && path.back() == '/') path.pop_back();
+    // Odstranimo vodilni '/'
+    if (path.starts_with('/')) path.remove_prefix(1);
 
     if (path.empty())
     {
-      return std::unexpected(
-        error_info{processor_error::invalid_xpath, fmt::format("Empty XPath after normalization: '{}'", xpath_str), "", 0});
+      return std::unexpected(error_info{processor_error::invalid_xpath, fmt::format("XPath '{}' nima elementov", xpath_str), "", 0});
     }
 
-    size_t start = 0;
-    size_t end   = path.find('/');
-
-    while (end != std::string::npos)
+    while (! path.empty())
     {
-      std::string etag_str = path.substr(start, end - start);
-      if (! etag_str.empty())
+      auto sep     = path.find('/');
+      auto segment = (sep == std::string_view::npos) ? path : path.substr(0, sep);
+
+      if (segment.empty())
       {
-        auto tag_result = parse_e_tag(etag_str);
-        if (! tag_result) return std::unexpected(tag_result.error());
-        result.push_back(std::move(*tag_result));
+        return std::unexpected(
+          error_info{processor_error::invalid_xpath, fmt::format("XPath '{}' vsebuje prazen segment", xpath_str), "", 0});
       }
-      start = end + 1;
-      end   = path.find('/', start);
-    }
 
-    std::string last_etag = path.substr(start);
-    if (! last_etag.empty())
-    {
-      auto tag_result = parse_e_tag(last_etag);
-      if (! tag_result) return std::unexpected(tag_result.error());
-      result.push_back(std::move(*tag_result));
+      e_tag tag;
+      auto  colon = segment.find(':');
+      if (colon != std::string_view::npos)
+      {
+        tag.set_ns(std::string(segment.substr(0, colon)));
+        tag.set_tag(std::string(segment.substr(colon + 1)));
+      }
+      else
+      {
+        tag.set_tag(std::string(segment));
+      }
+      result.push_back(std::move(tag));
+
+      path = (sep == std::string_view::npos) ? std::string_view{} : path.substr(sep + 1);
     }
 
     if (result.empty())
     {
       return std::unexpected(
-        error_info{processor_error::invalid_xpath, fmt::format("No valid tags found in XPath: '{}'", xpath_str), "", 0});
+        error_info{processor_error::invalid_xpath, fmt::format("XPath '{}': ni veljavnih elementov", xpath_str), "", 0});
     }
 
     return result;
@@ -90,41 +62,30 @@ namespace fsp::xpath_helpers
 
   std::string to_string(const xpath_t& xpath)
   {
-    if (xpath.empty()) return "";
-
     std::string result;
-    for (const auto& et : xpath)
+    for (const auto& tag : xpath)
     {
-      if (! result.empty()) result += "/";
-      result += et.to_string();
+      result += '/';
+      result += tag.to_string();
     }
     return result;
   }
 
-  bool validate(const xpath_t& xpath, std::string* error_msg)
+  bool validate(const xpath_t& xpath, std::string* error_msg) // TODO: ostri - bug 2: error_msg as result is not ok.
   {
     if (xpath.empty())
     {
-      if (error_msg->empty()) *error_msg = "XPath is empty";
+      if (nullptr != error_msg) *error_msg = "XPath je prazen";
       return false;
     }
-
-    for (size_t i = 0; i < xpath.size(); ++i)
+    for (const auto& tag : xpath)
     {
-      const auto& et = xpath[i];
-      if (et.tag().empty())
+      if (tag.tag().empty())
       {
-        if (nullptr != error_msg) *error_msg = fmt::format("Empty tag at position {}", i);
-        return false;
-      }
-
-      if (et.tag().find_first_of(" \t\n\r<>") != std::string::npos)
-      {
-        if (nullptr != error_msg) *error_msg = fmt::format("Invalid characters in tag '{}' at position {}", et.tag(), i);
+        if (nullptr != error_msg) *error_msg = "XPath vsebuje tag s praznim imenom";
         return false;
       }
     }
-
     return true;
   }
 
@@ -134,5 +95,6 @@ namespace fsp::xpath_helpers
     return xpath.back();
   }
 
-  size_t depth(const xpath_t& xpath) { return xpath.size(); }
+  std::size_t depth(const xpath_t& xpath) { return xpath.size(); }
+
 } // namespace fsp::xpath_helpers
