@@ -167,7 +167,7 @@ namespace fsp
                                                         const xml_segment&                     seg,
                                                         const fsp::mmap_file&                  xml_mmap,
                                                         const std::shared_ptr<spdlog::logger>& logger,
-                                                        dom_parser*                            parser)
+                                                        [[maybe_unused]] dom_parser*           parser)
   {
     segment_result res;
     res.segment_id  = seg.get_id();

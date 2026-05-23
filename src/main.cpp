@@ -52,15 +52,16 @@ int main(int argc, char* argv[])
     std::cout << "Processed segments: " << results.size() << "\n";
     std::cout << "Errors: " << errors.size() << "\n";
 
-    for (const auto& err : errors)
-    {
-      std::cerr << "  ✗ Error in segment " << err.segment_id << " (XPath index " << err.xpath_index << "): " << err.error_message << "\n";
-    }
+    // for (const auto& err : errors)
+    // {
+    //   std::cerr << "  ✗ Error in segment " << err.segment_id << " (XPath index " << err.xpath_index << "): " << err.error_message <<
+    //   "\n";
+    // }
 
-    for (const auto& res : results)
-    {
-      std::cout << "  ✓ Segment " << res.segment_id << " (XPath index " << res.xpath_index << ") processed\n";
-    }
+    // for (const auto& res : results)
+    // {
+    //   std::cout << "  ✓ Segment " << res.segment_id << " (XPath index " << res.xpath_index << ") processed\n";
+    // }
     // ///===============================================================================
     // // Example of using the processor directly
     // std::cout << "\n=== Advanced usage with custom config ===\n";
