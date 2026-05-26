@@ -22,31 +22,28 @@ namespace fsp
     {.name="remmitance_",     .path="CdtTrfTxInf/RmtInf/Strd/RfrdDocInf/*Nb", .is_opt=true},
   });
   // clang-format on
-
-  // 2. Eksplicitno podamo znane dimenzije konstruktorju
-  // constexpr attr_tbl<raw_inputs.size(), fsp::get_max_depth(raw_inputs)> ct_tran_attr(raw_inputs, NS);
-  constexpr path_node_struct<raw.size(), raw.get_max_xpath_len()> ct_tran_attr(raw, NS);
+  constexpr auto tree_node = build<raw, NS>();
 
   // NOLINTBEGIN(readability-magic-numbers)
   // Testi zastavic v času prevajanja
-  static_assert(ct_tran_attr["txn_id"].name() == "txn_id");
-  static_assert(! ct_tran_attr["txn_id"].is_attr());
-  static_assert(! ct_tran_attr["txn_id"].is_opt());
+  static_assert(tree_node["txn_id"].name() == "txn_id");
+  static_assert(! tree_node["txn_id"].is_attr());
+  static_assert(! tree_node["txn_id"].is_opt());
 
   // Test za "currency_", ki ima is_attr = true in is_opt = true
-  static_assert(ct_tran_attr["currency_"].name() == "currency_");
-  static_assert(ct_tran_attr["currency_"].is_attr());
-  static_assert(ct_tran_attr["currency_"].is_opt());
-  static_assert(ct_tran_attr["currency_"].last().tag == "Ccy");
+  static_assert(tree_node["currency_"].name() == "currency_");
+  static_assert(tree_node["currency_"].is_attr());
+  static_assert(tree_node["currency_"].is_opt());
+  static_assert(tree_node["currency_"].last().tag == "Ccy");
 
   // Test za "value_date_", ki ima is_opt = true
-  static_assert(! ct_tran_attr["value_date_"].is_attr());
-  static_assert(ct_tran_attr["value_date_"].is_opt());
+  static_assert(! tree_node["value_date_"].is_attr());
+  static_assert(tree_node["value_date_"].is_opt());
   // Test za "remittance_", ki ima is_attr = true in is_opt = true
-  static_assert(ct_tran_attr["remmitance_"].name() == "remmitance_");
-  static_assert(! ct_tran_attr["remmitance_"].is_attr());
-  static_assert(ct_tran_attr["remmitance_"].is_opt());
-  static_assert(ct_tran_attr["remmitance_"].last().tag == "Nb");
+  static_assert(tree_node["remmitance_"].name() == "remmitance_");
+  static_assert(! tree_node["remmitance_"].is_attr());
+  static_assert(tree_node["remmitance_"].is_opt());
+  static_assert(tree_node["remmitance_"].last().tag == "Nb");
   // NOLINTEND(readability-magic-numbers)
 }; // namespace fsp
 
@@ -62,7 +59,7 @@ int main()
     fmt::print("{:<15} | {:<40} | {:<7} | {:<8} | {:<7} | {}\n", "Name", "Path", "Is_Attr", "Is_Array", "Is_Opt", "XPath");
     fmt::print("{:-<90}\n", "");
 
-    for (const auto& attr : fsp::ct_tran_attr)
+    for (const auto& attr : fsp::tree_node)
     {
       std::string xpath_str;
       for (size_t i = 0; i < attr.xpath_size(); ++i)
@@ -82,16 +79,16 @@ int main()
                  xpath_str);
     }
 
-    fmt::print("currency: '{}'\n", fsp::ct_tran_attr["currency_"].xpath()[0].tag);
-    fmt::print("currency: '{}'\n", fsp::ct_tran_attr["currency_"].xpath()[1].tag);
-    fmt::print("currency: '{}'\n", fsp::ct_tran_attr["currency_"].xpath()[2].tag);
-    fmt::print("currency: '{}'\n", fsp::ct_tran_attr["currency_"].last().tag);
-    fmt::print("remmitance: '{}'\n", fsp::ct_tran_attr["remmitance_"].xpath()[0].tag);
-    fmt::print("remmitance: '{}'\n", fsp::ct_tran_attr["remmitance_"].xpath()[1].tag);
-    fmt::print("remmitance: '{}'\n", fsp::ct_tran_attr["remmitance_"].xpath()[2].tag);
-    fmt::print("remmitance: '{}'\n", fsp::ct_tran_attr["remmitance_"].xpath()[3].tag);
-    fmt::print("remmitance: '{}'\n", fsp::ct_tran_attr["remmitance_"].xpath()[4].tag);
-    fmt::print("remmitance: '{}'\n", fsp::ct_tran_attr["remmitance_"].last().tag);
+    // fmt::print("currency: '{}'\n", fsp::tree_node["currency_"].xpath()[0].tag);
+    // fmt::print("currency: '{}'\n", fsp::tree_node["currency_"].xpath()[1].tag);
+    // fmt::print("currency: '{}'\n", fsp::tree_node["currency_"].xpath()[2].tag);
+    // fmt::print("currency: '{}'\n", fsp::tree_node["currency_"].last().tag);
+    // fmt::print("remmitance: '{}'\n", fsp::tree_node["remmitance_"].xpath()[0].tag);
+    // fmt::print("remmitance: '{}'\n", fsp::tree_node["remmitance_"].xpath()[1].tag);
+    // fmt::print("remmitance: '{}'\n", fsp::tree_node["remmitance_"].xpath()[2].tag);
+    // fmt::print("remmitance: '{}'\n", fsp::tree_node["remmitance_"].xpath()[3].tag);
+    // fmt::print("remmitance: '{}'\n", fsp::tree_node["remmitance_"].xpath()[4].tag);
+    // fmt::print("remmitance: '{}'\n", fsp::tree_node["remmitance_"].last().tag);
   }
   catch (...)
   {
