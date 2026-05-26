@@ -24,6 +24,7 @@ Checks: |
   -readability-static-definition-in-anonymous-namespace, # <<< Catch2
   -readability-redundant-access-specifiers,
   -unused-includes,
+  -hicpp-explicit-conversions,
 
 WarningsAsErrors: '*'
 HeaderFilterRegex: ^(?!.*catch2)
