@@ -33,12 +33,14 @@ int main(int argc, char* argv[])
     log_cfg.enable_console = true;
     log_cfg.enable_file    = true;
     log_cfg.log_file_path  = "xml_processor.log";
-    log_cfg.log_level      = spdlog::level::info;
+    log_cfg.log_level      = spdlog::level::debug; // spdlog::level::info;
     log_cfg.logger_name    = "main_app";
 
     fsp::xerces_mgr ctx; // xercesc context
-    // Use the convenience function
-    auto result = fsp::process_xml_file(xml_file, xsd_file, xpath_strings, 0, log_cfg);
+    // all available workers
+    //    auto result = fsp::process_xml_file(xml_file, xsd_file, xpath_strings, 0, log_cfg);
+    // only one worker
+    auto result = fsp::process_xml_file(xml_file, xsd_file, xpath_strings, 1, log_cfg);
 
     if (! result)
     {

@@ -3,6 +3,7 @@
 #include <atomic>
 #include <expected>
 #include <memory>
+#include <spdlog/pattern_formatter.h>
 #include <stop_token>
 #include <string>
 #include <vector>
@@ -30,12 +31,27 @@
 
 namespace fsp
 {
+  using cstr_t = std::string_view;
   struct segment_result
   {
     std::size_t segment_id  = 0;
     int         xpath_index = -1;
     bool        success     = false;
     std::string error_message;
+  };
+
+  // 1. Global thread-local variable (each thread gets its own isolated instance)
+  inline thread_local std::string log_thread_name = "unknown";
+
+  // 2. Formatter class that reads the current thread's name
+  class ThreadNameFormatter : public spdlog::custom_flag_formatter
+  {
+  public:
+    void format(const spdlog::details::log_msg& /*msg*/, const std::tm& /*tm*/, spdlog::memory_buf_t& dest) override
+    { // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic)
+      dest.append(log_thread_name.data(), log_thread_name.data() + log_thread_name.size());
+    }
+    [[nodiscard]] std::unique_ptr<custom_flag_formatter> clone() const override { return std::make_unique<ThreadNameFormatter>(); }
   };
 
   class xml_processor
@@ -80,10 +96,11 @@ namespace fsp
     // NOLINTBEGIN(cppcoreguidelines-avoid-const-or-ref-data-members)
     struct worker_context
     {
-      segment_queue&                  seg_queue;
-      const fsp::mmap_file&           xml_mmap; // ← mmap za segment view
-      std::vector<segment_result>&    results;
-      std::vector<segment_result>&    errors;
+      int                             worker_id; // unique id of the worker
+      segment_queue&                  seg_queue; // input queue
+      const fsp::mmap_file&           xml_mmap;  // mmap mapping for buffer segment
+      std::vector<segment_result>&    results;   // output queue for valid transactions
+      std::vector<segment_result>&    errors;    // output queue for transactions with errors
       std::mutex&                     results_mutex;
       std::mutex&                     errors_mutex;
       std::atomic<std::size_t>&       processed_count;
@@ -123,18 +140,24 @@ namespace fsp
     void_result start_workers();
     void        stop_workers();
 
-    static void worker_function([[maybe_unused]] const std::stop_token& st, int worker_id, [[maybe_unused]] worker_context ctx);
+    static void worker_function( //
+      [[maybe_unused]] const std::stop_token& st,
+      int                                     worker_id,
+      [[maybe_unused]] worker_context         ctx);
 
-    static result<segment_result> process_segment(int                                    worker_id,
-                                                  const xml_segment&                     seg,
-                                                  const fsp::mmap_file&                  xml_mmap,
-                                                  const std::shared_ptr<spdlog::logger>& logger,
-                                                  dom_parser*                            parser);
-
-    void log_error(const error_info& error);
-    void log_info(const std::string& msg);
-    void log_debug(const std::string& msg);
-    void log_warning(const std::string& msg);
+    // static result<segment_result> process_segment(int                                    worker_id,
+    //                                               const xml_segment&                     seg,
+    //                                               const fsp::mmap_file&                  xml_mmap,
+    //                                               const std::shared_ptr<spdlog::logger>& logger,
+    //                                               dom_parser*                            parser);
+    static result<segment_result> process_segment([[maybe_unused]] const worker_context& ctx, const xml_segment& seg);
+    static result<segment_result> extract_xml_values(cstr_t                                 xml_buf,
+                                                     const segment_result&                  sr,
+                                                     const std::shared_ptr<spdlog::logger>& logger);
+    void                          log_error(const error_info& error);
+    void                          log_info(const std::string& msg);
+    void                          log_debug(const std::string& msg);
+    void                          log_warning(const std::string& msg);
   };
 
   using processing_result = std::expected<std::pair<std::vector<segment_result>, std::vector<segment_result>>, error_info>;

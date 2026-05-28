@@ -32,10 +32,11 @@ endif()
 
 # --- 3. Find required packages ---
 find_package(XercesC REQUIRED)
-find_package(pugixml REQUIRED)
+#find_package(pugixml REQUIRED)
 find_package(fmt REQUIRED)
 find_package(spdlog REQUIRED)
 find_package(magic_enum REQUIRED)
+find_package(LibXml2 REQUIRED)
 
 # --- 4. Function to define a target with common settings ---
 function(add_fsp_target TARGET_NAME TYPE)
@@ -91,7 +92,7 @@ set(FSP_LIB_SOURCES
 # Specify additional libraries for fsp_lib (if needed)
 set(FSP_TARGET_fsp_lib_LIBS
     XercesC::XercesC
-    pugixml
+    LibXml2::LibXml2
 )
 add_fsp_target(fsp_lib STATIC ${FSP_LIB_SOURCES})
 #
@@ -124,7 +125,7 @@ set(FSP_TARGET_${PROJECT_NAME}_LIBS
     spdlog::spdlog
     magic_enum::magic_enum
     XercesC::XercesC
-    pugixml
+    LibXml2::LibXml2
 )
 # If main needs any extra include paths
 # set(FSP_TARGET_${PROJECT_NAME}_INCLUDES ${CMAKE_SOURCE_DIR}/src/extra)

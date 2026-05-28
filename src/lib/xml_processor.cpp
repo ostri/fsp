@@ -1,14 +1,15 @@
 #include "xml_processor.hpp"
-#include "dom_parser.hpp"
+// #include "dom_parser.hpp"
 #include "x_str.hpp"
 #include "xpath_helpers.hpp"
 
 #include <chrono>
 #include <fmt/format.h>
 #include <magic_enum.hpp>
-#include <pugixml.hpp>
+// #include <pugixml.hpp>
 #include <spdlog/spdlog.h>
 #include <thread>
+#include <libxml/xmlreader.h>
 
 namespace fsp
 {
@@ -19,30 +20,99 @@ namespace fsp
 
   void xml_processor::setup_logger()
   {
-    std::vector<spdlog::sink_ptr> sinks;
+    // auto formatter = std::make_unique<spdlog::pattern_formatter>();
+    // formatter->add_custom_flag<ThreadNameFormatter>('*');
+    // formatter->set_pattern("[%Y-%m-%d %H:%M:%S.%e] [%*] [%l] %v");
+    // spdlog::set_formatter(std::move(formatter));
 
+    // // 4. Set the name for the main thread
+    // log_thread_name = "main_app";
+    // ///////////
+    // std::vector<spdlog::sink_ptr> sinks;
+
+    // if (config_.log_config.enable_console)
+    // {
+    //   auto s = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
+    //   s->set_pattern("[%Y-%m-%d %H:%M:%S.%e] [%^%-5l%$] [%t] [%*] [%n] %v");
+    //   sinks.push_back(s);
+    // }
+    // if (config_.log_config.enable_file)
+    // {
+    //   auto s = std::make_shared<spdlog::sinks::basic_file_sink_mt>(config_.log_config.log_file_path, true);
+    //   s->set_pattern("[%Y-%m-%d %H:%M:%S.%e] [%-5l] [%t] [%*] [%n] %v");
+    //   sinks.push_back(s);
+    // }
+    // if (sinks.empty())
+    // {
+    //   auto s = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
+    //   s->set_pattern("[%Y-%m-%d %H:%M:%S.%e] [%^%-5l%$] [%t] [%*] [%n] %v");
+    //   sinks.push_back(s);
+    // }
+
+    // logger_ = std::make_shared<spdlog::logger>(config_.log_config.logger_name, sinks.begin(), sinks.end());
+    // logger_->set_level(config_.log_config.log_level);
+    // logger_->flush_on(spdlog::level::err);
+    // spdlog::info("Main program initialized.");
+
+    std::vector<spdlog::sink_ptr> sinks;
+    log_thread_name = "main>";
+    // Using the official spdlog alias ensures identical type matching across GCC and Clang
     if (config_.log_config.enable_console)
     {
       auto s = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
-      s->set_pattern("[%Y-%m-%d %H:%M:%S.%e] [%^%l%$] [%n] %v");
+
+      // Use explicit unordered_map type instead of the missing custom_flags alias
+      std::unordered_map<char, std::unique_ptr<spdlog::custom_flag_formatter>> flags;
+      flags['*'] = std::make_unique<ThreadNameFormatter>();
+      // Strict 4-argument constructor call for pattern_formatter
+      auto formatter = std::make_unique<spdlog::pattern_formatter>( //
+        "[%Y-%m-%d %H:%M:%S.%e] [%*] [%^%-5l%$] %v",
+        spdlog::pattern_time_type::local,
+        spdlog::details::os::default_eol,
+        std::move(flags));
+      s->set_formatter(std::move(formatter));
       sinks.push_back(s);
     }
+
     if (config_.log_config.enable_file)
     {
       auto s = std::make_shared<spdlog::sinks::basic_file_sink_mt>(config_.log_config.log_file_path, true);
-      s->set_pattern("[%Y-%m-%d %H:%M:%S.%e] [%l] [%n] %v");
+
+      // Use explicit unordered_map type instead of the missing custom_flags alias
+      std::unordered_map<char, std::unique_ptr<spdlog::custom_flag_formatter>> flags;
+      flags['*'] = std::make_unique<ThreadNameFormatter>();
+
+      auto formatter = std::make_unique<spdlog::pattern_formatter>( //
+        "[%Y-%m-%d %H:%M:%S.%e] [%*] [%-5l] %v",
+        spdlog::pattern_time_type::local,
+        spdlog::details::os::default_eol,
+        std::move(flags));
+      s->set_formatter(std::move(formatter));
       sinks.push_back(s);
     }
+
     if (sinks.empty())
     {
       auto s = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
-      s->set_pattern("[%Y-%m-%d %H:%M:%S.%e] [%^%l%$] [%n] %v");
+
+      // Use explicit unordered_map type instead of the missing custom_flags alias
+      std::unordered_map<char, std::unique_ptr<spdlog::custom_flag_formatter>> flags;
+      flags['*'] = std::make_unique<ThreadNameFormatter>();
+
+      auto formatter = std::make_unique<spdlog::pattern_formatter>( //
+        "[%Y-%m-%d %H:%M:%S.%e] [%*] [%^%-5l%$] %v",
+        spdlog::pattern_time_type::local,
+        spdlog::details::os::default_eol,
+        std::move(flags));
+      s->set_formatter(std::move(formatter));
       sinks.push_back(s);
     }
 
     logger_ = std::make_shared<spdlog::logger>(config_.log_config.logger_name, sinks.begin(), sinks.end());
     logger_->set_level(config_.log_config.log_level);
     logger_->flush_on(spdlog::level::err);
+    logger_->flush();
+    spdlog::info("Main program initialized.");
   }
 
   void xml_processor::log_error(const error_info& e)
@@ -162,12 +232,13 @@ namespace fsp
   // ============================================================================
   // Worker
   // ============================================================================
-
-  result<segment_result> xml_processor::process_segment(int                                    worker_id,
-                                                        const xml_segment&                     seg,
-                                                        const fsp::mmap_file&                  xml_mmap,
-                                                        const std::shared_ptr<spdlog::logger>& logger,
-                                                        [[maybe_unused]] dom_parser*           parser)
+  /*! process one xml fragment
+   *  The method process one xml segment. It extracts the required values from xml
+   *  and yields control to user provided function for further processing.
+   *  upon the result from user supplied function it adjustes normal or error queue.
+   */
+  result<segment_result> xml_processor::process_segment([[maybe_unused]] const worker_context& ctx, const xml_segment& seg)
+  // const fsp::mmap_file&                  xml_mmap)
   {
     segment_result res;
     res.segment_id  = seg.get_id();
@@ -177,56 +248,142 @@ namespace fsp
 
     try
     {
-      if (logger) logger->trace(fmt::format("WORKER: {}\n'{}'", worker_id, seg.dump(xml_mmap.data())));
-      auto view     = seg.view(xml_mmap.data()); // whole xml subtree but the initial start tag
-      auto tmp_view = seg.subtree_str(view);     // merging together initial start tag and the rest of the xml tree
-      auto r        = parser->exec(tmp_view);    // make DOM document
+      if (ctx.logger) ctx.logger->trace(fmt::format("WORKER: {}\n'{}'", ctx.worker_id, seg.dump(ctx.xml_mmap.data())));
+      auto view     = seg.view(ctx.xml_mmap.data()); // whole xml subtree but the initial start tag
+      auto tmp_view = seg.subtree_str(view);         // merging together initial start tag and the rest of the xml tree
+      //      auto r        = parser->exec(tmp_view);    // make DOM document
+      auto r = extract_xml_values(tmp_view, res, ctx.logger);
 
       auto us = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - t0).count();
 
       if (r)
       { /// DOM parsing je ok r.value() vsebuje DOM drevo xercesc::DOMDocument*
         res.success = true;
-        if (logger)
-          logger->debug("Segment '{}' DOM processing '{}'µs (offset={}, len={})", seg.get_id(), us, seg.get_offset(), seg.get_length());
+        if (ctx.logger)
+          ctx.logger->debug("Segment '{}' DOM processing '{}'µs (offset={}, len={})", seg.get_id(), us, seg.get_offset(), seg.get_length());
         return res;
       }
 
       res.success       = false;
-      res.error_message = fmt::format("Parse error: {}", r.error().message);
-      if (logger) logger->warn("Segment {}: {} :: {}", seg.get_id(), res.error_message, seg.dump(xml_mmap.data()));
+      res.error_message = fmt::format("Parse error: {}", r.error().message());
+      if (ctx.logger) ctx.logger->warn("Segment {}: {} :: {}", seg.get_id(), res.error_message, seg.dump(ctx.xml_mmap.data()));
       return res;
     }
     catch (const std::exception& e)
     {
       res.success       = false;
       res.error_message = fmt::format("Exception in segment {}: '{}'", seg.get_id(), e.what());
-      if (logger) logger->error("{}", res.error_message);
+      if (ctx.logger) ctx.logger->error("{}", res.error_message);
       return res;
     }
   }
-
-  void xml_processor::worker_function([[maybe_unused]] const std::stop_token& st, int worker_id, [[maybe_unused]] worker_context ctx)
+  namespace
   {
-    if (ctx.logger) ctx.logger->debug(fmt::format("Worker {:02} established.", worker_id));
-    auto parser = std::make_unique<dom_parser>(ctx.logger, worker_id);
-    auto res    = parser->init();
-    if (! res)
+    struct XmlTextReaderDeleter
     {
-      auto msg = fmt::format("Error initializing worker '{:02}' dom parser: '{}'", worker_id, res.error().message);
-      if (ctx.logger)
+      void operator()(xmlTextReaderPtr reader) const
       {
-        ctx.logger->error(msg);
-        ctx.logger->debug(fmt::format("Worker {:02} finished.", worker_id));
+        if (reader != nullptr) { xmlFreeTextReader(reader); }
       }
-      return;
+    };
+    using UniqueXmlTextReader = std::unique_ptr<std::remove_pointer_t<xmlTextReaderPtr>, XmlTextReaderDeleter>;
+  } // namespace
+  result<segment_result> xml_processor::extract_xml_values(cstr_t                                 xml_buf,
+                                                           const segment_result&                  sr,
+                                                           const std::shared_ptr<spdlog::logger>& logger)
+  {
+    auto res = sr;
+    // NOLINTNEXTLINE(hicpp-signed-bitwise)
+    auto                flags = (XML_PARSE_NOCDATA | XML_PARSE_NOERROR | XML_PARSE_NOWARNING | XML_PARSE_NOBLANKS | XML_PARSE_NONET);
+    UniqueXmlTextReader reader(xmlReaderForMemory( //
+      xml_buf.data(),
+      static_cast<int>(xml_buf.size()),
+      nullptr,
+      nullptr,
+      flags));
+
+    int         read_status = xmlTextReaderRead(reader.get());
+    const char* local_name  = nullptr;
+    //  const char* ns_uri      = nullptr;
+    const char* value = nullptr;
+    while (read_status == 1)
+    { //
+      int  type      = xmlTextReaderNodeType(reader.get());
+      auto enum_type = static_cast<xmlReaderTypes>(type);
+      // auto type_name = magic_enum::enum_name(enum_type);
+      switch (enum_type)
+      {
+      case XML_READER_TYPE_ELEMENT: // start element
+      {
+        local_name = reinterpret_cast<const char*>(xmlTextReaderConstLocalName(reader.get()));
+        //        ns_uri     = reinterpret_cast<const char*>(xmlTextReaderConstNamespaceUri(reader.get()));
+        if (logger) logger->debug(fmt::format("start: {}", local_name));
+        break;
+      }
+      case XML_READER_TYPE_TEXT: // element value
+      {
+        value = reinterpret_cast<const char*>(xmlTextReaderConstValue(reader.get()));
+        if (logger) logger->debug(fmt::format("end  : {} val: {}", local_name, value));
+        break;
+      }
+      case XML_READER_TYPE_END_ELEMENT: // end element
+      {
+        if (logger) logger->debug(fmt::format("end  : {}", local_name));
+        break;
+      }
+      /// element types to be skipped
+      case XML_READER_TYPE_NONE:
+      case XML_READER_TYPE_ATTRIBUTE:
+      case XML_READER_TYPE_CDATA:
+      case XML_READER_TYPE_ENTITY_REFERENCE:
+      case XML_READER_TYPE_ENTITY:
+      case XML_READER_TYPE_PROCESSING_INSTRUCTION:
+      case XML_READER_TYPE_COMMENT:
+      case XML_READER_TYPE_DOCUMENT:
+      case XML_READER_TYPE_DOCUMENT_TYPE:
+      case XML_READER_TYPE_DOCUMENT_FRAGMENT:
+      case XML_READER_TYPE_NOTATION:
+      case XML_READER_TYPE_WHITESPACE:
+      case XML_READER_TYPE_SIGNIFICANT_WHITESPACE:
+      case XML_READER_TYPE_END_ENTITY:
+      case XML_READER_TYPE_XML_DECLARATION: [[fallthrough]];
+      default:
+        auto type_name = magic_enum::enum_name(enum_type);
+        if (logger) logger->debug(fmt::format("nonprocessed: {} {}", type_name, type));
+      }
+      read_status = xmlTextReaderRead(reader.get());
     }
+    res.success = read_status != -1; // FIXME ostri samo da se prevede. popravi, da bo ok.
+    return res;
+  }
+
+  void xml_processor::worker_function( //
+    [[maybe_unused]] const std::stop_token& st,
+    int                                     worker_id,
+    [[maybe_unused]] worker_context         ctx)
+  {
+    log_thread_name = fmt::format("wrk{:02}", worker_id);
+    if (ctx.logger) ctx.logger->info("Worker thread '{}' started.", log_thread_name);
+    ctx.worker_id = worker_id;
+    //    auto parser   = std::make_unique<dom_parser>(ctx.logger, worker_id);
+    //    auto res    = parser->init();
+    // if (! res)
+    // {
+    //   auto msg = fmt::format("Error initializing worker '{:02}' dom parser: '{}'", worker_id, res.error().message);
+    //   if (ctx.logger)
+    //   {
+    //     ctx.logger->error(msg);
+    //     ctx.logger->debug(fmt::format("Worker {:02} finished.", worker_id));
+    //   }
+    //   return;
+    // }
     while (! st.stop_requested() && ! ctx.cancel_flag.load())
     {
       xml_segment seg{};
       if (! ctx.seg_queue.pop(seg)) break;
 
-      auto res = process_segment(worker_id, seg, ctx.xml_mmap, ctx.logger, parser.get());
+      //      auto res = process_segment(worker_id, seg, ctx.xml_mmap, ctx.logger, parser.get());
+      auto res = process_segment(ctx, seg);
 
       if (res)
       {
@@ -255,8 +412,8 @@ namespace fsp
         ctx.error_count++; // do we need errors per thread?
       }
     }
-    auto x = parser->done();
-    if (! x && ctx.logger) ctx.logger->error(fmt::format("Error releasing dom parser: '{}'", x.error().message));
+    // auto x = parser->done();
+    // if (! x && ctx.logger) ctx.logger->error(fmt::format("Error releasing dom parser: '{}'", x.error().message));
     if (ctx.logger) ctx.logger->debug(fmt::format("Worker {:02} finished.", worker_id));
   }
 
@@ -282,6 +439,7 @@ namespace fsp
     }
 
     worker_context ctx{
+      .worker_id       = -1,
       .seg_queue       = seg_queue_,
       .xml_mmap        = *active_mmap_,
       .results         = results_,

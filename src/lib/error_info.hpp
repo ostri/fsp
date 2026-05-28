@@ -8,6 +8,7 @@
 
 namespace fsp
 {
+  using cstr_t = std::string_view;
   // Error types for expected<T>
   enum class processor_error : std::uint8_t
   {
@@ -26,7 +27,11 @@ namespace fsp
   {
   public:
     error_info(processor_error code, std::string msg, std::string_view path, size_t line);
-    [[nodiscard]] std::string to_string() const;
+    [[nodiscard]] std::string     to_string() const;
+    [[nodiscard]] cstr_t          message() const;
+    [[nodiscard]] processor_error code() const;
+    [[nodiscard]] cstr_t          path() const;
+    [[nodiscard]] size_t          line() const;
   private:
     processor_error code_;
     std::string     message_;
