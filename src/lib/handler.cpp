@@ -225,7 +225,10 @@ namespace fsp
   // endElement
   // ============================================================================
 
-  void Handler::endElement([[maybe_unused]] const XMLCh* uri, [[maybe_unused]] const XMLCh* localname, [[maybe_unused]] const XMLCh* qname)
+  void Handler::endElement( //
+    [[maybe_unused]] const XMLCh* uri,
+    [[maybe_unused]] const XMLCh* localname,
+    [[maybe_unused]] const XMLCh* qname)
   {
     if (capturing_)
     {
@@ -234,8 +237,13 @@ namespace fsp
       { // fragment is finished. wrap it up and send it to the workers
         std::size_t end_offset = parser_->getSrcOffset();
         std::size_t length     = end_offset - frag_start_offset_;
-        if (logger_) logger_->trace("{} offset: {} len {} prefix '{}'", x_str(qname).to_string(), frag_start_offset_, length, prefix_);
-        queue_.push(xml_segment(counter_++, active_idx_, frag_start_offset_, length, prefix_));
+        if (logger_)
+        {
+          logger_->debug("pushing to queue:{} type: {} segment: {}", x_str(qname).to_string(), active_idx_, counter_);
+          logger_->trace("{} offset: {} len {} prefix '{}'", x_str(qname).to_string(), frag_start_offset_, length, prefix_);
+        }
+        queue_.push(xml_segment(counter_, active_idx_, frag_start_offset_, length, prefix_));
+        counter_++;
         //        if (logger_) logger_->trace(fmt::format("subtree: '{}'", base_addr_.substr(frag_start_offset_, length)));
         capturing_  = false;
         active_idx_ = -1;

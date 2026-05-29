@@ -28,15 +28,18 @@ namespace fsp
             std::string_view                base_addr);
 
     // --- SAX2 ContentHandler ---
-    void startPrefixMapping(const XMLCh* prefix, const XMLCh* uri) override;
+    void startPrefixMapping( //
+      const XMLCh* prefix,
+      const XMLCh* uri) override;
     void endPrefixMapping(const XMLCh* prefix) override;
     void startElement(const XMLCh*                  uri,
                       [[maybe_unused]] const XMLCh* localname,
                       [[maybe_unused]] const XMLCh* qname,
                       const xercesc::Attributes&    attrs) override;
-    void endElement([[maybe_unused]] const XMLCh* uri,
-                    [[maybe_unused]] const XMLCh* localname,
-                    [[maybe_unused]] const XMLCh* qname) override;
+    void endElement( //
+      [[maybe_unused]] const XMLCh* uri,
+      [[maybe_unused]] const XMLCh* localname,
+      [[maybe_unused]] const XMLCh* qname) override;
     //    void characters([[maybe_unused]] const XMLCh* chars, [[maybe_unused]] XMLSize_t length) override;
     // --- SAX2 ErrorHandler ---
     void warning(const xercesc::SAXParseException& e) override;
