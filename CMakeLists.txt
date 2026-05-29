@@ -117,6 +117,7 @@ set(${b_target}_SOURCES
     ${CMAKE_SOURCE_DIR}/src/lib/common.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/dom_parser.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/dom_handler.cpp
+    ${CMAKE_SOURCE_DIR}/src/lib/parsing_util.cpp
 )
 # Additional libraries for main program
 set(FSP_TARGET_${PROJECT_NAME}_LIBS
@@ -163,6 +164,7 @@ add_fsp_target(${b_target} EXECUTABLE ${${b_target}_SOURCES})
 set(b_target test_pars) # name of the target
 set(${b_target}_SOURCES
     ${CMAKE_SOURCE_DIR}/src/test/test_pars.cpp
+    ${CMAKE_SOURCE_DIR}/src/lib/parsing_util.cpp
 )
 set(FSP_TARGET_${b_target}_INCLUDES
   ${CMAKE_SOURCE_DIR}/src/lib

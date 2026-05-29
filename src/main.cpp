@@ -33,7 +33,7 @@ int main(int argc, char* argv[])
     {.prefix = "xy", .uri = "krneki"},      // explicitly defined namespace and prefix
   });
 
-  static constexpr fsp::raw_inputs_container raw = std::to_array<fsp::raw_attr>({
+  static constexpr auto raw = std::to_array<fsp::raw_attr>({
     {.name="txn_id",          .path="CdtTrfTxInf/PmtId/TxId"},
     {.name="debtor_.iban_",   .path="CdtTrfTxInf/DbtrAcct/Id/IBAN"},
     {.name="debtor_.bic_",    .path="CdtTrfTxInf/DbtrAgt/FinInstnId/BICFI"},
@@ -45,9 +45,9 @@ int main(int argc, char* argv[])
     {.name="remmitance_",     .path="CdtTrfTxInf/RmtInf/Strd/RfrdDocInf/*Nb", .is_opt=true},
   });
     // clang-format on
-    static constexpr auto xtn = fsp::build<raw, NS>(); // xml tree node(s)
-    static_assert(xtn.size() == raw.size(), "The sizes must be equal");
-    // Configure logging
+    static const auto xtn = fsp::build(raw, NS); // xml tree node(s)
+    // static_assert(xtn.size() == raw.size(), "The sizes must be equal");
+    //  Configure logging
     fsp::logger_config log_cfg{.enable_console = true,
                                .enable_file    = true,
                                .log_file_path  = "xml_processor.log",
