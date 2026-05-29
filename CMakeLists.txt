@@ -1,6 +1,12 @@
 cmake_minimum_required(VERSION 3.10)
 project(fsp LANGUAGES CXX)
 
+#
+# for profiling
+# cmake -B build-profile -DCMAKE_BUILD_TYPE=Profile
+# cmake --build build-profile --target fsp
+#
+
 # --- 1. General project settings ---
 set(CMAKE_CXX_STANDARD 26)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -10,6 +16,8 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON CACHE BOOL "" FORCE)
 if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE "Debug" CACHE STRING "Choose build type" FORCE)
 endif()
+
+set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "Debug" "Release" "Profile")
 
 # --- 2. Common compilation and linking parameters ---
 if(MSVC)
@@ -28,6 +36,15 @@ else()
         "-fno-omit-frame-pointer"
     )
     set(COMMON_LINK_FLAGS "-fsanitize=address,undefined,leak")
+    set(COMMON_PROFILE_FLAGS
+    "-Wall" "-Wextra" "-Wpedantic"
+    "-Wnarrowing" "-Wswitch-enum"
+    "-O2"
+    "-g" "-gdwarf-4"
+    "-fno-omit-frame-pointer"
+    "-pg"
+    )
+    set(COMMON_PROFILE_LINK_FLAGS "-pg")
 endif()
 
 # --- 3. Find required packages ---
@@ -61,6 +78,11 @@ function(add_fsp_target TARGET_NAME TYPE)
     # Compile options based on build type
     if(CMAKE_BUILD_TYPE STREQUAL "Release")
         target_compile_options(${TARGET_NAME} PRIVATE ${COMMON_RELEASE_FLAGS})
+    elseif(CMAKE_BUILD_TYPE STREQUAL "Profile")
+        target_compile_options(${TARGET_NAME} PRIVATE ${COMMON_PROFILE_FLAGS})
+        if(NOT TYPE STREQUAL "STATIC")
+            target_link_options(${TARGET_NAME} PRIVATE ${COMMON_PROFILE_LINK_FLAGS})
+        endif()
     else()
         target_compile_options(${TARGET_NAME} PRIVATE ${COMMON_DEBUG_FLAGS})
         if(NOT TYPE STREQUAL "STATIC")  # Only for executable and shared library
@@ -72,6 +94,7 @@ function(add_fsp_target TARGET_NAME TYPE)
     target_compile_definitions(${TARGET_NAME} PRIVATE
         $<$<CONFIG:Debug>:DEBUG_MODE>
         $<$<CONFIG:Release>:RELEASE_MODE>
+        $<$<CONFIG:Profile>:RELEASE_MODE>
     )
 
     # Link with external libraries if provided
