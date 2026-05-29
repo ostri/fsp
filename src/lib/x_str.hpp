@@ -40,7 +40,7 @@ namespace fsp
     [[nodiscard]] bool           empty() const noexcept;
     [[nodiscard]] std::size_t    length() const noexcept;
   private:
-    XMLCh* m_data = nullptr;
+    XMLCh* data_ = nullptr;
   };
 } // namespace fsp
 

@@ -32,8 +32,7 @@ int main(int argc, char* argv[])
     {.prefix = "",   .uri = "urn:iso:std:iso:20022:tech:xsd:pacs.008.001.10"}, // default namespace
     {.prefix = "xy", .uri = "krneki"},      // explicitly defined namespace and prefix
   });
-
-  static constexpr auto raw = std::to_array<fsp::raw_attr>({
+  static constexpr auto xpath_hdr = std::to_array<fsp::raw_attr>({
     {.name="txn_id",          .path="CdtTrfTxInf/PmtId/TxId"},
     {.name="debtor_.iban_",   .path="CdtTrfTxInf/DbtrAcct/Id/IBAN"},
     {.name="debtor_.bic_",    .path="CdtTrfTxInf/DbtrAgt/FinInstnId/BICFI"},
@@ -42,23 +41,36 @@ int main(int argc, char* argv[])
     {.name="amount_",         .path="CdtTrfTxInf/IntrBkSttlmAmt"},
     {.name="currency_",       .path="CdtTrfTxInf/IntrBkSttlmAmt/@Ccy",        .is_opt=true},
     {.name="value_date_",     .path="CdtTrfTxInf/IntrBkSttlmDt",              .is_opt=true},
-    {.name="remmitance_",     .path="CdtTrfTxInf/RmtInf/Strd/RfrdDocInf/*Nb", .is_opt=true},
+    {.name="remittance_",     .path="CdtTrfTxInf/RmtInf/Strd/RfrdDocInf/*Nb", .is_opt=true},
+  });
+    static const auto hdr = fsp::build(xpath_hdr, NS); // xml tree node(s)
+
+  static constexpr auto xpath_txn = std::to_array<fsp::raw_attr>({
+    {.name="txn_id",          .path="CdtTrfTxInf/PmtId/TxId"},
+    {.name="debtor_.iban_",   .path="CdtTrfTxInf/DbtrAcct/Id/IBAN"},
+    {.name="debtor_.bic_",    .path="CdtTrfTxInf/DbtrAgt/FinInstnId/BICFI"},
+    {.name="creditor_.iban_", .path="CdtTrfTxInf/CdtrAcct/Id/IBAN"},
+    {.name="creditor_.bic_",  .path="CdtTrfTxInf/CdtrAgt/FinInstnId/BICFI"},
+    {.name="amount_",         .path="CdtTrfTxInf/IntrBkSttlmAmt"},
+    {.name="currency_",       .path="CdtTrfTxInf/IntrBkSttlmAmt/@Ccy",        .is_opt=true},
+    {.name="value_date_",     .path="CdtTrfTxInf/IntrBkSttlmDt",              .is_opt=true},
+    {.name="remittance_",     .path="CdtTrfTxInf/RmtInf/Strd/RfrdDocInf/*Nb", .is_opt=true},
   });
     // clang-format on
-    static const auto xtn = fsp::build(raw, NS); // xml tree node(s)
+    static const auto xtn = fsp::build(xpath_txn, NS); // xml tree node(s)
     // static_assert(xtn.size() == raw.size(), "The sizes must be equal");
     //  Configure logging
     fsp::logger_config log_cfg{.enable_console = true,
                                .enable_file    = true,
                                .log_file_path  = "xml_processor.log",
-                               .log_level      = spdlog::level::debug, // spdlog::level::info;
+                               .log_level      = spdlog::level::info, // spdlog::level::info;
                                .logger_name    = "main_app"};
 
     auto result = fsp::process_xml_file( //
       xml_file,                          // path to the xml file
       xsd_file,                          // path to the xsd file that xml file must comply with
       xpath_strings,                     // array of xpaths that define split points of the xml tree
-      1,                                 // number of workers that process the xml file in parallel
+      1,                                 // number of workers that process the xml file in parallel (0=all)
       log_cfg                            // configuration of logging
     );
 

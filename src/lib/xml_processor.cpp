@@ -11,6 +11,7 @@
 #include <stack>
 #include <thread>
 #include <libxml/xmlreader.h>
+#include <algorithm>
 
 namespace fsp
 {
@@ -394,25 +395,11 @@ namespace fsp
     log_thread_name = fmt::format("wrk{:02}", worker_id);
     if (ctx.logger) ctx.logger->info("Worker thread '{}' started.", log_thread_name);
     ctx.worker_id = worker_id;
-    //    auto parser   = std::make_unique<dom_parser>(ctx.logger, worker_id);
-    //    auto res    = parser->init();
-    // if (! res)
-    // {
-    //   auto msg = fmt::format("Error initializing worker '{:02}' dom parser: '{}'", worker_id, res.error().message);
-    //   if (ctx.logger)
-    //   {
-    //     ctx.logger->error(msg);
-    //     ctx.logger->debug(fmt::format("Worker {:02} finished.", worker_id));
-    //   }
-    //   return;
-    // }
-    // while (! st.stop_requested() && ! ctx.cancel_flag.load())
+
     while (! ctx.cancel_flag.load())
     {
       xml_segment seg{};
       if (! ctx.seg_queue.pop(seg)) break;
-
-      //      auto res = process_segment(worker_id, seg, ctx.xml_mmap, ctx.logger, parser.get());
       auto res = process_segment(ctx, seg);
 
       if (res)
@@ -444,7 +431,7 @@ namespace fsp
     }
     // auto x = parser->done();
     // if (! x && ctx.logger) ctx.logger->error(fmt::format("Error releasing dom parser: '{}'", x.error().message));
-    if (ctx.logger) ctx.logger->debug(fmt::format("Worker {:02} finished.", worker_id));
+    if (ctx.logger) ctx.logger->info("Worker thread '{}' finished.", log_thread_name);
   }
 
   void_result xml_processor::start_workers()

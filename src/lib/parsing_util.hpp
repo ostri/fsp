@@ -38,31 +38,6 @@ namespace fsp
     cstr_t uri;
   };
 
-  // // --- xpath element ------------------------------------------------------------------
-  // struct xpath_el
-  // {
-  //   cstr_t ns;
-  //   cstr_t tag;
-  // };
-
-  // class static_xpath_vector
-  // {
-  //   static_xpath_vector() = default;
-  //   const xpath_el& operator[](std::size_t ndx) const { return arr.at(ndx); }
-  //   xpath_el&       operator[](std::size_t ndx) { return arr.at(ndx); }
-
-  //   xpath_el& emplace_back(const xpath_el& el)
-  //   {
-  //     arr.at(size_) = el;
-  //     return arr.at(size_++);
-  //   }
-  //   [[nodiscard]] auto size() const { return size_; }
-  // private:
-  //   static const std::size_t            max_xpath_len = 50U;
-  //   std::size_t                         size_         = 0;
-  //   std::array<xpath_el, max_xpath_len> arr;
-  // };
-
   // --- raw attribute definition (compile-time) ----------------------------------------
   struct raw_attr
   {
@@ -133,10 +108,10 @@ namespace fsp
   };
 
   // --- main structure (non-templated) -------------------------------------------------
-  class path_node_struct
+  class xpath_node_struct
   {
   public:
-    constexpr path_node_struct(raw_inputs inputs, std::span<const ns> ns_arr);
+    constexpr xpath_node_struct(raw_inputs inputs, std::span<const ns> ns_arr);
 
     [[nodiscard]] constexpr const xml_attr& operator[](std::size_t ndx) const { return data_.at(ndx); }
     [[nodiscard]] constexpr const xml_attr& operator[](cstr_t name) const;
@@ -146,17 +121,15 @@ namespace fsp
     [[nodiscard]] constexpr std::size_t size() const { return data_.size(); }
     [[nodiscard]] constexpr std::size_t max_xpath_size() const { return max_xpath_size_; }
 
-    //[[nodiscard]] constexpr cstr_t first_xpath_tag_name(std::size_t depth) const;
-
     [[nodiscard]] constexpr cstr_t last_xpath_tag_name(std::size_t depth) const;
     [[nodiscard]] constexpr cstr_t first_xpath_tag_name(std::size_t depth) const;
   private:
     std::vector<xml_attr> data_;
     std::size_t           max_xpath_size_ = 0;
   };
-
+  ///////////////////////////////////////////////////////////////////////////////////////////////////////
   // Build function
-  [[nodiscard]] constexpr path_node_struct build(raw_inputs raw_paths, std::span<const ns> ns_arr) //
+  [[nodiscard]] constexpr xpath_node_struct build(raw_inputs raw_paths, std::span<const ns> ns_arr) //
   { return {raw_paths, ns_arr}; }
   // xml_attr
   constexpr xml_attr::xml_attr(const raw_attr& raw, std::span<const ns> ns_arr)
@@ -245,7 +218,7 @@ namespace fsp
   }
 
   // path_node_struct
-  constexpr path_node_struct::path_node_struct(raw_inputs inputs, std::span<const ns> ns_arr)
+  constexpr xpath_node_struct::xpath_node_struct(raw_inputs inputs, std::span<const ns> ns_arr)
   {
     data_.reserve(inputs.size());
     std::size_t max_d = 0;
@@ -262,7 +235,7 @@ namespace fsp
     std::ranges::sort(data_, [](const xml_attr& a, const xml_attr& b) { return a.path() < b.path(); });
   }
 
-  [[nodiscard]] constexpr const xml_attr& path_node_struct::operator[](cstr_t name) const
+  [[nodiscard]] constexpr const xml_attr& xpath_node_struct::operator[](cstr_t name) const
   {
     for (const auto& el : data_)
       if (el.name() == name) return el;
@@ -270,7 +243,7 @@ namespace fsp
     throw compile_error(fmt::format("unknown path '{}'.", name).data());
   }
 
-  [[nodiscard]] constexpr cstr_t path_node_struct::last_xpath_tag_name(std::size_t depth) const
+  [[nodiscard]] constexpr cstr_t xpath_node_struct::last_xpath_tag_name(std::size_t depth) const
   {
     if (depth >= max_xpath_size_) throw compile_error(fmt::format("depth {} exceeds max xpath depth {}", depth, max_xpath_size_).data());
 
@@ -284,7 +257,7 @@ namespace fsp
     return res;
   }
 
-  [[nodiscard]] constexpr cstr_t path_node_struct::first_xpath_tag_name(std::size_t depth) const
+  [[nodiscard]] constexpr cstr_t xpath_node_struct::first_xpath_tag_name(std::size_t depth) const
   {
     if (depth >= max_xpath_size_) throw compile_error(fmt::format("depth {} exceeds max xpath depth {}", depth, max_xpath_size_).data());
 
