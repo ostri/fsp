@@ -18,7 +18,7 @@
 #include <xercesc/sax2/XMLReaderFactory.hpp>
 
 // #include "e_tag.hpp"
-#include "dom_parser.hpp"
+// #include "dom_parser.hpp"
 #include "error_info.hpp"
 #include "handler.hpp"
 #include "logger_config.hpp"
@@ -28,6 +28,7 @@
 #include "queue.hpp"
 #include "xerces_mgr.hpp"
 #include "xpath_helpers.hpp"
+#include "parsing_util.hpp"
 
 namespace fsp
 {
@@ -41,6 +42,7 @@ namespace fsp
   };
 
   // 1. Global thread-local variable (each thread gets its own isolated instance)
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables, cert-err58-cpp)
   inline thread_local std::string log_thread_name = "unknown";
 
   // 2. Formatter class that reads the current thread's name
@@ -151,9 +153,11 @@ namespace fsp
     //                                               const std::shared_ptr<spdlog::logger>& logger,
     //                                               dom_parser*                            parser);
     static result<segment_result> process_segment([[maybe_unused]] const worker_context& ctx, const xml_segment& seg);
-    static result<segment_result> extract_xml_values(cstr_t                                 xml_buf,
-                                                     const segment_result&                  sr,
-                                                     const std::shared_ptr<spdlog::logger>& logger);
+    static result<segment_result> extract_xml_values( //
+      cstr_t                                 xml_buf,
+      const segment_result&                  sr,
+      const xml_segment&                     seg,
+      [[maybe_unused]] const worker_context& ctx);
     void                          log_error(const error_info& error);
     void                          log_info(const std::string& msg);
     void                          log_debug(const std::string& msg);

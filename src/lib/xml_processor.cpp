@@ -8,6 +8,7 @@
 #include <magic_enum.hpp>
 // #include <pugixml.hpp>
 #include <spdlog/spdlog.h>
+#include <stack>
 #include <thread>
 #include <libxml/xmlreader.h>
 
@@ -237,7 +238,9 @@ namespace fsp
    *  and yields control to user provided function for further processing.
    *  upon the result from user supplied function it adjustes normal or error queue.
    */
-  result<segment_result> xml_processor::process_segment([[maybe_unused]] const worker_context& ctx, const xml_segment& seg)
+  result<segment_result> xml_processor::process_segment( //
+    [[maybe_unused]] const worker_context& ctx,
+    const xml_segment&                     seg)
   // const fsp::mmap_file&                  xml_mmap)
   {
     segment_result res;
@@ -248,11 +251,15 @@ namespace fsp
 
     try
     {
-      if (ctx.logger) ctx.logger->trace(fmt::format("WORKER: {}\n'{}'", ctx.worker_id, seg.dump(ctx.xml_mmap.data())));
+      if (ctx.logger)
+      {
+        ctx.logger->debug(fmt::format("seg:{} started ", seg.get_id()));
+        ctx.logger->trace(fmt::format("'{}'", seg.dump(ctx.xml_mmap.data())));
+      }
       auto view     = seg.view(ctx.xml_mmap.data()); // whole xml subtree but the initial start tag
       auto tmp_view = seg.subtree_str(view);         // merging together initial start tag and the rest of the xml tree
       //      auto r        = parser->exec(tmp_view);    // make DOM document
-      auto r = extract_xml_values(tmp_view, res, ctx.logger);
+      auto r = extract_xml_values(tmp_view, res, seg, ctx);
 
       auto us = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - t0).count();
 
@@ -260,7 +267,11 @@ namespace fsp
       { /// DOM parsing je ok r.value() vsebuje DOM drevo xercesc::DOMDocument*
         res.success = true;
         if (ctx.logger)
-          ctx.logger->debug("Segment '{}' DOM processing '{}'µs (offset={}, len={})", seg.get_id(), us, seg.get_offset(), seg.get_length());
+          ctx.logger->debug("Segment '{}' DOM processing finished '{}'µs (offset={}, len={})", //
+                            seg.get_id(),
+                            us,
+                            seg.get_offset(),
+                            seg.get_length());
         return res;
       }
 
@@ -287,14 +298,28 @@ namespace fsp
       }
     };
     using UniqueXmlTextReader = std::unique_ptr<std::remove_pointer_t<xmlTextReaderPtr>, XmlTextReaderDeleter>;
+
+    struct xml_node
+    {
+      std::string uri;
+      std::string tag;
+    };
   } // namespace
-  result<segment_result> xml_processor::extract_xml_values(cstr_t                                 xml_buf,
-                                                           const segment_result&                  sr,
-                                                           const std::shared_ptr<spdlog::logger>& logger)
+
+  result<segment_result> xml_processor::extract_xml_values( //
+    cstr_t                                 xml_buf,
+    const segment_result&                  sr,
+    const xml_segment&                     seg,
+    [[maybe_unused]] const worker_context& ctx)
   {
     auto res = sr;
     // NOLINTNEXTLINE(hicpp-signed-bitwise)
-    auto                flags = (XML_PARSE_NOCDATA | XML_PARSE_NOERROR | XML_PARSE_NOWARNING | XML_PARSE_NOBLANKS | XML_PARSE_NONET);
+    auto flags = (XML_PARSE_NOCDATA |   //
+                  XML_PARSE_NOERROR |   //
+                  XML_PARSE_NOWARNING | //
+                  XML_PARSE_NOBLANKS |  //
+                  XML_PARSE_NONET);     //
+
     UniqueXmlTextReader reader(xmlReaderForMemory( //
       xml_buf.data(),
       static_cast<int>(xml_buf.size()),
@@ -302,11 +327,12 @@ namespace fsp
       nullptr,
       flags));
 
-    int         read_status = xmlTextReaderRead(reader.get());
-    const char* local_name  = nullptr;
-    //  const char* ns_uri      = nullptr;
-    const char* value = nullptr;
-    while (read_status == 1)
+    int                  read_status;
+    const char*          value = nullptr;
+    auto                 depth = 0UL; // no depth before the processing starts
+    const char           pad   = '.';
+    std::stack<xml_node> stack; // current tag and uri
+    while ((read_status = xmlTextReaderRead(reader.get())) == 1)
     { //
       int  type      = xmlTextReaderNodeType(reader.get());
       auto enum_type = static_cast<xmlReaderTypes>(type);
@@ -315,20 +341,23 @@ namespace fsp
       {
       case XML_READER_TYPE_ELEMENT: // start element
       {
-        local_name = reinterpret_cast<const char*>(xmlTextReaderConstLocalName(reader.get()));
-        //        ns_uri     = reinterpret_cast<const char*>(xmlTextReaderConstNamespaceUri(reader.get()));
-        if (logger) logger->debug(fmt::format("start: {}", local_name));
+        stack.emplace(reinterpret_cast<const char*>(xmlTextReaderConstNamespaceUri(reader.get())),
+                      reinterpret_cast<const char*>(xmlTextReaderConstLocalName(reader.get())));
+        if (ctx.logger) ctx.logger->debug(fmt::format("seg:{:5}{}{}", seg.get_id(), std::string(depth * 2, pad), stack.top().tag));
+        depth++;
         break;
       }
       case XML_READER_TYPE_TEXT: // element value
       {
         value = reinterpret_cast<const char*>(xmlTextReaderConstValue(reader.get()));
-        if (logger) logger->debug(fmt::format("end  : {} val: {}", local_name, value));
+        if (ctx.logger) ctx.logger->debug(fmt::format("seg:{:5}{}{}", seg.get_id(), std::string(depth * 2, pad), value));
         break;
       }
       case XML_READER_TYPE_END_ELEMENT: // end element
       {
-        if (logger) logger->debug(fmt::format("end  : {}", local_name));
+        depth--;
+        if (ctx.logger) ctx.logger->debug(fmt::format("seg:{:5}{}/{}", seg.get_id(), std::string(depth * 2, pad), stack.top().tag));
+        stack.pop();
         break;
       }
       /// element types to be skipped
@@ -349,9 +378,9 @@ namespace fsp
       case XML_READER_TYPE_XML_DECLARATION: [[fallthrough]];
       default:
         auto type_name = magic_enum::enum_name(enum_type);
-        if (logger) logger->debug(fmt::format("nonprocessed: {} {}", type_name, type));
+        if (ctx.logger) ctx.logger->debug(fmt::format("nonprocessed: {} {}", type_name, type));
       }
-      read_status = xmlTextReaderRead(reader.get());
+      // read_status = xmlTextReaderRead(reader.get());
     }
     res.success = read_status != -1; // FIXME ostri samo da se prevede. popravi, da bo ok.
     return res;
@@ -377,7 +406,8 @@ namespace fsp
     //   }
     //   return;
     // }
-    while (! st.stop_requested() && ! ctx.cancel_flag.load())
+    // while (! st.stop_requested() && ! ctx.cancel_flag.load())
+    while (! ctx.cancel_flag.load())
     {
       xml_segment seg{};
       if (! ctx.seg_queue.pop(seg)) break;

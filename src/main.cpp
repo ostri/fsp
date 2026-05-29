@@ -3,15 +3,16 @@
 #include <vector>
 #include "xml_processor.hpp"
 #include <fmt/format.h>
+#include "parsing_util.hpp"
 
 
 int main(int argc, char* argv[])
 {
   std::vector<std::string> args(argv, argv + argc); // NOLINT (cppcoreguidelines-pro-bounds-pointer-arithmetic)
-  if (argc < 4)
+  if (argc != 3)
   {
-    static constexpr auto* msg = "Usage: {0} <xml_file> <xsd_file> <xpath1> [xpath2 ...]\n"
-                                 "Example: {0} data.xml schema.xsd /root/item /root/other\n";
+    static constexpr auto* msg = "Usage: {0} <xml_file> <xsd_file> \n"
+                                 "Example: {0} data.xml schema.xsd \n";
     std::cerr << fmt::format(msg, args[0]);
     return 1;
   }
@@ -22,25 +23,44 @@ int main(int argc, char* argv[])
     const std::string& xsd_file = args[2];
 
     std::vector<std::string> xpath_strings;
-    for (int i = 3; i < argc; ++i) { xpath_strings.push_back(args[i]); }
 
-    xpath_strings.clear(); // da ne delam na roko
-    xpath_strings.emplace_back("/Document/FIToFICstmrCdtTrf/GrpHdr");
-    xpath_strings.emplace_back("/Document/FIToFICstmrCdtTrf/CdtTrfTxInf");
+    xpath_strings.emplace_back("/Document/FIToFICstmrCdtTrf/GrpHdr");      // header
+    xpath_strings.emplace_back("/Document/FIToFICstmrCdtTrf/CdtTrfTxInf"); // transaction
 
+    // clang-format off
+  static constexpr auto NS = std::to_array<fsp::ns>({
+    {.prefix = "",   .uri = "urn:iso:std:iso:20022:tech:xsd:pacs.008.001.10"}, // default namespace
+    {.prefix = "xy", .uri = "krneki"},      // explicitly defined namespace and prefix
+  });
+
+  static constexpr fsp::raw_inputs_container raw = std::to_array<fsp::raw_attr>({
+    {.name="txn_id",          .path="CdtTrfTxInf/PmtId/TxId"},
+    {.name="debtor_.iban_",   .path="CdtTrfTxInf/DbtrAcct/Id/IBAN"},
+    {.name="debtor_.bic_",    .path="CdtTrfTxInf/DbtrAgt/FinInstnId/BICFI"},
+    {.name="creditor_.iban_", .path="CdtTrfTxInf/CdtrAcct/Id/IBAN"},
+    {.name="creditor_.bic_",  .path="CdtTrfTxInf/CdtrAgt/FinInstnId/BICFI"},
+    {.name="amount_",         .path="CdtTrfTxInf/IntrBkSttlmAmt"},
+    {.name="currency_",       .path="CdtTrfTxInf/IntrBkSttlmAmt/@Ccy",        .is_opt=true},
+    {.name="value_date_",     .path="CdtTrfTxInf/IntrBkSttlmDt",              .is_opt=true},
+    {.name="remmitance_",     .path="CdtTrfTxInf/RmtInf/Strd/RfrdDocInf/*Nb", .is_opt=true},
+  });
+    // clang-format on
+    static constexpr auto xtn = fsp::build<raw, NS>(); // xml tree node(s)
+    static_assert(xtn.size() == raw.size(), "The sizes must be equal");
     // Configure logging
-    fsp::logger_config log_cfg;
-    log_cfg.enable_console = true;
-    log_cfg.enable_file    = true;
-    log_cfg.log_file_path  = "xml_processor.log";
-    log_cfg.log_level      = spdlog::level::debug; // spdlog::level::info;
-    log_cfg.logger_name    = "main_app";
+    fsp::logger_config log_cfg{.enable_console = true,
+                               .enable_file    = true,
+                               .log_file_path  = "xml_processor.log",
+                               .log_level      = spdlog::level::debug, // spdlog::level::info;
+                               .logger_name    = "main_app"};
 
-    fsp::xerces_mgr ctx; // xercesc context
-    // all available workers
-    //    auto result = fsp::process_xml_file(xml_file, xsd_file, xpath_strings, 0, log_cfg);
-    // only one worker
-    auto result = fsp::process_xml_file(xml_file, xsd_file, xpath_strings, 1, log_cfg);
+    auto result = fsp::process_xml_file( //
+      xml_file,                          // path to the xml file
+      xsd_file,                          // path to the xsd file that xml file must comply with
+      xpath_strings,                     // array of xpaths that define split points of the xml tree
+      1,                                 // number of workers that process the xml file in parallel
+      log_cfg                            // configuration of logging
+    );
 
     if (! result)
     {
