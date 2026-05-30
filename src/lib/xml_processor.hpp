@@ -8,6 +8,10 @@
 #include <string>
 #include <vector>
 
+// [DODANO] future/promise/optional za asinhrono validacijo
+#include <future>
+#include <optional>
+
 #include <fmt/format.h>
 #include <magic_enum.hpp>
 #include <spdlog/sinks/basic_file_sink.h>
@@ -136,22 +140,37 @@ namespace fsp
     const fsp::mmap_file* active_mmap_ = nullptr;
 
     void        setup_logger();
-    void_result setup_parser();
+
+    // [SPREMENJENO] setup_parser() razdeljen na dve funkciji:
+    // - setup_parser_no_validation(): za SAX nit — brez validacijskih featureov,
+    //   ker validacija teče v svoji niti z lastnim parserjem. fgCalculateSrcOfs
+    //   mora ostati vklopljen ker Handler potrebuje byte offsete.
+    // - setup_validation_parser(): za validacijsko nit — z vsemi XSD featurji,
+    //   brez fgCalculateSrcOfs ker offseti niso potrebni (zmanjša overhead).
+    // Stara setup_parser() je bila kombinacija obeh in se ne more več uporabiti
+    // ko sta niti ločeni.
+    void_result setup_parser_no_validation();
+
     void_result setup_validation(fsp::mmap_file& xsd_mmap);
     void_result setup_validation_from_buffer(const void* data, std::size_t size, std::string_view schema_name);
     void_result start_workers();
     void        stop_workers();
+
+    // [DODANO] Zažene validacijo v ločeni niti. Vrne future ki se razreši z
+    // nullopt (ok) ali error_info (napaka). Klic je neblokirajočen — validacija
+    // teče vzporedno s SAX parsingom. Če XSD ni podan, future se takoj razreši
+    // z nullopt da ostala koda ne rabi ločevati med "validacija vklopljena" in
+    // "validacija izklopljena".
+    std::shared_future<std::optional<error_info>> launch_validation_thread(
+      const void* xml_data, std::size_t xml_size,
+      const void* xsd_data, std::size_t xsd_size,
+      std::string xsd_path);
 
     static void worker_function( //
       [[maybe_unused]] const std::stop_token& st,
       int                                     worker_id,
       [[maybe_unused]] worker_context         ctx);
 
-    // static result<segment_result> process_segment(int                                    worker_id,
-    //                                               const xml_segment&                     seg,
-    //                                               const fsp::mmap_file&                  xml_mmap,
-    //                                               const std::shared_ptr<spdlog::logger>& logger,
-    //                                               dom_parser*                            parser);
     static result<segment_result> process_segment([[maybe_unused]] const worker_context& ctx, const xml_segment& seg);
     static result<segment_result> extract_xml_values( //
       cstr_t                                 xml_buf,

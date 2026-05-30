@@ -5,6 +5,10 @@
 #include <string>
 #include <vector>
 
+// [DODANO] future/optional za sprejem validacijske napake iz validacijske niti
+#include <future>
+#include <optional>
+
 #include <xercesc/dom/DOMLocator.hpp>
 #include <xercesc/sax/Locator.hpp>
 #include <xercesc/sax2/Attributes.hpp>
@@ -13,6 +17,7 @@
 
 // #include "common.hpp"
 #include "e_tag.hpp"
+#include "error_info.hpp"
 #include "queue.hpp"
 #include "x_str.hpp"
 // #include "x_str.hpp"
@@ -77,6 +82,13 @@ namespace fsp
 
     [[nodiscard]] std::size_t      segments_found() const noexcept { return counter_; }
     [[nodiscard]] std::string_view base_addr() const;
+
+    // [DODANO] Injicira shared_future iz xml_processor::process_from_buffer.
+    // Handler ga polling preverja v startElement() in ob napaki vrže
+    // SAXParseException, ki jo Xerces uporabi kot signal za prekinitev parsinga.
+    // shared_future (ne future) ker get() ne sme biti destructive — handler ga
+    // lahko preveri večkrat (polling), xml_processor pa pokliče get() na koncu.
+    void set_validation_future(std::shared_future<std::optional<error_info>> f) { val_future_ = std::move(f); }
   private:
     // --- NS context stack ---
     // Vsak nivo je map prefix→uri za en XML element scope.
@@ -132,6 +144,17 @@ namespace fsp
     std::shared_ptr<spdlog::logger> logger_;    /// logger
     std::string_view                base_addr_; // address of the start of the document
     std::string                     prefix_;    // opening tag with inherited ns, ns and attributes
+
+    // [DODANO] Shared future na katerega validacijska nit postavi napako (ali nullopt).
+    // Handler ga polling preverja v startElement() brez blokiranja.
+    // Inicializiran kot neveljaven (valid() == false) — brez validacije se ne
+    // preveri nikoli in ne povzroča overhead-a.
+    std::shared_future<std::optional<error_info>> val_future_;
+
+    // [DODANO] Števec za redčenje polling preverjanj validacijskega future-a.
+    // Preverjanje se izvede vsakih 2^10 (1024) elementov z bitno masko,
+    // kar je zanemarljiva cena pri 1M transakcijah (~1000 preverjanj skupaj).
+    std::size_t element_counter_ = 0;
   };
 
 } // namespace fsp

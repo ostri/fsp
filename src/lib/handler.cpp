@@ -129,7 +129,7 @@ namespace fsp
   }
 
   // ============================================================================
-  // SAX2 prefix mapping (executes before startElement)
+  // SAX2 prefix mapping (pride PRED startElement)
   // ============================================================================
 
   void Handler::startPrefixMapping(const XMLCh* prefix, const XMLCh* uri)
@@ -154,11 +154,33 @@ namespace fsp
                              [[maybe_unused]] const XMLCh* qname,
                              const xercesc::Attributes&    attrs)
   {
+    // [DODANO] Polling preverjanje validacijske napake iz vzporedne niti.
+    // Izvede se vsakih 1024 elementov (bitna maska je cenejša od modulo).
+    // wait_for(0) je neblokirajoč — vrne immediately z deferred/timeout/ready.
+    // Ob napaki vržemo SAXParseException: to je edini način za prekinitev
+    // Xerces SAX parsinga iz ContentHandler callbacka. Izjema se propagira
+    // skozi parser_->parse() in jo ujame process_from_buffer().
+    const auto every_1024 = 0x3FFU;
+    if ((element_counter_++ & every_1024) == 0 && val_future_.valid())
+    {
+      if (val_future_.wait_for(std::chrono::seconds(0)) == std::future_status::ready)
+      {
+        const auto& val_result = val_future_.get();
+        if (val_result.has_value())
+        {
+          if (logger_) logger_->debug("Handler: validacijska napaka zaznana, prekinjam SAX parsing.");
+          // Vržemo SAXParseException — Xerces jo ujame interno in ustavi parsing.
+          // Sporočilo prenesemo naprej; row/col ni znan na tej točki (0,0).
+          throw xercesc::SAXParseException(x_str(val_result->message()).c_str(), nullptr, nullptr, 0, 0);
+        }
+      }
+    }
+
     // Odpri NS scope — pending preslikave postanejo aktivne
     open_ns_scope();
     doc_depth_++;
-    //   const auto ln     = x_str(qname).to_string();
-    //   const auto ns_uri = x_str(uri).to_string();
+    // const auto ln     = x_str(qname).to_string();
+    // const auto ns_uri = x_str(uri).to_string();
 
 
     if (! capturing_)
@@ -180,9 +202,8 @@ namespace fsp
           continue;
         }
 
-        //        const auto& step = xpath[m];
+        // const auto& step = xpath[m];
         const auto& step = xpath_wide[m];
-        // if (tag_matches(step, ln, ns_uri)) m++;
         if (tag_matches(step, qname, uri)) m++;
       }
 
@@ -197,10 +218,10 @@ namespace fsp
 
           // Byte offset začetka tega elementa
           frag_start_offset_ = parser_->getSrcOffset(); // one charater after opening tag '>'
+          auto ln            = x_str(qname).to_string();
+          auto ns_uri        = x_str(uri).to_string();
           // prefix
-          auto ln     = x_str(qname).to_string();
-          auto ns_uri = x_str(uri).to_string();
-          prefix_     = make_open_tag(ln, attrs);
+          prefix_ = make_open_tag(ln, attrs);
           if (logger_) logger_->trace("tag:'{}' ns:'{}' offset:{} prefix:'{}'", ln, ns_uri, frag_start_offset_, prefix_);
 
           //          fragment_.clear();

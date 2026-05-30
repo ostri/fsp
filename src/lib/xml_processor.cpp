@@ -1,12 +1,10 @@
 #include "xml_processor.hpp"
-// #include "dom_parser.hpp"
 #include "x_str.hpp"
 #include "xpath_helpers.hpp"
 
 #include <chrono>
 #include <fmt/format.h>
 #include <magic_enum.hpp>
-// #include <pugixml.hpp>
 #include <spdlog/spdlog.h>
 #include <stack>
 #include <thread>
@@ -22,7 +20,7 @@ namespace fsp
   void xml_processor::setup_logger()
   {
     std::vector<spdlog::sink_ptr> sinks;
-    log_thread_name = "main>";
+    log_thread_name = "main >";
     // Using the official spdlog alias ensures identical type matching across GCC and Clang
     if (config_.log_config.enable_console)
     {
@@ -126,31 +124,35 @@ namespace fsp
   // Parser setup
   // ============================================================================
 
-  void_result xml_processor::setup_parser()
+  // [SPREMENJENO] Preimenovano iz setup_parser() v setup_parser_no_validation().
+  // Odstranjeni so vsi XSD/validacijski featurji (fgSAX2CoreValidation,
+  // fgXercesSchema, fgXercesValidationErrorAsFatal, fgXercesUseCachedGrammarInParse)
+  // ker validacija zdaj teče v svoji niti z lastnim parserjem (launch_validation_thread).
+  // fgCalculateSrcOfs mora ostati — Handler::endElement() ga potrebuje za byte offsete.
+  void_result xml_processor::setup_parser_no_validation()
   {
     try
     {
       parser_.reset(xercesc::XMLReaderFactory::createXMLReader());
       // NOLINTBEGIN(hicpp-no-array-decay)
-      parser_->setFeature(xercesc::XMLUni::fgXercesCalculateSrcOfs, true);
-      if (config_.validate_against_xsd)
-      {
-        parser_->setFeature(xercesc::XMLUni::fgSAX2CoreValidation, true);
-        parser_->setFeature(xercesc::XMLUni::fgXercesSchema, true);
-        parser_->setFeature(xercesc::XMLUni::fgXercesValidationErrorAsFatal, true);
-        parser_->setFeature(xercesc::XMLUni::fgXercesUseCachedGrammarInParse, true);
-      }
-      else
-      {
-        parser_->setFeature(xercesc::XMLUni::fgSAX2CoreValidation, false);
-      }
-      // Kritično za DOMLocator::getByteOffset()
+
+      // [ODSTRANJENO] Validacijski featurji — zdaj v validacijski niti:
+      // parser_->setFeature(xercesc::XMLUni::fgSAX2CoreValidation, true);
+      // parser_->setFeature(xercesc::XMLUni::fgXercesSchema, true);
+      // parser_->setFeature(xercesc::XMLUni::fgXercesValidationErrorAsFatal, true);
+      // parser_->setFeature(xercesc::XMLUni::fgXercesUseCachedGrammarInParse, true);
+
+      // Eksplicitno izklopi validacijo — brez tega bi Xerces morda validiral
+      // po defaultu če je grammar v cache-u
+      parser_->setFeature(xercesc::XMLUni::fgSAX2CoreValidation, false);
+
+      // Obvezno — Handler::endElement() kliče parser_->getSrcOffset()
       parser_->setFeature(xercesc::XMLUni::fgXercesCalculateSrcOfs, true);
       parser_->setFeature(xercesc::XMLUni::fgSAX2CoreNameSpaces, true);
       parser_->setFeature(xercesc::XMLUni::fgSAX2CoreNameSpacePrefixes, true);
       // NOLINTEND(hicpp-no-array-decay)
 
-      log_debug("Parser setup ok");
+      log_debug("Parser (no-validation) setup ok");
       return {};
     }
     catch (const xercesc::XMLException& e)
@@ -182,8 +184,11 @@ namespace fsp
 
       if (xsd_holder_->source() != nullptr)
       {
-        parser_->loadGrammar(*xsd_holder_->source(), xercesc::Grammar::SchemaGrammarType, true);
-        log_info(fmt::format("XSD schema: '{}' loaded.", schema_name));
+        // [OPOMBA] loadGrammar() se tukaj ne kliče več za SAX parser —
+        // validacijska nit si zgradi lasten parser z lastnim grammarjem.
+        // Ta metoda ostane za morebitno zunanjo rabo (setup_validation_from_buffer
+        // je public API) in za xsd_holder_ lifecycle management.
+        log_info(fmt::format("XSD schema: '{}' pripravljena.", schema_name));
       }
       return {};
     }
@@ -193,6 +198,110 @@ namespace fsp
       log_error(err);
       return std::unexpected(err);
     }
+  }
+
+  // ============================================================================
+  // [DODANO] Validacijska nit
+  // ============================================================================
+
+  // Zažene validacijo XML proti XSD v ločeni niti. Vrne shared_future ki se
+  // razreši takoj ko validacija konča — bodisi z nullopt (ok) ali error_info
+  // (prva napaka). shared_future (ne unique future) ker ga delita dve mesti:
+  //   1. Handler::startElement() — polling z wait_for(0)
+  //   2. process_from_buffer()   — get() po koncu parsinga
+  // Oba klica sta na isti niti (glavna nit), zato ni race conditiona na get().
+  //
+  // Parametri so kopirani po vrednosti — nit mora imeti lastništvo nad podatki
+  // ki jih potrebuje, saj mmap ostaja živeti v klicatelju (process_from_buffer),
+  // a nit ne sme imeti surovih referenc nanj (lifetime ni garantiran).
+  // xml_data/xsd_data sta raw pointer-ja na mmap ki živita dlje od niti — ok.
+  std::shared_future<std::optional<error_info>> xml_processor::launch_validation_thread(const void* xml_data,
+                                                                                        std::size_t xml_size,
+                                                                                        const void* xsd_data,
+                                                                                        std::size_t xsd_size,
+                                                                                        std::string xsd_path)
+  {
+    auto logger = logger_; // kopija shared_ptr — nit ima lastno referenco
+
+    // std::async vrne future; .share() ga pretvori v shared_future ki ga
+    // lahko get() pokličemo večkrat brez uničenja vrednosti
+    return std::async(std::launch::async,
+                      [xml_data, xml_size, xsd_data, xsd_size, xsd_path = std::move(xsd_path), logger]() -> std::optional<error_info>
+                      {
+                        log_thread_name = "valid>";
+                        if (logger) logger->info("Validation start.");
+
+                        try
+                        {
+                          // Lasten parser — xercesc::SAX2XMLReader ni thread-safe, ne smemo
+                          // deliti parser_ iz glavne niti
+                          std::unique_ptr<xercesc::SAX2XMLReader> vparser(xercesc::XMLReaderFactory::createXMLReader());
+
+                          // NOLINTBEGIN(hicpp-no-array-decay)
+                          vparser->setFeature(xercesc::XMLUni::fgSAX2CoreValidation, true);
+                          vparser->setFeature(xercesc::XMLUni::fgXercesSchema, true);
+                          vparser->setFeature(xercesc::XMLUni::fgXercesValidationErrorAsFatal, true);
+                          vparser->setFeature(xercesc::XMLUni::fgXercesUseCachedGrammarInParse, true);
+                          vparser->setFeature(xercesc::XMLUni::fgSAX2CoreNameSpaces, true);
+                          // NOLINTEND(hicpp-no-array-decay)
+
+                          // Naloži XSD shemo v lasten parser
+                          mem_buf_holder xsd_holder(xsd_data, xsd_size, xsd_path, logger);
+                          if (xsd_holder.source() != nullptr)
+                            vparser->loadGrammar(*xsd_holder.source(), xercesc::Grammar::SchemaGrammarType, true);
+
+                          // DefaultHandler ki ob napaki takoj vrže — brez tega bi Xerces
+                          // nadaljeval parsing kljub validacijski napaki
+                          struct ThrowingErrorHandler : public xercesc::DefaultHandler
+                          {
+                            void error(const xercesc::SAXParseException& e) override { throw e; }      // NOLINT(hicpp-exception-baseclass)
+                            void fatalError(const xercesc::SAXParseException& e) override { throw e; } // NOLINT(hicpp-exception-baseclass)
+                          } err_handler;
+                          vparser->setErrorHandler(&err_handler);
+
+                          xercesc::MemBufInputSource src(
+                            // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
+                            reinterpret_cast<const XMLByte*>(xml_data),
+                            static_cast<XMLSize_t>(xml_size),
+                            "xml_validation",
+                            false);
+
+                          vparser->parse(src);
+
+                          if (logger) logger->info("Validation finished: OK.");
+                          return std::nullopt; // brez napak
+                        }
+                        catch (const xercesc::SAXParseException& e)
+                        {
+                          // ThrowingErrorHandler je vrgel ob prvi validacijski napaki.
+                          // Ustavimo parsing (izjema je že prekinila vparser->parse())
+                          // in sporočimo napako klicatelju.
+                          auto err = error_info{processor_error::xsd_validation_failed,
+                                                fmt::format("SAX parser error: {} (row:{} col:{})",
+                                                            x_str(e.getMessage()).to_string(),
+                                                            e.getLineNumber(),
+                                                            e.getColumnNumber()),
+                                                "",
+                                                static_cast<std::size_t>(e.getLineNumber())};
+                          if (logger) logger->error(err.to_string());
+                          return err;
+                        }
+                        catch (const xercesc::XMLException& e)
+                        {
+                          auto err = error_info{
+                            processor_error::xsd_validation_failed, fmt::format("XML error: {}", x_str(e.getMessage()).to_string()), "", 0};
+                          if (logger) logger->error(err.to_string());
+                          return err;
+                        }
+                        catch (...)
+                        {
+                          // Neznana izjema — ne smemo pustiti future v broken stanju
+                          auto err = error_info{processor_error::internal_error, "Validation: unknown error", "", 0};
+                          if (logger) logger->error(err.to_string());
+                          return err;
+                        }
+                      })
+      .share(); // .share() → shared_future
   }
 
   // ============================================================================
@@ -206,7 +315,6 @@ namespace fsp
   result<segment_result> xml_processor::process_segment( //
     [[maybe_unused]] const worker_context& ctx,
     const xml_segment&                     seg)
-  // const fsp::mmap_file&                  xml_mmap)
   {
     segment_result res;
     res.segment_id  = seg.get_id();
@@ -221,22 +329,18 @@ namespace fsp
         ctx.logger->debug(fmt::format("seg:{} started ", seg.get_id()));
         ctx.logger->trace(fmt::format("'{}'", seg.dump(ctx.xml_mmap.data())));
       }
-      auto view     = seg.view(ctx.xml_mmap.data()); // whole xml subtree but the initial start tag
-      auto tmp_view = seg.subtree_str(view);         // merging together initial start tag and the rest of the xml tree
-      //      auto r        = parser->exec(tmp_view);    // make DOM document
-      auto r = extract_xml_values(tmp_view, res, seg, ctx);
+      auto view     = seg.view(ctx.xml_mmap.data());
+      auto tmp_view = seg.subtree_str(view);
+      auto r        = extract_xml_values(tmp_view, res, seg, ctx);
 
       auto us = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - t0).count();
 
       if (r)
-      { /// DOM parsing je ok r.value() vsebuje DOM drevo xercesc::DOMDocument*
+      {
         res.success = true;
         if (ctx.logger)
-          ctx.logger->debug("Segment '{}' DOM processing finished '{}'µs (offset={}, len={})", //
-                            seg.get_id(),
-                            us,
-                            seg.get_offset(),
-                            seg.get_length());
+          ctx.logger->debug(
+            "Segment '{}' DOM processing finished '{}'µs (offset={}, len={})", seg.get_id(), us, seg.get_offset(), seg.get_length());
         return res;
       }
 
@@ -253,6 +357,7 @@ namespace fsp
       return res;
     }
   }
+
   namespace
   {
     struct XmlTextReaderDeleter
@@ -271,40 +376,29 @@ namespace fsp
     };
   } // namespace
 
-  result<segment_result> xml_processor::extract_xml_values( //
-    cstr_t                                 xml_buf,
-    const segment_result&                  sr,
-    const xml_segment&                     seg,
-    [[maybe_unused]] const worker_context& ctx)
+  result<segment_result> xml_processor::extract_xml_values(cstr_t                                 xml_buf,
+                                                           const segment_result&                  sr,
+                                                           const xml_segment&                     seg,
+                                                           [[maybe_unused]] const worker_context& ctx)
   {
     auto res = sr;
     // NOLINTNEXTLINE(hicpp-signed-bitwise)
-    auto flags = (XML_PARSE_NOCDATA |   //
-                  XML_PARSE_NOERROR |   //
-                  XML_PARSE_NOWARNING | //
-                  XML_PARSE_NOBLANKS |  //
-                  XML_PARSE_NONET);     //
+    auto flags = (XML_PARSE_NOCDATA | XML_PARSE_NOERROR | XML_PARSE_NOWARNING | XML_PARSE_NOBLANKS | XML_PARSE_NONET);
 
-    UniqueXmlTextReader reader(xmlReaderForMemory( //
-      xml_buf.data(),
-      static_cast<int>(xml_buf.size()),
-      nullptr,
-      nullptr,
-      flags));
+    UniqueXmlTextReader reader(xmlReaderForMemory(xml_buf.data(), static_cast<int>(xml_buf.size()), nullptr, nullptr, flags));
 
     int                  read_status;
     const char*          value = nullptr;
-    auto                 depth = 0UL; // no depth before the processing starts
+    auto                 depth = 0UL;
     const char           pad   = '.';
-    std::stack<xml_node> stack; // current tag and uri
+    std::stack<xml_node> stack;
     while ((read_status = xmlTextReaderRead(reader.get())) == 1)
-    { //
+    {
       int  type      = xmlTextReaderNodeType(reader.get());
       auto enum_type = static_cast<xmlReaderTypes>(type);
-      // auto type_name = magic_enum::enum_name(enum_type);
       switch (enum_type)
       {
-      case XML_READER_TYPE_ELEMENT: // start element
+      case XML_READER_TYPE_ELEMENT:
       {
         stack.emplace(reinterpret_cast<const char*>(xmlTextReaderConstNamespaceUri(reader.get())),
                       reinterpret_cast<const char*>(xmlTextReaderConstLocalName(reader.get())));
@@ -312,20 +406,19 @@ namespace fsp
         depth++;
         break;
       }
-      case XML_READER_TYPE_TEXT: // element value
+      case XML_READER_TYPE_TEXT:
       {
         value = reinterpret_cast<const char*>(xmlTextReaderConstValue(reader.get()));
         if (ctx.logger) ctx.logger->debug(fmt::format("seg:{:5}{}{}", seg.get_id(), std::string(depth * 2, pad), value));
         break;
       }
-      case XML_READER_TYPE_END_ELEMENT: // end element
+      case XML_READER_TYPE_END_ELEMENT:
       {
         depth--;
         if (ctx.logger) ctx.logger->debug(fmt::format("seg:{:5}{}/{}", seg.get_id(), std::string(depth * 2, pad), stack.top().tag));
         stack.pop();
         break;
       }
-      /// element types to be skipped
       case XML_READER_TYPE_NONE:
       case XML_READER_TYPE_ATTRIBUTE:
       case XML_READER_TYPE_CDATA:
@@ -345,18 +438,14 @@ namespace fsp
         auto type_name = magic_enum::enum_name(enum_type);
         if (ctx.logger) ctx.logger->debug(fmt::format("nonprocessed: {} {}", type_name, type));
       }
-      // read_status = xmlTextReaderRead(reader.get());
     }
-    res.success = read_status != -1; // FIXME ostri samo da se prevede. popravi, da bo ok.
+    res.success = read_status != -1;
     return res;
   }
 
-  void xml_processor::worker_function( //
-    [[maybe_unused]] const std::stop_token& st,
-    int                                     worker_id,
-    [[maybe_unused]] worker_context         ctx)
+  void xml_processor::worker_function([[maybe_unused]] const std::stop_token& st, int worker_id, [[maybe_unused]] worker_context ctx)
   {
-    log_thread_name = fmt::format("wrk{:02}", worker_id);
+    log_thread_name = fmt::format("wrk{:03}", worker_id);
     if (ctx.logger) ctx.logger->info("Worker thread '{}' started.", log_thread_name);
     ctx.worker_id = worker_id;
 
@@ -390,7 +479,7 @@ namespace fsp
         err_res.error_message = res.error().to_string();
         std::lock_guard lock(ctx.errors_mutex);
         ctx.errors.push_back(std::move(err_res));
-        ctx.error_count++; // do we need errors per thread?
+        ctx.error_count++;
       }
     }
     if (ctx.logger) ctx.logger->info("Worker thread '{}' finished.", log_thread_name);
@@ -499,16 +588,35 @@ namespace fsp
     return process_from_buffer(xml_mmap, xsd_mmap ? &*xsd_mmap : nullptr);
   }
 
+  // [SPREMENJENO] process_from_buffer — glavna sprememba v tej datoteki.
+  // Prej: setup_parser() z validacijo + sinhrono parsiranje (26s).
+  // Zdaj:
+  //   1. setup_parser_no_validation() — SAX parser brez XSD overhead-a
+  //   2. launch_validation_thread()   — validacija vzporedno v svoji niti
+  //   3. handler_->set_validation_future() — handler dobi shared_future za
+  //      polling; ob napaki vrže SAXParseException ki prekine parser_->parse()
+  //   4. parser_->parse() — teče vzporedno z validacijsko nitjo (~16s)
+  //   5. Po koncu parsinga: cancel() + join workerjev + get() na future
+  //
+  // Potek ob validacijski napaki:
+  //   validacijska nit  →  promise.set_value(err)
+  //   handler polling   →  wait_for(0) == ready → throw SAXParseException
+  //   parser_->parse()  →  vrže izjemo → ujamemo v catch bloku spodaj
+  //   cancel()          →  cancel_flag_ = true → workerji se ustavijo
+  //   val_future.get()  →  vrnemo napako klicatelju
   void_result xml_processor::process_from_buffer(fsp::mmap_file& xml_mmap, fsp::mmap_file* xsd_mmap)
   {
-    auto ps = setup_parser();
+    // [SPREMENJENO] Kličemo setup_parser_no_validation() namesto setup_parser()
+    // ker validacija zdaj teče v ločeni niti
+    auto ps = setup_parser_no_validation();
     if (! ps) return std::unexpected(ps.error());
 
-    if (xsd_mmap != nullptr)
-    {
-      auto vs = setup_validation(*xsd_mmap);
-      if (! vs) return std::unexpected(vs.error());
-    }
+    // [ODSTRANJENO] Sinhrona validacija pred parsingom:
+    // if (xsd_mmap != nullptr) {
+    //   auto vs = setup_validation(*xsd_mmap);
+    //   if (!vs) return std::unexpected(vs.error());
+    // }
+    // Zamenjano z asinhrono validacijo spodaj (launch_validation_thread).
 
     try
     {
@@ -523,11 +631,29 @@ namespace fsp
       return std::unexpected(err);
     }
 
-    // Nastavimo mmap referenco za workerje
     active_mmap_ = &xml_mmap;
 
     auto ws = start_workers();
     if (! ws) return std::unexpected(ws.error());
+
+    // [DODANO] Zaženi validacijsko nit vzporedno s SAX parsingom.
+    // Če XSD ni podan, launch_validation_thread() vrne future ki je takoj
+    // razrešen z nullopt — handler polling bo vedno dobil "ok" in ne bo
+    // povzročal overhead-a (wait_for na already-ready future je trivial).
+    std::shared_future<std::optional<error_info>> val_future;
+    if (xsd_mmap != nullptr && config_.validate_against_xsd)
+    {
+      val_future =
+        launch_validation_thread(xml_mmap.data(), xml_mmap.size(), xsd_mmap->data(), xsd_mmap->size(), std::string(xsd_mmap->path()));
+
+      // [DODANO] Injiciramo shared_future v handler — ta ga polling preverja
+      // v startElement() in ob napaki vrže izjemo ki prekine parser_->parse()
+      handler_->set_validation_future(val_future);
+    }
+
+    // [DODANO] Zastavica: ali smo parser_->parse() prekinili zaradi validacije.
+    // Ločimo validacijsko napako od prave parse napake.
+    bool validation_interrupted = false;
 
     try
     {
@@ -538,14 +664,25 @@ namespace fsp
         static_cast<XMLSize_t>(xml_mmap.size()),
         "xml_input",
         false);
-      // // NOLINTNEXTLINE
-      // log_info(std::string(reinterpret_cast<const char*>(xml_mmap.data()), xml_mmap.size()));
       parser_->parse(src);
       log_debug("SAX parsing finished.");
     }
+    catch (const xercesc::SAXParseException&)
+    {
+      // [DODANO] Handler je vrgel SAXParseException kot signal za prekinitev
+      // parsinga ob zaznani validacijski napaki. Napaka je že v val_future —
+      // ne logiramo tukaj, logirala jo je validacijska nit.
+      // Nastavimo zastavico da spodaj ne logiramo lažne "parse" napake.
+      validation_interrupted = true;
+      log_debug("SAX parsing prekinjen — validacijska napaka.");
+    }
     catch (const xercesc::XMLException& e)
     {
+      // Prava napaka parsinga (ne validacijska) — canceliramo in vrnemo napako
       cancel();
+      if (val_future.valid()) val_future.wait(); // počakamo nit pred return
+      workers_.clear();
+      active_mmap_ = nullptr;
       auto err = error_info{processor_error::parse_failed, x_str(e.getMessage()).to_string(), "", static_cast<std::size_t>(e.getSrcLine())};
       log_error(err);
       return std::unexpected(err);
@@ -553,18 +690,49 @@ namespace fsp
     catch (const std::exception& e)
     {
       cancel();
-      auto err = error_info{processor_error::parse_failed, e.what(), "", 0};
+      if (val_future.valid()) val_future.wait();
+      workers_.clear();
+      active_mmap_ = nullptr;
+      auto err     = error_info{processor_error::parse_failed, e.what(), "", 0};
       log_error(err);
       return std::unexpected(err);
     }
 
-    seg_queue_.set_finished();
-    // Počakamo da workerji končajo
+    // [DODANO] Ob prekinitvi (validacijska napaka ali normalni konec) canceliramo
+    // workerje. cancel() nastavi cancel_flag_ = true in pokliče set_finished()
+    // na vrsti — workerji se ustavijo takoj ko pop() vrne false.
+    // Brez tega bi workerji nadaljevali z obdelavo segmentov ki so že v vrsti,
+    // kar bi bil nepotreben overhead pri validacijski napaki.
+    if (validation_interrupted) { cancel(); }
+    else
+    {
+      seg_queue_.set_finished();
+    }
+
+    // [DODANO] Počakamo validacijsko nit pred cleanup-om. val_future.wait() je
+    // idempotenten — če je nit že končala (kar je verjetno pri 1M transakcijah),
+    // se vrne takoj. Brez tega bi destruktor mem_buf_holder-ja v validacijski
+    // niti tekel vzporedno z našim cleanup-om.
+    if (val_future.valid()) val_future.wait();
+
     workers_.clear();
     active_mmap_ = nullptr;
 
-    // auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start_time_).count();
-    // log_info(fmt::format("Finished in {} ms {} bytes in document.", ms, xml_mmap.size()));
+    // [DODANO] Preverimo rezultat validacije.
+    // get() na shared_future je varen ker:
+    //   - validacijska nit je že končala (val_future.wait() zgoraj)
+    //   - shared_future get() ne uniči vrednosti (za razliko od unique future)
+    //   - kličemo ga samo z glavne niti
+    if (val_future.valid())
+    {
+      auto val_result = val_future.get();
+      if (val_result.has_value())
+      {
+        // Napaka je bila že logirana v validacijski niti — samo vrnemo
+        return std::unexpected(*val_result);
+      }
+    }
+
     auto stat = get_stats();
     log_info(fmt::format("Processing time:{:.2f} ms workers:{} segments:{} (ok:{} err:{}) bytes:{}",
                          stat.processing_time_ms,
