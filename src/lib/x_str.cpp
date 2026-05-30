@@ -5,15 +5,17 @@
 namespace fsp
 {
   fsp::x_str::x_str(XMLCh* ptr) noexcept
-  : data_(ptr)
+  : data_(xercesc::XMLString::replicate(ptr))
   {
   }
+
+  x_str::~x_str() { reset(); }
 
   x_str::x_str(std::string_view utf8)
   {
     if (! utf8.empty())
     {
-      data_ = xercesc::XMLString::transcode(utf8.data()); // NOLINT(bugprone-suspicious-stringview-data-usage)
+      reset(xercesc::XMLString::transcode(utf8.data())); // NOLINT(bugprone-suspicious-stringview-data-usage)
       if (data_ == nullptr) throw std::runtime_error("XMLString::transcode failed");
     }
   }
@@ -22,16 +24,15 @@ namespace fsp
   {
     if (! u16.empty())
     {
-      data_ =
-        xercesc::XMLString::replicate(reinterpret_cast<const XMLCh*>(u16.data()) // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
-        );
+      // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+      reset(xercesc::XMLString::replicate(reinterpret_cast<const XMLCh*>(u16.data())));
       if (data_ == nullptr) throw std::runtime_error("XMLString::replicate failed");
     }
   }
 
   x_str::x_str(const x_str& other)
   {
-    if (other.data_ != nullptr) data_ = xercesc::XMLString::replicate(other.data_);
+    if (other.data_ != nullptr) reset(xercesc::XMLString::replicate(other.data_));
   }
 
   x_str::x_str(x_str&& other) noexcept
@@ -43,20 +44,22 @@ namespace fsp
   {
     if (this != &other)
     {
-      reset();
-      if (other.data_ != nullptr) data_ = xercesc::XMLString::replicate(other.data_);
+      if (other.data_ != nullptr) reset(xercesc::XMLString::replicate(other.data_));
     }
     return *this;
   }
 
   x_str& x_str::operator=(x_str&& other) noexcept
   {
-    if (this != &other)
-    {
-      reset();
-      data_ = std::exchange(other.data_, nullptr);
-    }
+    if (this != &other) { reset(std::exchange(other.data_, nullptr)); }
     return *this;
+  }
+
+  void x_str::assign(const XMLCh* other) { reset(xercesc::XMLString::replicate(other)); }
+  void x_str::assign(const cstr_t other)
+  {
+    x_str tmp(other);
+    *this = tmp;
   }
 
   void x_str::reset() noexcept
@@ -64,13 +67,13 @@ namespace fsp
     if (data_ != nullptr)
     {
       xercesc::XMLString::release(&data_);
-      data_ = nullptr;
+      data_ = nullptr; // must be eventhough the xerces documentation claims that it clears data_
     }
   }
 
   void x_str::reset(XMLCh* ptr) noexcept
   {
-    reset();
+    if (data_ != nullptr) xercesc::XMLString::release(&data_);
     data_ = ptr;
   }
 

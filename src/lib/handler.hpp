@@ -14,10 +14,39 @@
 // #include "common.hpp"
 #include "e_tag.hpp"
 #include "queue.hpp"
+#include "x_str.hpp"
 // #include "x_str.hpp"
 
 namespace fsp
 {
+  using cstr_t       = std::string_view;
+  using cstr_XMLCh_t = std::basic_string_view<XMLCh>;
+  class e_tag_wide
+  {
+  public:
+    e_tag_wide() = default;
+    e_tag_wide(cstr_t ns, cstr_t tag)
+    : ns_(ns)
+    , tag_(tag)
+    {
+    }
+    e_tag_wide(cstr_XMLCh_t ns, cstr_XMLCh_t tag)
+    : ns_(ns)
+    , tag_(tag)
+    {
+    }
+    [[nodiscard]] x_str get_ns() const { return ns_; }
+    [[nodiscard]] x_str get_tag() const { return tag_; }
+    void                set_tag(const x_str& tag) { tag_.assign(tag.data()); };
+    void                set_tag(const XMLCh* tag) { tag_.assign(tag); }
+    void                set_ns(const x_str& ns) { ns_.assign(ns.data()); }
+    void                set_ns(const XMLCh* ns) { ns_.assign(ns); }
+  private:
+    x_str ns_;  // namespace: prefix or uri
+    x_str tag_; // tagname
+  };
+  using xpath_wide_t = std::vector<e_tag_wide>;
+
   class Handler : public xercesc::DefaultHandler
   {
   public:
@@ -73,8 +102,9 @@ namespace fsp
     /// prepare message to report exception
     std::string prepare_msg(const xercesc::SAXParseException& e);
 
-    // --- Konfiguracija ---
-    std::vector<xpath_t> targets_; // xpath pravila (vektor e_tag vektorjev)
+    // --- subtree xpaths ---
+    std::vector<xpath_t>      targets_;      // xpath rules
+    std::vector<xpath_wide_t> targets_wide_; // xpath rules as XMLCh* strings
 
     // --- NS stanje ---
     // Stack nivojev: vsak nivo je map prefix→uri

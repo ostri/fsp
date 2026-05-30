@@ -11,7 +11,6 @@
 #include <stack>
 #include <thread>
 #include <libxml/xmlreader.h>
-#include <algorithm>
 
 namespace fsp
 {
@@ -114,7 +113,7 @@ namespace fsp
     logger_->set_level(config_.log_config.log_level);
     logger_->flush_on(spdlog::level::err);
     logger_->flush();
-    spdlog::info("Main program initialized.");
+    log_info("Main program initialized.");
   }
 
   void xml_processor::log_error(const error_info& e)
@@ -167,7 +166,6 @@ namespace fsp
     {
       parser_.reset(xercesc::XMLReaderFactory::createXMLReader());
       // NOLINTBEGIN(hicpp-no-array-decay)
-      // === KRITIČNO ZA DOMLocator + byte offset ===
       parser_->setFeature(xercesc::XMLUni::fgXercesCalculateSrcOfs, true);
       if (config_.validate_against_xsd)
       {
@@ -219,7 +217,7 @@ namespace fsp
       if (xsd_holder_->source() != nullptr)
       {
         parser_->loadGrammar(*xsd_holder_->source(), xercesc::Grammar::SchemaGrammarType, true);
-        log_info(fmt::format("XSD schema '{}' loaded.", schema_name));
+        log_info(fmt::format("XSD schema: '{}' loaded.", schema_name));
       }
       return {};
     }
@@ -497,7 +495,7 @@ namespace fsp
   void_result xml_processor::process_file(const std::string& xml_path, const std::string& xsd_path)
   {
     start_time_ = std::chrono::steady_clock::now();
-    log_info(fmt::format("XML file: '{}'", xml_path));
+    log_info(fmt::format("XML file  : '{}'", xml_path));
 
     fsp::mmap_file xml_mmap;
     try

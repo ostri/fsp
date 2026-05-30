@@ -7,19 +7,24 @@
 
 namespace fsp
 {
+  using cstr_t = std::string_view;
   class x_str
   {
   public:
     x_str() noexcept = default;
-    ~x_str() { reset(); }
+    ~x_str();
     explicit x_str(XMLCh* ptr) noexcept;
     explicit x_str(std::string_view utf8);
     explicit x_str(std::u16string_view u16);
     x_str(const x_str& other);
     x_str(x_str&& other) noexcept;
+    //    x_str(const x_str&)            = delete;
+    //    x_str& operator=(const x_str&) = delete;
     /// operators
     x_str&                       operator=(const x_str& other);
     x_str&                       operator=(x_str&& other) noexcept;
+    void                         assign(const XMLCh* other);
+    void                         assign(cstr_t other);
     void                         reset() noexcept;
     void                         reset(XMLCh* ptr) noexcept;
     [[nodiscard]] std::string    to_string() const;

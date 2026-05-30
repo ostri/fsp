@@ -9,9 +9,9 @@
 int main(int argc, char* argv[])
 {
   std::vector<std::string> args(argv, argv + argc); // NOLINT (cppcoreguidelines-pro-bounds-pointer-arithmetic)
-  if (argc != 3)
+  if (argc != 3 && argc != 2)
   {
-    static constexpr auto* msg = "Usage: {0} <xml_file> <xsd_file> \n"
+    static constexpr auto* msg = "Usage: {0} <xml_file> [<xsd_file>] \n"
                                  "Example: {0} data.xml schema.xsd \n";
     std::cerr << fmt::format(msg, args[0]);
     return 1;
@@ -19,8 +19,8 @@ int main(int argc, char* argv[])
 
   try
   {
-    const std::string& xml_file = args[1];
-    const std::string& xsd_file = args[2];
+    const std::string xml_file = argv[1];                  // NOLINT
+    const std::string xsd_file = argc == 3 ? argv[2] : ""; // NOLINT
 
     std::vector<std::string> xpath_strings;
 
@@ -70,7 +70,7 @@ int main(int argc, char* argv[])
       xml_file,                          // path to the xml file
       xsd_file,                          // path to the xsd file that xml file must comply with
       xpath_strings,                     // array of xpaths that define split points of the xml tree
-      1,                                 // number of workers that process the xml file in parallel (0=all)
+      3,                                 // number of workers that process the xml file in parallel (0=all)
       log_cfg                            // configuration of logging
     );
 

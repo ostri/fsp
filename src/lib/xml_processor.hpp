@@ -112,10 +112,10 @@ namespace fsp
     };
     // NOLINTEND(cppcoreguidelines-avoid-const-or-ref-data-members)
 
+    fsp::xerces_mgr                         xerces_life_; // must be first to be destructed last
     processor_config                        config_;
     std::unique_ptr<xercesc::SAX2XMLReader> parser_;
     std::unique_ptr<Handler>                handler_;
-    fsp::xerces_mgr                         xerces_life_;
     std::shared_ptr<spdlog::logger>         logger_;
 
     segment_queue               seg_queue_;

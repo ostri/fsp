@@ -9,8 +9,6 @@
       "args": [
         "../xml-data/pacs8-2.xml",
         "../xsd/pacs.008.xsd",
-        "/Document/FIToFICstmrCdtTrf/GrpHdr",
-        "/b/c"
       ],
       "cwd": "${workspaceRoot}/build",
       "preLaunchTask": "build", // Najprej požene task "build" v tasks.json

@@ -28,26 +28,16 @@ namespace fsp
   , logger_(std::move(logger)) //
   , base_addr_(base_addr)      //
   {
+    for (const auto& el : targets_)
+    {
+      xpath_wide_t tmp_vec;
+      for (const auto& xp : el) { tmp_vec.emplace_back(xp.ns(), xp.tag()); }
+      targets_wide_.push_back(tmp_vec);
+    }
     matched_.assign(targets_.size(), 0);
     // Korenski NS nivo — vedno prisoten
     ns_stack_.emplace_back();
   }
-
-  // // ============================================================================
-  // // Xerces string helpers
-  // // ============================================================================
-
-  // std::string Handler::to_str(const XMLCh* xstr)
-  // {
-  //   if (xstr == nullptr) return {};
-  //   return x_str(xstr).to_string();
-  // }
-
-  // std::string Handler::to_str(const XMLCh* xstr, XMLSize_t len)
-  // {
-  //   if (xstr == nullptr || len == 0) return {};
-  //   return x_str(xstr).to_string().substr(0, len);
-  // }
 
   // ============================================================================
   // NS context stack
