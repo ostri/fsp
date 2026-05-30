@@ -80,7 +80,7 @@ namespace fsp
   // Tag matching
   // ============================================================================
 
-  bool Handler::tag_matches(const e_tag& tag, const std::string& local_name, const std::string& ns_uri) const noexcept
+  bool Handler::tag_matches(const e_tag_wide& tag, const XMLCh* local_name, const XMLCh* ns_uri) const noexcept
   {
     // Local name se mora vedno ujemati
     if (tag.tag() != local_name) return false;
@@ -89,13 +89,13 @@ namespace fsp
     if (tag.ns().empty()) return true;
 
     // Z NS — razrešimo prefix in primerjamo URI
-    auto expected_uri = resolve_ns(tag.ns());
+    auto expected_uri = resolve_ns(tag.ns().to_string());
     if (expected_uri.empty())
     {
       // Prefix ni znan — primerjamo direktno z ns_uri iz SAX eventa
       return tag.ns() == ns_uri;
     }
-    return expected_uri == ns_uri;
+    return expected_uri == x_str(ns_uri).to_string();
   }
 
   // --- Fragment gradnja ---
@@ -129,7 +129,7 @@ namespace fsp
   }
 
   // ============================================================================
-  // SAX2 prefix mapping (pride PRED startElement)
+  // SAX2 prefix mapping (executes before startElement)
   // ============================================================================
 
   void Handler::startPrefixMapping(const XMLCh* prefix, const XMLCh* uri)
@@ -157,8 +157,8 @@ namespace fsp
     // Odpri NS scope — pending preslikave postanejo aktivne
     open_ns_scope();
     doc_depth_++;
-    const auto ln     = x_str(qname).to_string();
-    const auto ns_uri = x_str(uri).to_string();
+    //   const auto ln     = x_str(qname).to_string();
+    //   const auto ns_uri = x_str(uri).to_string();
 
 
     if (! capturing_)
@@ -166,8 +166,9 @@ namespace fsp
       // Napreduj vse kandidate ki se ujemajo na trenutni globini
       for (std::size_t i = 0; i < targets_.size(); ++i)
       {
-        const auto& xpath = targets_[i];
-        int&        m     = matched_[i];
+        const auto& xpath      = targets_[i];
+        const auto& xpath_wide = targets_wide_[i];
+        int&        m          = matched_[i];
 
         if (m >= static_cast<int>(xpath.size())) continue;
 
@@ -179,8 +180,10 @@ namespace fsp
           continue;
         }
 
-        const auto& step = xpath[m];
-        if (tag_matches(step, ln, ns_uri)) m++;
+        //        const auto& step = xpath[m];
+        const auto& step = xpath_wide[m];
+        // if (tag_matches(step, ln, ns_uri)) m++;
+        if (tag_matches(step, qname, uri)) m++;
       }
 
       // Preverimo ali je kateri xpath kompletiran
@@ -195,7 +198,9 @@ namespace fsp
           // Byte offset začetka tega elementa
           frag_start_offset_ = parser_->getSrcOffset(); // one charater after opening tag '>'
           // prefix
-          prefix_ = make_open_tag(ln, attrs);
+          auto ln     = x_str(qname).to_string();
+          auto ns_uri = x_str(uri).to_string();
+          prefix_     = make_open_tag(ln, attrs);
           if (logger_) logger_->trace("tag:'{}' ns:'{}' offset:{} prefix:'{}'", ln, ns_uri, frag_start_offset_, prefix_);
 
           //          fragment_.clear();

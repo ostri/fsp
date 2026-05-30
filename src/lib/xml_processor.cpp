@@ -21,40 +21,6 @@ namespace fsp
 
   void xml_processor::setup_logger()
   {
-    // auto formatter = std::make_unique<spdlog::pattern_formatter>();
-    // formatter->add_custom_flag<ThreadNameFormatter>('*');
-    // formatter->set_pattern("[%Y-%m-%d %H:%M:%S.%e] [%*] [%l] %v");
-    // spdlog::set_formatter(std::move(formatter));
-
-    // // 4. Set the name for the main thread
-    // log_thread_name = "main_app";
-    // ///////////
-    // std::vector<spdlog::sink_ptr> sinks;
-
-    // if (config_.log_config.enable_console)
-    // {
-    //   auto s = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
-    //   s->set_pattern("[%Y-%m-%d %H:%M:%S.%e] [%^%-5l%$] [%t] [%*] [%n] %v");
-    //   sinks.push_back(s);
-    // }
-    // if (config_.log_config.enable_file)
-    // {
-    //   auto s = std::make_shared<spdlog::sinks::basic_file_sink_mt>(config_.log_config.log_file_path, true);
-    //   s->set_pattern("[%Y-%m-%d %H:%M:%S.%e] [%-5l] [%t] [%*] [%n] %v");
-    //   sinks.push_back(s);
-    // }
-    // if (sinks.empty())
-    // {
-    //   auto s = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
-    //   s->set_pattern("[%Y-%m-%d %H:%M:%S.%e] [%^%-5l%$] [%t] [%*] [%n] %v");
-    //   sinks.push_back(s);
-    // }
-
-    // logger_ = std::make_shared<spdlog::logger>(config_.log_config.logger_name, sinks.begin(), sinks.end());
-    // logger_->set_level(config_.log_config.log_level);
-    // logger_->flush_on(spdlog::level::err);
-    // spdlog::info("Main program initialized.");
-
     std::vector<spdlog::sink_ptr> sinks;
     log_thread_name = "main>";
     // Using the official spdlog alias ensures identical type matching across GCC and Clang
@@ -134,7 +100,7 @@ namespace fsp
   }
 
   // ============================================================================
-  // Konstrukcija / destrukcija
+  // Constructor / Destructor
   // ============================================================================
 
   xml_processor::xml_processor(processor_config cfg)
@@ -427,8 +393,6 @@ namespace fsp
         ctx.error_count++; // do we need errors per thread?
       }
     }
-    // auto x = parser->done();
-    // if (! x && ctx.logger) ctx.logger->error(fmt::format("Error releasing dom parser: '{}'", x.error().message));
     if (ctx.logger) ctx.logger->info("Worker thread '{}' finished.", log_thread_name);
   }
 

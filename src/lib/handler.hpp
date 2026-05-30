@@ -35,8 +35,8 @@ namespace fsp
     , tag_(tag)
     {
     }
-    [[nodiscard]] x_str get_ns() const { return ns_; }
-    [[nodiscard]] x_str get_tag() const { return tag_; }
+    [[nodiscard]] x_str ns() const { return ns_; }
+    [[nodiscard]] x_str tag() const { return tag_; }
     void                set_tag(const x_str& tag) { tag_.assign(tag.data()); };
     void                set_tag(const XMLCh* tag) { tag_.assign(tag); }
     void                set_ns(const x_str& ns) { ns_.assign(ns.data()); }
@@ -92,7 +92,7 @@ namespace fsp
     [[nodiscard]] std::map<std::string, std::string> active_ns() const;
 
     // Razreši NS URI za e_tag (enkrat, ko je NS context zgrajen).
-    [[nodiscard]] bool tag_matches(const e_tag& tag, const std::string& local_name, const std::string& ns_uri) const noexcept;
+    [[nodiscard]] bool tag_matches(const e_tag_wide& tag, const XMLCh* local_name, const XMLCh* ns_uri) const noexcept;
 
     std::string make_open_tag(const std::string& qname, const xercesc::Attributes& attrs);
 
