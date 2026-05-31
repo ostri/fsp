@@ -65,13 +65,13 @@ int main(int argc, char* argv[])
                                .log_file_path  = "xml_processor.log",
                                .log_level      = spdlog::level::info, // spdlog::level::info;
                                .logger_name    = "main_app"};
-
-    auto result = fsp::process_xml_file( //
-      xml_file,                          // path to the xml file
-      xsd_file,                          // path to the xsd file that xml file must comply with
-      xpath_strings,                     // array of xpaths that define split points of the xml tree
-      3,                                 // number of workers that process the xml file in parallel (0=all)
-      log_cfg                            // configuration of logging
+    const auto         no_of_workers = 5U;
+    auto               result        = fsp::process_xml_file( //
+      xml_file,                                               // path to the xml file
+      xsd_file,                                               // path to the xsd file that xml file must comply with
+      xpath_strings,                                          // array of xpaths that define split points of the xml tree
+      no_of_workers,                                          // number of workers that process the xml file in parallel (0=all)
+      log_cfg                                                 // configuration of logging
     );
 
     if (! result)

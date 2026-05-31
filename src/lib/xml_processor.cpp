@@ -253,9 +253,10 @@ namespace fsp
                           // DefaultHandler ki ob napaki takoj vrže — brez tega bi Xerces
                           // nadaljeval parsing kljub validacijski napaki
                           struct ThrowingErrorHandler : public xercesc::DefaultHandler
-                          {
-                            void error(const xercesc::SAXParseException& e) override { throw e; }      // NOLINT(hicpp-exception-baseclass)
-                            void fatalError(const xercesc::SAXParseException& e) override { throw e; } // NOLINT(hicpp-exception-baseclass)
+                          { // NOLINTBEGIN(cert-err60-cpp, hicpp-exception-baseclass)
+                            void error(const xercesc::SAXParseException& e) override { throw e; }
+                            void fatalError(const xercesc::SAXParseException& e) override { throw e; }
+                            // NOLINTEND(cert-err60-cpp, hicpp-exception-baseclass)
                           } err_handler;
                           vparser->setErrorHandler(&err_handler);
 

@@ -1,6 +1,5 @@
 #pragma once
 
-#include <map>
 #include <spdlog/logger.h>
 #include <string>
 #include <vector>
@@ -65,7 +64,7 @@ namespace fsp
     void startPrefixMapping( //
       const XMLCh* prefix,
       const XMLCh* uri) override;
-    void endPrefixMapping(const XMLCh* prefix) override;
+    void endPrefixMapping([[maybe_unused]] const XMLCh* prefix) override;
     void startElement(const XMLCh*                  uri,
                       [[maybe_unused]] const XMLCh* localname,
                       [[maybe_unused]] const XMLCh* qname,
@@ -93,15 +92,15 @@ namespace fsp
     // --- NS context stack ---
     // Vsak nivo je map prefix→uri za en XML element scope.
     // open_ns_scope() potisne nov nivo, close_ns_scope() ga odstrani.
-    void open_ns_scope();
-    void close_ns_scope();
-    void push_ns_mapping(const std::string& prefix, const std::string& uri);
+    void open_ns_scope(const XMLCh* qname);
+    void close_ns_scope(const XMLCh* qname);
+    void push_ns_mapping(const XMLCh* prefix, const XMLCh* uri);
 
     // Razreši prefix v URI. Prazen string če prefix ni znan.
-    [[nodiscard]] std::string resolve_ns(const std::string& prefix) const noexcept;
+    [[nodiscard]] x_str resolve_ns(const x_str& prefix) const noexcept;
 
     // Vrne snapshot vseh aktivnih NS preslikav (za vbrizganje v fragment).
-    [[nodiscard]] std::map<std::string, std::string> active_ns() const;
+    [[nodiscard]] std::unordered_map<x_str, x_str> active_ns() const;
 
     // Razreši NS URI za e_tag (enkrat, ko je NS context zgrajen).
     [[nodiscard]] bool tag_matches(const e_tag_wide& tag, const XMLCh* local_name, const XMLCh* ns_uri) const noexcept;
@@ -118,16 +117,32 @@ namespace fsp
     std::vector<xpath_t>      targets_;      // xpath rules
     std::vector<xpath_wide_t> targets_wide_; // xpath rules as XMLCh* strings
 
-    // --- NS stanje ---
-    // Stack nivojev: vsak nivo je map prefix→uri
-    std::vector<std::map<std::string, std::string>> ns_stack_;
-    // Pending preslikave za naslednji open_ns_scope()
-    std::map<std::string, std::string> ns_pending_;
+    // --- NS definicitons ---
+    // stack of NS definitions. Whenever new set of ns definitions occur new push on stack
+    // occurs. on endElement of the same tag this is removed.
+    struct ns_level
+    {
+      x_str                            qname;
+      std::unordered_map<x_str, x_str> ns_map;
+    };
+    std::vector<ns_level> ns_stack_;
+    //
+    // the ns_pending_structure is a temporary buffer that transfers information between
+    // methods startPrefixMapping and startElement
+    //
+    std::unordered_map<x_str, x_str> ns_pending_;
 
     // --- Matching stanje ---
     // matched_[i] = koliko korakov xpath[i] je že ujeto
     std::vector<int> matched_;
     int              doc_depth_ = 0; // globina v dokumentu (1 = koreni elem.)
+
+    // --- helper methods ---------
+    void check_validation_status();
+    void check_xpath_matches([[maybe_unused]] const XMLCh*               uri,
+                             [[maybe_unused]] const XMLCh*               localname,
+                             [[maybe_unused]] const XMLCh*               qname,
+                             [[maybe_unused]] const xercesc::Attributes& attrs);
 
     // --- Fragment akumulacija ---
     bool capturing_  = false;
