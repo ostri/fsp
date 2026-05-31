@@ -141,6 +141,7 @@ set(${b_target}_SOURCES
     ${CMAKE_SOURCE_DIR}/src/lib/dom_parser.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/dom_handler.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/parsing_util.cpp
+    ${CMAKE_SOURCE_DIR}/src/lib/e_tag_wide.cpp
 )
 # Additional libraries for main program
 set(FSP_TARGET_${PROJECT_NAME}_LIBS

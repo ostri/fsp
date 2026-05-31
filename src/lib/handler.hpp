@@ -16,6 +16,7 @@
 
 // #include "common.hpp"
 #include "e_tag.hpp"
+#include "e_tag_wide.hpp"
 #include "error_info.hpp"
 #include "queue.hpp"
 #include "x_str.hpp"
@@ -25,31 +26,8 @@ namespace fsp
 {
   using cstr_t       = std::string_view;
   using cstr_XMLCh_t = std::basic_string_view<XMLCh>;
-  class e_tag_wide
-  {
-  public:
-    e_tag_wide() = default;
-    e_tag_wide(cstr_t ns, cstr_t tag)
-    : ns_(ns)
-    , tag_(tag)
-    {
-    }
-    e_tag_wide(cstr_XMLCh_t ns, cstr_XMLCh_t tag)
-    : ns_(ns)
-    , tag_(tag)
-    {
-    }
-    [[nodiscard]] x_str ns() const { return ns_; }
-    [[nodiscard]] x_str tag() const { return tag_; }
-    void                set_tag(const x_str& tag) { tag_.assign(tag.data()); };
-    void                set_tag(const XMLCh* tag) { tag_.assign(tag); }
-    void                set_ns(const x_str& ns) { ns_.assign(ns.data()); }
-    void                set_ns(const XMLCh* ns) { ns_.assign(ns); }
-  private:
-    x_str ns_;  // namespace: prefix or uri
-    x_str tag_; // tagname
-  };
-  using xpath_wide_t = std::vector<e_tag_wide>;
+  using ns_def_t     = std::vector<std::pair<x_str, x_str>>;
+
 
   class Handler : public xercesc::DefaultHandler
   {
@@ -64,7 +42,7 @@ namespace fsp
     void startPrefixMapping( //
       const XMLCh* prefix,
       const XMLCh* uri) override;
-    void endPrefixMapping([[maybe_unused]] const XMLCh* prefix) override;
+    // void endPrefixMapping() override;
     void startElement(const XMLCh*                  uri,
                       [[maybe_unused]] const XMLCh* localname,
                       [[maybe_unused]] const XMLCh* qname,
@@ -73,7 +51,7 @@ namespace fsp
       [[maybe_unused]] const XMLCh* uri,
       [[maybe_unused]] const XMLCh* localname,
       [[maybe_unused]] const XMLCh* qname) override;
-    //    void characters([[maybe_unused]] const XMLCh* chars, [[maybe_unused]] XMLSize_t length) override;
+    void characters([[maybe_unused]] const XMLCh* chars, [[maybe_unused]] XMLSize_t length) override { };
     // --- SAX2 ErrorHandler ---
     void warning(const xercesc::SAXParseException& e) override;
     void error(const xercesc::SAXParseException& e) override;
@@ -92,20 +70,20 @@ namespace fsp
     // --- NS context stack ---
     // Vsak nivo je map prefix→uri za en XML element scope.
     // open_ns_scope() potisne nov nivo, close_ns_scope() ga odstrani.
-    void open_ns_scope(const XMLCh* qname);
-    void close_ns_scope(const XMLCh* qname);
+    void open_ns_scope();
+    void close_ns_scope();
     void push_ns_mapping(const XMLCh* prefix, const XMLCh* uri);
 
     // Razreši prefix v URI. Prazen string če prefix ni znan.
     [[nodiscard]] x_str resolve_ns(const x_str& prefix) const noexcept;
 
     // Vrne snapshot vseh aktivnih NS preslikav (za vbrizganje v fragment).
-    [[nodiscard]] std::unordered_map<x_str, x_str> active_ns() const;
+    [[nodiscard]] ns_def_t active_ns() const; // FIXME ostri - should be vector
 
     // Razreši NS URI za e_tag (enkrat, ko je NS context zgrajen).
     [[nodiscard]] bool tag_matches(const e_tag_wide& tag, const XMLCh* local_name, const XMLCh* ns_uri) const noexcept;
 
-    std::string make_open_tag(const std::string& qname, const xercesc::Attributes& attrs);
+    std::string make_open_tag(const XMLCh* qname, const xercesc::Attributes& attrs);
 
     // // --- Xerces string helpers ---
     // static std::string to_str(const XMLCh* xstr);
@@ -122,15 +100,15 @@ namespace fsp
     // occurs. on endElement of the same tag this is removed.
     struct ns_level
     {
-      x_str                            qname;
-      std::unordered_map<x_str, x_str> ns_map;
+      int      depth;
+      ns_def_t ns_vec;
     };
     std::vector<ns_level> ns_stack_;
     //
     // the ns_pending_structure is a temporary buffer that transfers information between
     // methods startPrefixMapping and startElement
     //
-    std::unordered_map<x_str, x_str> ns_pending_;
+    ns_def_t ns_pending_;
 
     // --- Matching stanje ---
     // matched_[i] = koliko korakov xpath[i] je že ujeto
@@ -146,10 +124,10 @@ namespace fsp
 
     // --- Fragment akumulacija ---
     bool capturing_  = false;
-    int  frag_depth_ = 0;  // globina znotraj fragmenta
-    int  active_idx_ = -1; // kateri xpath je aktiven
+    int  frag_depth_ = 0;  // debth inside the fragment
+    int  active_idx_ = -1; // which subtry type we are processing
     // std::string fragment_;              // akumuliran XML fragment
-    std::size_t frag_start_offset_ = 0; // byte offset začetka fragmenta
+    std::size_t frag_start_offset_ = 0; // byte offset of start of the fragment
 
     // --- Output ---
     segment_queue& queue_;

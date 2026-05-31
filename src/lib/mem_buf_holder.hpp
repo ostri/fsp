@@ -28,8 +28,8 @@ namespace fsp
     // void set_source(const xercesc::MemBufInputSource>& source);
     // void set_logger(const std::shared_ptr<spdlog::logger>& logger);
   private:
-    std::unique_ptr<xercesc::MemBufInputSource> source_;
-    std::shared_ptr<spdlog::logger>             logger_;
-    std::string                                 name_;
+    std::unique_ptr<xercesc::MemBufInputSource> source_; // xerces file buffer
+    std::shared_ptr<spdlog::logger>             logger_; // logger handler
+    std::string                                 name_;   // name of the file
   };
 } // namespace fsp

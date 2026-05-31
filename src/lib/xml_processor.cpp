@@ -215,11 +215,12 @@ namespace fsp
   // ki jih potrebuje, saj mmap ostaja živeti v klicatelju (process_from_buffer),
   // a nit ne sme imeti surovih referenc nanj (lifetime ni garantiran).
   // xml_data/xsd_data sta raw pointer-ja na mmap ki živita dlje od niti — ok.
-  std::shared_future<std::optional<error_info>> xml_processor::launch_validation_thread(const void* xml_data,
-                                                                                        std::size_t xml_size,
-                                                                                        const void* xsd_data,
-                                                                                        std::size_t xsd_size,
-                                                                                        std::string xsd_path)
+  std::shared_future<std::optional<error_info>> xml_processor::launch_validation_thread( //
+    const void* xml_data,
+    std::size_t xml_size,
+    const void* xsd_data,
+    std::size_t xsd_size,
+    std::string xsd_path)
   {
     auto logger = logger_; // kopija shared_ptr — nit ima lastno referenco
 
@@ -229,7 +230,9 @@ namespace fsp
                       [xml_data, xml_size, xsd_data, xsd_size, xsd_path = std::move(xsd_path), logger]() -> std::optional<error_info>
                       {
                         log_thread_name = "valid>";
-                        if (logger) logger->info("Validation start.");
+                        auto start      = std::chrono::steady_clock::now();
+                        if (logger && logger->should_log(logger->level()))
+                          logger->info(fmt::format("Validation started. file: xsd:{}", xsd_path));
 
                         try
                         {
@@ -243,6 +246,7 @@ namespace fsp
                           vparser->setFeature(xercesc::XMLUni::fgXercesValidationErrorAsFatal, true);
                           vparser->setFeature(xercesc::XMLUni::fgXercesUseCachedGrammarInParse, true);
                           vparser->setFeature(xercesc::XMLUni::fgSAX2CoreNameSpaces, true);
+                          //                          vparser->setFeature(xercesc::XMLUni::fgXercesCalculateSrcOfs, false);
                           // NOLINTEND(hicpp-no-array-decay)
 
                           // Naloži XSD shemo v lasten parser
@@ -269,7 +273,12 @@ namespace fsp
 
                           vparser->parse(src);
 
-                          if (logger) logger->info("Validation finished: OK.");
+                          if (logger && logger->should_log(logger->level()))
+                          {
+                            auto end      = std::chrono::steady_clock::now();
+                            auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+                            logger->info(fmt::format("Validation finished in {} ms {} bytes.", duration.count(), xml_size));
+                          }
                           return std::nullopt; // brez napak
                         }
                         catch (const xercesc::SAXParseException& e)
@@ -325,7 +334,7 @@ namespace fsp
 
     try
     {
-      if (ctx.logger)
+      if (ctx.logger && ctx.logger->should_log(ctx.logger->level()))
       {
         ctx.logger->debug(fmt::format("seg:{} started ", seg.get_id()));
         ctx.logger->trace(fmt::format("'{}'", seg.dump(ctx.xml_mmap.data())));
@@ -549,7 +558,7 @@ namespace fsp
   void_result xml_processor::process_file(const std::string& xml_path, const std::string& xsd_path)
   {
     start_time_ = std::chrono::steady_clock::now();
-    log_info(fmt::format("XML file  : '{}'", xml_path));
+    log_info(fmt::format("XML file: '{}'", xml_path));
 
     fsp::mmap_file xml_mmap;
     try
@@ -634,8 +643,6 @@ namespace fsp
 
     active_mmap_ = &xml_mmap;
 
-    auto ws = start_workers();
-    if (! ws) return std::unexpected(ws.error());
 
     // [DODANO] Zaženi validacijsko nit vzporedno s SAX parsingom.
     // Če XSD ni podan, launch_validation_thread() vrne future ki je takoj
@@ -655,6 +662,9 @@ namespace fsp
     // [DODANO] Zastavica: ali smo parser_->parse() prekinili zaradi validacije.
     // Ločimo validacijsko napako od prave parse napake.
     bool validation_interrupted = false;
+    // starting workers
+    auto ws = start_workers(); // validation is on critical path workers start last
+    if (! ws) return std::unexpected(ws.error());
 
     try
     {
