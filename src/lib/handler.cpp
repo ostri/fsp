@@ -15,28 +15,28 @@ namespace fsp
   // Konstrukcija
   // ============================================================================
 
-  Handler::Handler(const std::vector<xpath_t>&     targets,
+  Handler::Handler(proc_data&                      targets,
                    segment_queue&                  queue,
                    std::shared_ptr<spdlog::logger> logger,
                    const xercesc::SAX2XMLReader*   parser,
-                   std::string_view                base_addr //
-                   )
-  : targets_(targets) //
-  , queue_(queue)     //
+                   std::string_view                base_addr)
+  : targets_(std::move(targets)) //
+  , queue_(queue)                //
   , parser_(parser)
   , logger_(std::move(logger)) //
   , base_addr_(base_addr)      //
   {
     // targets are converted to wide characters
-    for (const auto& el : targets_)
+    for (const auto& el : targets_.targets)
     {
       xpath_wide_t tmp_vec;
-      for (const auto& xp : el) { tmp_vec.emplace_back(xp.ns(), xp.tag()); }
+      for (const auto& xp : el.xpath()) { tmp_vec.emplace_back(std::string(xp.ns), std::string(xp.tag)); }
       targets_wide_.push_back(tmp_vec);
     }
-    matched_.assign(targets_.size(), 0);
+    matched_.assign(targets_wide_.size(), 0);
     // Korenski NS nivo — vedno prisoten
     ns_stack_.emplace_back(ns_level{.depth = -1, .ns_vec = {}});
+    for (std::size_t i = 0; i < targets_.targets.size(); ++i) logger_->debug("target[{}] = '{}'", i, targets_.targets[i].name());
   }
 
   // ============================================================================
@@ -183,7 +183,7 @@ namespace fsp
                                            [[maybe_unused]] const xercesc::Attributes& attrs)
   {
     // Advance all candidates matching the current depth
-    for (std::size_t i = 0; i < targets_.size(); ++i)
+    for (std::size_t i = 0; i < targets_.targets.size(); ++i)
     {
       // const auto& xpath      = targets_[i];
       const auto& xpath_wide = targets_wide_[i];
@@ -236,6 +236,8 @@ namespace fsp
 
     open_ns_scope();
     doc_depth_++;
+    if (logger_)
+      logger_->trace("startElement depth:{} local:'{}' uri:'{}'", doc_depth_, x_str(localname).to_string(), x_str(uri).to_string());
 
     if (! capturing_) check_xpath_matches(uri, localname, qname, attrs);
 
@@ -264,7 +266,7 @@ namespace fsp
           logger_->debug("pushing to queue:{} type: {} segment: {}", x_str(qname).to_string(), active_idx_, counter_);
           logger_->trace("{} offset: {} len {} prefix '{}'", x_str(qname).to_string(), frag_start_offset_, length, prefix_);
         }
-        queue_.push(xml_segment(counter_, active_idx_, frag_start_offset_, length, prefix_));
+        queue_.push(xml_segment(counter_, active_idx_, frag_start_offset_, length, prefix_, active_idx_));
         counter_++;
         capturing_  = false;
         active_idx_ = -1;

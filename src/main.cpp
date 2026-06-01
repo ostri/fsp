@@ -28,48 +28,53 @@ int main(int argc, char* argv[])
     xpath_strings.emplace_back("/Document/FIToFICstmrCdtTrf/CdtTrfTxInf"); // transaction
 
     // clang-format off
-  static constexpr auto NS = std::to_array<fsp::ns>({
-    {.prefix = "",   .uri = "urn:iso:std:iso:20022:tech:xsd:pacs.008.001.10"}, // default namespace
-    {.prefix = "xy", .uri = "krneki"},      // explicitly defined namespace and prefix
-  });
-  static constexpr auto xpath_hdr = std::to_array<fsp::raw_attr>({
-    {.name="txn_id",          .path="CdtTrfTxInf/PmtId/TxId"},
-    {.name="debtor_.iban_",   .path="CdtTrfTxInf/DbtrAcct/Id/IBAN"},
-    {.name="debtor_.bic_",    .path="CdtTrfTxInf/DbtrAgt/FinInstnId/BICFI"},
-    {.name="creditor_.iban_", .path="CdtTrfTxInf/CdtrAcct/Id/IBAN"},
-    {.name="creditor_.bic_",  .path="CdtTrfTxInf/CdtrAgt/FinInstnId/BICFI"},
-    {.name="amount_",         .path="CdtTrfTxInf/IntrBkSttlmAmt"},
-    {.name="currency_",       .path="CdtTrfTxInf/IntrBkSttlmAmt/@Ccy",        .is_opt=true},
-    {.name="value_date_",     .path="CdtTrfTxInf/IntrBkSttlmDt",              .is_opt=true},
-    {.name="remittance_",     .path="CdtTrfTxInf/RmtInf/Strd/RfrdDocInf/*Nb", .is_opt=true},
-  });
-    static const auto hdr = fsp::build(xpath_hdr, NS); // xml tree node(s)
-
-  static constexpr auto xpath_txn = std::to_array<fsp::raw_attr>({
-    {.name="txn_id",          .path="CdtTrfTxInf/PmtId/TxId"},
-    {.name="debtor_.iban_",   .path="CdtTrfTxInf/DbtrAcct/Id/IBAN"},
-    {.name="debtor_.bic_",    .path="CdtTrfTxInf/DbtrAgt/FinInstnId/BICFI"},
-    {.name="creditor_.iban_", .path="CdtTrfTxInf/CdtrAcct/Id/IBAN"},
-    {.name="creditor_.bic_",  .path="CdtTrfTxInf/CdtrAgt/FinInstnId/BICFI"},
-    {.name="amount_",         .path="CdtTrfTxInf/IntrBkSttlmAmt"},
-    {.name="currency_",       .path="CdtTrfTxInf/IntrBkSttlmAmt/@Ccy",        .is_opt=true},
-    {.name="value_date_",     .path="CdtTrfTxInf/IntrBkSttlmDt",              .is_opt=true},
-    {.name="remittance_",     .path="CdtTrfTxInf/RmtInf/Strd/RfrdDocInf/*Nb", .is_opt=true},
-  });
+    static constexpr auto ns = std::to_array<fsp::ns>({
+      {.prefix = "",   .uri = "urn:iso:std:iso:20022:tech:xsd:pacs.008.001.08"}, // default namespace
+      {.prefix = "x",  .uri = "urn:iso:std:iso:20022:tech:xsd:pacs.008.001.08"}, // default namespace
+      {.prefix = "xy", .uri = "krneki"},      // explicitly defined namespace and prefix
+    });
+    // --- targets --------------------------------------------------------------
+    static constexpr auto targets_raw = std::to_array<fsp::raw_attr>({
+      {.name="header",           .path="/x:Document/FIToFICstmrCdtTrf/x:GrpHdr"},
+      {.name="transaction",      .path="/Document/x:FIToFICstmrCdtTrf/x:CdtTrfTxInf"},
+    });
+    // --- attributes in header -------------------------------------------------
+    static constexpr auto xpath_hdr = std::to_array<fsp::raw_attr>({
+      {.name="msg_id",          .path="x:GrpHdr/MsgId"},
+      {.name="amount_sum",      .path="GrpHdr/TtlIntrBkSttlmAmt"},
+      {.name="amount_sum_cur",  .path="GrpHdr/TtlIntrBkSttlmAmt/@Ccy", .is_opt=true},
+      {.name="msg_ts",          .path="x:GrpHdr/CreDtTm",              .is_opt=true},
+    });
+    // --- attributes in transaction --------------------------------------------
+    static constexpr auto xpath_txn = std::to_array<fsp::raw_attr>({
+      {.name="txn_id",          .path="CdtTrfTxInf/PmtId/TxId"},
+      {.name="debtor_.iban_",   .path="CdtTrfTxInf/DbtrAcct/Id/IBAN"},
+      {.name="debtor_.bic_",    .path="CdtTrfTxInf/DbtrAgt/FinInstnId/BICFI"},
+      {.name="creditor_.iban_", .path="CdtTrfTxInf/CdtrAcct/Id/IBAN"},
+      {.name="creditor_.bic_",  .path="CdtTrfTxInf/CdtrAgt/FinInstnId/BICFI"},
+      {.name="amount_",         .path="CdtTrfTxInf/IntrBkSttlmAmt"},
+      {.name="currency_",       .path="CdtTrfTxInf/IntrBkSttlmAmt/@Ccy",        .is_opt=true},
+      {.name="value_date_",     .path="CdtTrfTxInf/IntrBkSttlmDt",              .is_opt=true},
+      {.name="remittance_",     .path="CdtTrfTxInf/RmtInf/Strd/RfrdDocInf/*Nb", .is_opt=true},
+    });
     // clang-format on
-    static const auto xtn = fsp::build(xpath_txn, NS); // xml tree node(s)
+    static const auto targets = fsp::build(targets_raw, ns); // xml tree node(s)
+    static const auto hdr     = fsp::build(xpath_hdr, ns);   // xml tree node(s)
+    static const auto xtn     = fsp::build(xpath_txn, ns);   // xml tree node(s)
+    static auto       all     = fsp::proc_data{.targets = targets, .xpaths = {hdr, xtn}};
+    assert(all.targets.size() == all.xpaths.size());
     // static_assert(xtn.size() == raw.size(), "The sizes must be equal");
     //  Configure logging
     fsp::logger_config log_cfg{.enable_console = true,
                                .enable_file    = true,
                                .log_file_path  = "xml_processor.log",
-                               .log_level      = spdlog::level::info, // spdlog::level::info;
+                               .log_level      = spdlog::level::trace, // spdlog::level::info;
                                .logger_name    = "main_app"};
     const auto         no_of_workers = 7U;
     auto               result        = fsp::process_xml_file( //
       xml_file,                                               // path to the xml file
       xsd_file,                                               // path to the xsd file that xml file must comply with
-      xpath_strings,                                          // array of xpaths that define split points of the xml tree
+      all,                                                    // array of xpaths that define split points of the xml tree
       no_of_workers,                                          // number of workers that process the xml file in parallel (0=all)
       log_cfg                                                 // configuration of logging
     );

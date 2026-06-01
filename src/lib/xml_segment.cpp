@@ -4,12 +4,20 @@ namespace fsp
 {
   // Vrne pogled na XML vsebino segmenta iz mmap bufferja.
   // mmap_base mora kazati na začetek mmap-ane datoteke.
-  [[nodiscard]] xml_segment::xml_segment(std::size_t id, int xpath_index, std::size_t offset, std::size_t length, std::string_view prefix)
+  xml_segment::xml_segment(std::size_t      id,          // segment id
+                           int              xpath_index, // target index
+                           std::size_t      offset,      // start from the beggining of the buffer
+                           std::size_t      length,      // length of the character buffer
+                           std::string_view prefix,      // prefix to be added before the buffer (actial start of the
+                                                         // tag + inherited  ns)
+                           int seg_type                  // segment type (ndx of the split xpath)
+                           )
   : id_(id)
   , xpath_index_(xpath_index)
   , offset_(offset)
   , length_(length)
   , prefix_(prefix)
+  , seg_type_(seg_type)
   {
   }
   std::string_view xml_segment::view(const std::byte* mmap_base) const noexcept

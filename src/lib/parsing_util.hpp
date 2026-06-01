@@ -69,7 +69,7 @@ namespace fsp
   {
   public:
     constexpr xml_attr() = default;
-    constexpr xml_attr(const raw_attr& raw, std::span<const ns> ns_arr);
+    constexpr xml_attr(std::size_t original_ndx, const raw_attr& raw, std::span<const ns> ns_arr);
 
     [[nodiscard]] std::string full_xpath() const;
     [[nodiscard]] std::string full_xpath_with_uri() const
@@ -95,6 +95,7 @@ namespace fsp
     [[nodiscard]] constexpr cstr_t      attr_name() const { return attr_.tag; }
     [[nodiscard]] constexpr cstr_t      attr_uri() const { return attr_.ns; }
     [[nodiscard]] constexpr auto        last() const { return xpath_[xpath_.size() - 1]; }
+    [[nodiscard]] std::size_t           original_ndx() const { return original_ndx_; }
   private:
     static constexpr cstr_t trim_xpath(cstr_t str);
   private:
@@ -104,13 +105,15 @@ namespace fsp
     bool        is_opt_   = false;
     xpath_vec   xpath_;
     xpath_el    attr_;
-    std::size_t xpath_size_ = 0;
+    std::size_t xpath_size_   = 0;
+    std::size_t original_ndx_ = 0; // original index before sorting to connect with child structure
   };
 
   // --- main structure (non-templated) -------------------------------------------------
   class xpath_node_struct
   {
   public:
+    xpath_node_struct() = default;
     constexpr xpath_node_struct(raw_inputs inputs, std::span<const ns> ns_arr);
 
     [[nodiscard]] constexpr const xml_attr& operator[](std::size_t ndx) const { return data_.at(ndx); }
@@ -127,17 +130,23 @@ namespace fsp
     std::vector<xml_attr> data_;
     std::size_t           max_xpath_size_ = 0;
   };
+  struct proc_data
+  {
+    fsp::xpath_node_struct              targets;
+    std::vector<fsp::xpath_node_struct> xpaths;
+  };
   ///////////////////////////////////////////////////////////////////////////////////////////////////////
   // Build function
   [[nodiscard]] constexpr xpath_node_struct build(raw_inputs raw_paths, std::span<const ns> ns_arr) //
   { return {raw_paths, ns_arr}; }
   // xml_attr
-  constexpr xml_attr::xml_attr(const raw_attr& raw, std::span<const ns> ns_arr)
+  constexpr xml_attr::xml_attr(std::size_t original_ndx, const raw_attr& raw, std::span<const ns> ns_arr)
   : name_(raw.name)
   , path_(trim_xpath(raw.path))
   , is_opt_(raw.is_opt)
+  , original_ndx_(original_ndx)
   {
-    auto tmp    = parse_xpath_to_elements(raw.path, ns_arr);
+    auto tmp    = parse_xpath_to_elements(path_, ns_arr);
     xpath_size_ = tmp.size();
     // xpath_.reserve(tmp.size());
 
@@ -174,7 +183,12 @@ namespace fsp
   {
     for (const auto& el : ns_arr)
       if (el.prefix == prefix) return el.uri;
-    throw compile_error("Prefix has no matching definition in ns structure.");
+    std::string msg;
+    for (const auto& el : ns_arr) { msg += fmt::format("prefix:'{}'\turi:'{}'\n", el.prefix, el.uri); }
+    throw std::runtime_error(fmt::format( //
+      "Prefix '{}' has no matching definition in ns structure.\n{}",
+      prefix,
+      msg));
   }
 
   constexpr xpath_vec xml_attr::parse_xpath_to_elements(cstr_t input, std::span<const ns> ns_arr)
@@ -223,9 +237,10 @@ namespace fsp
     data_.reserve(inputs.size());
     std::size_t max_d = 0;
 
+    auto ndx = 0U;
     for (const auto& input : inputs)
     {
-      xml_attr attr(input, ns_arr);
+      xml_attr attr(ndx++, input, ns_arr);
       max_d = std::max(max_d, attr.xpath_size());
       data_.push_back(std::move(attr));
     }
@@ -271,5 +286,6 @@ namespace fsp
     }
     return res;
   }
+
 
 } // namespace fsp

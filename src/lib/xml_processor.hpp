@@ -102,17 +102,19 @@ namespace fsp
     // NOLINTBEGIN(cppcoreguidelines-avoid-const-or-ref-data-members)
     struct worker_context
     {
-      int                             worker_id; // unique id of the worker
-      segment_queue&                  seg_queue; // input queue
-      const fsp::mmap_file&           xml_mmap;  // mmap mapping for buffer segment
-      std::vector<segment_result>&    results;   // output queue for valid transactions
-      std::vector<segment_result>&    errors;    // output queue for transactions with errors
-      std::mutex&                     results_mutex;
-      std::mutex&                     errors_mutex;
-      std::atomic<std::size_t>&       processed_count;
-      std::atomic<std::size_t>&       error_count;
-      std::atomic<bool>&              cancel_flag;
-      std::shared_ptr<spdlog::logger> logger;
+      int                             worker_id;       // unique id of the worker
+      segment_queue&                  seg_queue;       // input queue
+      const fsp::mmap_file&           xml_mmap;        // mmap mapping for buffer segment
+      std::vector<segment_result>&    results;         // output queue for valid transactions
+      std::vector<segment_result>&    errors;          // output queue for transactions with errors
+      std::mutex&                     results_mutex;   // results queue mutex
+      std::mutex&                     errors_mutex;    // errors queue mitex
+      std::atomic<std::size_t>&       processed_count; // number of processed segments
+      std::atomic<std::size_t>&       error_count;     // number of detected errors
+      std::atomic<bool>&              cancel_flag;     // is the operation cancelled?
+      std::shared_ptr<spdlog::logger> logger;          // logger
+      const proc_data&                targets;         // how to partition the xml buffer and which
+                                                       // tags to extract from each partition type
     };
     // NOLINTEND(cppcoreguidelines-avoid-const-or-ref-data-members)
 
@@ -139,7 +141,7 @@ namespace fsp
     // Trajna mmap referenca za workers (živi med procesiranjem)
     const fsp::mmap_file* active_mmap_ = nullptr;
 
-    void        setup_logger();
+    void setup_logger();
 
     // [SPREMENJENO] setup_parser() razdeljen na dve funkciji:
     // - setup_parser_no_validation(): za SAX nit — brez validacijskih featureov,
@@ -161,10 +163,11 @@ namespace fsp
     // teče vzporedno s SAX parsingom. Če XSD ni podan, future se takoj razreši
     // z nullopt da ostala koda ne rabi ločevati med "validacija vklopljena" in
     // "validacija izklopljena".
-    std::shared_future<std::optional<error_info>> launch_validation_thread(
-      const void* xml_data, std::size_t xml_size,
-      const void* xsd_data, std::size_t xsd_size,
-      std::string xsd_path);
+    std::shared_future<std::optional<error_info>> launch_validation_thread(const void* xml_data,
+                                                                           std::size_t xml_size,
+                                                                           const void* xsd_data,
+                                                                           std::size_t xsd_size,
+                                                                           std::string xsd_path);
 
     static void worker_function( //
       [[maybe_unused]] const std::stop_token& st,
@@ -185,11 +188,11 @@ namespace fsp
 
   using processing_result = std::expected<std::pair<std::vector<segment_result>, std::vector<segment_result>>, error_info>;
 
-  processing_result process_xml_file(const std::string&              xml_path,
-                                     const std::string&              xsd_path,
-                                     const std::vector<std::string>& xpath_strings,
-                                     std::size_t                     num_workers = 0,
-                                     const logger_config&            log_cfg     = logger_config{});
+  processing_result process_xml_file(const std::string&   xml_path,
+                                     const std::string&   xsd_path,
+                                     const proc_data&     proc_data,
+                                     std::size_t          num_workers = 0,
+                                     const logger_config& log_cfg     = logger_config{});
 
 } // namespace fsp
 

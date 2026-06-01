@@ -397,11 +397,13 @@ namespace fsp
 
     UniqueXmlTextReader reader(xmlReaderForMemory(xml_buf.data(), static_cast<int>(xml_buf.size()), nullptr, nullptr, flags));
 
-    int                  read_status;
-    const char*          value = nullptr;
-    auto                 depth = 0UL;
-    const char           pad   = '.';
-    std::stack<xml_node> stack;
+    int                          read_status;
+    const char*                  value = nullptr;
+    auto                         depth = 0UL;
+    const char                   pad   = '.';
+    std::stack<xml_node>         stack;
+    [[maybe_unused]] const auto& xpaths = ctx.targets.xpaths[seg.seg_type()];
+    assert(xpaths.size() != 0);
     while ((read_status = xmlTextReaderRead(reader.get())) == 1)
     {
       int  type      = xmlTextReaderNodeType(reader.get());
@@ -452,11 +454,21 @@ namespace fsp
     res.success = read_status != -1;
     return res;
   }
-
-  void xml_processor::worker_function([[maybe_unused]] const std::stop_token& st, int worker_id, [[maybe_unused]] worker_context ctx)
+  /**
+   * @brief execution of worker thread
+   *
+   * @param st don't know TODO ostri ugotovi čemu to služi
+   * @param worker_id unique id of the thread
+   * @param ctx worker context
+   */
+  void xml_processor::worker_function( //
+    [[maybe_unused]] const std::stop_token& st,
+    int                                     worker_id,
+    [[maybe_unused]] worker_context         ctx)
   {
+    auto t0         = std::chrono::steady_clock::now();
     log_thread_name = fmt::format("wrk{:03}", worker_id);
-    if (ctx.logger) ctx.logger->info("Worker thread '{}' started.", log_thread_name);
+    if (ctx.logger) ctx.logger->debug("Worker thread '{}' started.", log_thread_name);
     ctx.worker_id = worker_id;
 
     while (! ctx.cancel_flag.load())
@@ -492,7 +504,11 @@ namespace fsp
         ctx.error_count++;
       }
     }
-    if (ctx.logger) ctx.logger->info("Worker thread '{}' finished.", log_thread_name);
+    if (ctx.logger && ctx.logger->should_log(ctx.logger->level()))
+    {
+      auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count();
+      ctx.logger->debug("Worker thread '{}' finished in {} ms.", log_thread_name, duration);
+    }
   }
 
   void_result xml_processor::start_workers()
@@ -517,23 +533,24 @@ namespace fsp
     }
 
     worker_context ctx{
-      .worker_id       = -1,
-      .seg_queue       = seg_queue_,
-      .xml_mmap        = *active_mmap_,
-      .results         = results_,
-      .errors          = errors_,
-      .results_mutex   = results_mutex_,
-      .errors_mutex    = errors_mutex_,
-      .processed_count = processed_count_,
-      .error_count     = error_count_,
-      .cancel_flag     = cancel_flag_,
-      .logger          = logger_,
+      .worker_id       = -1,               // unique id of the worker
+      .seg_queue       = seg_queue_,       // queue to send segmetns to workers
+      .xml_mmap        = *active_mmap_,    // input/xml file or buffer
+      .results         = results_,         // queue of results
+      .errors          = errors_,          // queue of errors
+      .results_mutex   = results_mutex_,   // mutex for queue of results
+      .errors_mutex    = errors_mutex_,    // mutex for queue of errors
+      .processed_count = processed_count_, // number of processed segmetns
+      .error_count     = error_count_,     // number of error segments
+      .cancel_flag     = cancel_flag_,     // are we cancellig the operation?
+      .logger          = logger_,          // logger
+      .targets         = config_.targets   // how to split the xml tree and whic values to find
     };
 
     workers_.reserve(config_.num_workers);
     for (std::size_t i = 0; i < config_.num_workers; ++i) workers_.emplace_back(worker_function, i, ctx);
 
-    log_debug(fmt::format("{} workers started.", config_.num_workers));
+    log_info(fmt::format("{} workers started.", config_.num_workers));
     return {};
   }
 
@@ -616,17 +633,8 @@ namespace fsp
   //   val_future.get()  →  vrnemo napako klicatelju
   void_result xml_processor::process_from_buffer(fsp::mmap_file& xml_mmap, fsp::mmap_file* xsd_mmap)
   {
-    // [SPREMENJENO] Kličemo setup_parser_no_validation() namesto setup_parser()
-    // ker validacija zdaj teče v ločeni niti
     auto ps = setup_parser_no_validation();
     if (! ps) return std::unexpected(ps.error());
-
-    // [ODSTRANJENO] Sinhrona validacija pred parsingom:
-    // if (xsd_mmap != nullptr) {
-    //   auto vs = setup_validation(*xsd_mmap);
-    //   if (!vs) return std::unexpected(vs.error());
-    // }
-    // Zamenjano z asinhrono validacijo spodaj (launch_validation_thread).
 
     try
     {
@@ -653,10 +661,7 @@ namespace fsp
     {
       val_future =
         launch_validation_thread(xml_mmap.data(), xml_mmap.size(), xsd_mmap->data(), xsd_mmap->size(), std::string(xsd_mmap->path()));
-
-      // [DODANO] Injiciramo shared_future v handler — ta ga polling preverja
-      // v startElement() in ob napaki vrže izjemo ki prekine parser_->parse()
-      handler_->set_validation_future(val_future);
+      handler_->set_validation_future(val_future); // to receive signal, taht validation failed
     }
 
     // [DODANO] Zastavica: ali smo parser_->parse() prekinili zaradi validacije.
@@ -744,9 +749,10 @@ namespace fsp
       }
     }
 
-    auto stat = get_stats();
-    log_info(fmt::format("Processing time:{:.2f} ms workers:{} segments:{} (ok:{} err:{}) bytes:{}",
-                         stat.processing_time_ms,
+    auto       stat = get_stats();
+    const auto kilo = 1000;
+    log_info(fmt::format("Processing time: {:.3f}sec workers:{} segments:{} (ok:{} err:{}) size:{} byte(s)",
+                         stat.processing_time_ms / kilo, // converting from milisecond to seconds
                          stat.active_workers,
                          stat.total_segments,
                          stat.successful_segments,
@@ -789,23 +795,23 @@ namespace fsp
   // Convenience function
   // ============================================================================
 
-  processing_result process_xml_file(const std::string&              xml_path,
-                                     const std::string&              xsd_path,
-                                     const std::vector<std::string>& xpath_strings,
-                                     std::size_t                     num_workers,
-                                     const logger_config&            log_cfg)
+  processing_result process_xml_file(const std::string&   xml_path,
+                                     const std::string&   xsd_path,
+                                     const proc_data&     proc_data,
+                                     std::size_t          num_workers,
+                                     const logger_config& log_cfg)
   {
-    std::vector<xpath_t> targets;
-    targets.reserve(xpath_strings.size());
-    for (const auto& s : xpath_strings)
-    {
-      auto r = xpath_helpers::from_string(s);
-      if (! r) return std::unexpected(r.error());
-      targets.push_back(std::move(*r));
-    }
+    // std::vector<xpath_t> targets;
+    //  targets.reserve(proc_data.size());
+    //  for (const auto& s : xpath_strings)
+    //  {
+    //    auto r = xpath_helpers::from_string(s);
+    //    if (! r) return std::unexpected(r.error());
+    //    targets.push_back(std::move(*r));
+    //  }
 
     processor_config cfg;
-    cfg.targets              = std::move(targets);
+    cfg.targets              = proc_data;
     cfg.num_workers          = num_workers;
     cfg.validate_against_xsd = ! xsd_path.empty();
     cfg.log_config           = log_cfg;

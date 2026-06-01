@@ -15,9 +15,9 @@
 #include <xercesc/sax2/SAX2XMLReader.hpp>
 
 // #include "common.hpp"
-#include "e_tag.hpp"
 #include "e_tag_wide.hpp"
 #include "error_info.hpp"
+#include "parsing_util.hpp"
 #include "queue.hpp"
 #include "x_str.hpp"
 // #include "x_str.hpp"
@@ -32,7 +32,7 @@ namespace fsp
   class Handler : public xercesc::DefaultHandler
   {
   public:
-    Handler(const std::vector<xpath_t>&     targets,
+    Handler(proc_data&                      targets,
             segment_queue&                  queue,
             std::shared_ptr<spdlog::logger> logger,
             const xercesc::SAX2XMLReader*   parser,
@@ -92,7 +92,7 @@ namespace fsp
     std::string prepare_msg(const xercesc::SAXParseException& e);
 
     // --- subtree xpaths ---
-    std::vector<xpath_t>      targets_;      // xpath rules
+    proc_data                 targets_;      // xpath rules
     std::vector<xpath_wide_t> targets_wide_; // xpath rules as XMLCh* strings
 
     // --- NS definicitons ---
