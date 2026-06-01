@@ -20,8 +20,8 @@ namespace fsp
                    std::shared_ptr<spdlog::logger> logger,
                    const xercesc::SAX2XMLReader*   parser,
                    std::string_view                base_addr)
-  : targets_(std::move(targets)) //
-  , queue_(queue)                //
+  : targets_(targets) //
+  , queue_(queue)     //
   , parser_(parser)
   , logger_(std::move(logger)) //
   , base_addr_(base_addr)      //
@@ -233,14 +233,11 @@ namespace fsp
                              const xercesc::Attributes&    attrs)
   {
     check_validation_status();
-
     open_ns_scope();
     doc_depth_++;
-    if (logger_)
-      logger_->trace("startElement depth:{} local:'{}' uri:'{}'", doc_depth_, x_str(localname).to_string(), x_str(uri).to_string());
-
+    if (logger_ && logger_->should_log(logger_->level()))
+      logger_->trace("startElement depth:{:2} local:'{:10}' uri:'{}'", doc_depth_, x_str(localname).to_string(), x_str(uri).to_string());
     if (! capturing_) check_xpath_matches(uri, localname, qname, attrs);
-
     if (capturing_) [[likely]]
       frag_depth_++;
   }
@@ -261,12 +258,13 @@ namespace fsp
       { // fragment is finished. wrap it up and send it to the workers
         std::size_t end_offset = parser_->getSrcOffset();
         std::size_t length     = end_offset - frag_start_offset_;
+        auto        seg        = xml_segment(counter_, active_idx_, frag_start_offset_, length, prefix_);
         if (logger_ && logger_->should_log(logger_->level())) [[unlikely]]
         {
-          logger_->debug("pushing to queue:{} type: {} segment: {}", x_str(qname).to_string(), active_idx_, counter_);
-          logger_->trace("{} offset: {} len {} prefix '{}'", x_str(qname).to_string(), frag_start_offset_, length, prefix_);
+          logger_->debug("pushing to queue: {} {}", x_str(qname).to_string(), seg.dump());
+          logger_->trace("{}", seg.dump_all(base_addr_));
         }
-        queue_.push(xml_segment(counter_, active_idx_, frag_start_offset_, length, prefix_, active_idx_));
+        queue_.push(std::move(seg));
         counter_++;
         capturing_  = false;
         active_idx_ = -1;

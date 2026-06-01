@@ -16,7 +16,6 @@ namespace fsp
   using date_t = std::chrono::year_month_day;
   using cstr_t = std::string_view;
 
-
   // --- compile time exception ----------------------------------------------------------
   class compile_error : public std::exception
   {
@@ -72,16 +71,7 @@ namespace fsp
     constexpr xml_attr(std::size_t original_ndx, const raw_attr& raw, std::span<const ns> ns_arr);
 
     [[nodiscard]] std::string full_xpath() const;
-    [[nodiscard]] std::string full_xpath_with_uri() const
-    {
-      std::string tmp;
-      for (std::size_t i = 0; i < xpath_size_; ++i) tmp += fmt::format("/{}:{}", xpath_[i].ns, xpath_[i].tag);
-
-      if (is_attr()) tmp += fmt::format("/@{}:{}", attr_uri(), attr_name());
-      else if (is_array()) tmp += "/*";
-
-      return tmp;
-    }
+    [[nodiscard]] std::string full_xpath_with_uri() const;
 
     [[nodiscard]] constexpr cstr_t      name() const { return name_; }
     [[nodiscard]] constexpr cstr_t      path() const { return path_; }
@@ -95,7 +85,22 @@ namespace fsp
     [[nodiscard]] constexpr cstr_t      attr_name() const { return attr_.tag; }
     [[nodiscard]] constexpr cstr_t      attr_uri() const { return attr_.ns; }
     [[nodiscard]] constexpr auto        last() const { return xpath_[xpath_.size() - 1]; }
-    [[nodiscard]] std::size_t           original_ndx() const { return original_ndx_; }
+    [[nodiscard]] constexpr std::size_t original_ndx() const { return original_ndx_; }
+    [[nodiscard]] constexpr std::string dump(int offs = 0) const
+    {
+      auto msg = fmt::format(                                                                                    //
+        "{}name: {:15} path: {:40} is_array: {:5} is_opt {:5} attr: {}:{:15} xpath size:{:2} original ndx:{:2}", //
+        std::string(offs, ' '),
+        name_,
+        path_,
+        is_array_,
+        is_opt_,
+        attr_.ns,
+        attr_.tag,
+        xpath_size_,
+        original_ndx_);
+      return msg;
+    }
   private:
     static constexpr cstr_t trim_xpath(cstr_t str);
   private:
@@ -124,17 +129,31 @@ namespace fsp
     [[nodiscard]] constexpr std::size_t size() const { return data_.size(); }
     [[nodiscard]] constexpr std::size_t max_xpath_size() const { return max_xpath_size_; }
 
-    [[nodiscard]] constexpr cstr_t last_xpath_tag_name(std::size_t depth) const;
-    [[nodiscard]] constexpr cstr_t first_xpath_tag_name(std::size_t depth) const;
+    [[nodiscard]] constexpr std::pair<cstr_t, std::size_t> last_xpath_tag_name(std::size_t depth) const;
+    [[nodiscard]] constexpr std::pair<cstr_t, std::size_t> first_xpath_tag_name(std::size_t depth) const;
+    [[nodiscard]] std::string                              dump(int offs) const
+    {
+      std::string msg;
+      msg = fmt::format("{}data.size; {} max_path_size: {}", std::string(offs, ' '), data_.size(), max_xpath_size_);
+      return msg;
+    }
   private:
     std::vector<xml_attr> data_;
     std::size_t           max_xpath_size_ = 0;
   };
   struct proc_data
   {
-    fsp::xpath_node_struct              targets;
-    std::vector<fsp::xpath_node_struct> xpaths;
+    fsp::xpath_node_struct              targets; // NOLINT(misc-non-private-member-variables-in-classes)
+    std::vector<fsp::xpath_node_struct> xpaths;  // NOLINT(misc-non-private-member-variables-in-classes)
+    [[nodiscard]] std::string           dump(int offs) const
+    {
+      std::string msg;
+      msg = fmt::format("{0}targets:{1}\n{0}xpaths.size:{2}", std::string(offs, ' '), targets.dump(offs), xpaths.size());
+      return msg;
+    }
   };
+
+
   ///////////////////////////////////////////////////////////////////////////////////////////////////////
   // Build function
   [[nodiscard]] constexpr xpath_node_struct build(raw_inputs raw_paths, std::span<const ns> ns_arr) //
@@ -258,34 +277,32 @@ namespace fsp
     throw compile_error(fmt::format("unknown path '{}'.", name).data());
   }
 
-  [[nodiscard]] constexpr cstr_t xpath_node_struct::last_xpath_tag_name(std::size_t depth) const
+  [[nodiscard]] constexpr std::pair<cstr_t, std::size_t> xpath_node_struct::last_xpath_tag_name(std::size_t depth) const
   {
     if (depth >= max_xpath_size_) throw compile_error(fmt::format("depth {} exceeds max xpath depth {}", depth, max_xpath_size_).data());
 
-    cstr_t res{};
-    for (const auto& el : data_)
+    std::pair<cstr_t, std::size_t> res{};
+    for (const auto& [ndx, el] : std::views::enumerate(data_))
     {
       if (depth >= el.xpath_size()) continue;
       auto val = el.xpath()[depth].tag;
-      if (res.empty() || val > res) res = val;
+      if (res.first.empty() || val > res.first) res = {val, ndx};
     }
     return res;
   }
 
-  [[nodiscard]] constexpr cstr_t xpath_node_struct::first_xpath_tag_name(std::size_t depth) const
+  [[nodiscard]] constexpr std::pair<cstr_t, std::size_t> xpath_node_struct::first_xpath_tag_name(std::size_t depth) const
   {
     if (depth >= max_xpath_size_) throw compile_error(fmt::format("depth {} exceeds max xpath depth {}", depth, max_xpath_size_).data());
 
-    cstr_t res{};
-    for (const auto& el : data_)
+    std::pair<cstr_t, std::size_t> res{};
+    for (const auto& [ndx, el] : std::views::enumerate(data_))
     {
       if (depth >= el.xpath_size()) continue;
       auto val = el.xpath()[depth].tag;
       if (val.empty()) continue; // we are looking for minimum value but empty
-      if (res.empty() || val < res) res = val;
+      if (res.first.empty() || val < res.first) res = {val, ndx};
     }
     return res;
   }
-
-
 } // namespace fsp

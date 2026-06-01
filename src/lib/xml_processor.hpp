@@ -174,12 +174,12 @@ namespace fsp
       int                                     worker_id,
       [[maybe_unused]] worker_context         ctx);
 
-    static result<segment_result> process_segment([[maybe_unused]] const worker_context& ctx, const xml_segment& seg);
+    static result<segment_result> process_segment(const worker_context& ctx, const xml_segment& seg);
     static result<segment_result> extract_xml_values( //
-      cstr_t                                 xml_buf,
-      const segment_result&                  sr,
-      const xml_segment&                     seg,
-      [[maybe_unused]] const worker_context& ctx);
+      cstr_t                xml_buf,
+      const segment_result& sr,
+      const xml_segment&    seg,
+      const worker_context& ctx);
     void                          log_error(const error_info& error);
     void                          log_info(const std::string& msg);
     void                          log_debug(const std::string& msg);

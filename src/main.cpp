@@ -61,7 +61,8 @@ int main(int argc, char* argv[])
     static const auto targets = fsp::build(targets_raw, ns); // xml tree node(s)
     static const auto hdr     = fsp::build(xpath_hdr, ns);   // xml tree node(s)
     static const auto xtn     = fsp::build(xpath_txn, ns);   // xml tree node(s)
-    static auto       all     = fsp::proc_data{.targets = targets, .xpaths = {hdr, xtn}};
+    // static const auto xps     = {hdr, xtn};
+    static auto all = fsp::proc_data{.targets = targets, .xpaths = {hdr, xtn}};
     assert(all.targets.size() == all.xpaths.size());
     // static_assert(xtn.size() == raw.size(), "The sizes must be equal");
     //  Configure logging
@@ -70,7 +71,7 @@ int main(int argc, char* argv[])
                                .log_file_path  = "xml_processor.log",
                                .log_level      = spdlog::level::trace, // spdlog::level::info;
                                .logger_name    = "main_app"};
-    const auto         no_of_workers = 7U;
+    const auto         no_of_workers = 1U;
     auto               result        = fsp::process_xml_file( //
       xml_file,                                               // path to the xml file
       xsd_file,                                               // path to the xsd file that xml file must comply with

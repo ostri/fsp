@@ -93,7 +93,8 @@ int main()
     fmt::print("lowest and the biggest tag name value by depth\n");
     for (auto ndx = 0U; ndx < fsp::xtn.max_xpath_size(); ndx++) //
     {
-      fmt::print("depth: {:3}: min: {:15} max: {:15}\n", +ndx, fsp::xtn.first_xpath_tag_name(ndx), fsp::xtn.last_xpath_tag_name(ndx));
+      fmt::print(
+        "depth: {:3}: min: {:15} max: {:15}\n", +ndx, fsp::xtn.first_xpath_tag_name(ndx).first, fsp::xtn.last_xpath_tag_name(ndx).first);
     }
     // static_assert(fsp::xtn.first_xpath_tag_name(0) == "CdtTrfTxInf");
     // static_assert(fsp::xtn.last_xpath_tag_name(0) == "CdtTrfTxInf");
