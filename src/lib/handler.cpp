@@ -165,7 +165,7 @@ namespace fsp
         const auto& val_result = val_future_.get();
         if (val_result.has_value())
         {
-          if (logger_ && logger_->should_log(logger_->level()))
+          if (logger_ && logger_->should_log(spdlog::level::debug))
             logger_->debug("Handler: validacijska napaka zaznana, prekinjam SAX parsing.");
           // Vržemo SAXParseException — Xerces jo ujame interno in ustavi parsing.
           // Sporočilo prenesemo naprej; row/col ni znan na tej točki (0,0).
@@ -216,7 +216,7 @@ namespace fsp
         frag_start_offset_ = parser_->getSrcOffset(); //
         prefix_            = make_open_tag(qname, attrs);
 
-        if (logger_ && logger_->should_log(logger_->level())) [[unlikely]]
+        if (logger_ && logger_->should_log(spdlog::level::trace)) [[unlikely]]
         {
           auto ln     = x_str(localname).to_string();
           auto ns_uri = x_str(uri).to_string();
@@ -232,7 +232,7 @@ namespace fsp
     check_validation_status();
     open_ns_scope();
     doc_depth_++;
-    if (logger_ && logger_->should_log(logger_->level())) [[unlikely]]
+    if (logger_ && logger_->should_log(spdlog::level::debug)) [[unlikely]]
       logger_->trace("startElement depth:{:2} local:'{:10}' uri:'{}'", doc_depth_, x_str(localname).to_string(), x_str(uri).to_string());
     if (! capturing_) check_xpath_matches(uri, localname, qname, attrs);
     if (capturing_) [[likely]]
@@ -256,7 +256,7 @@ namespace fsp
         std::size_t end_offset = parser_->getSrcOffset();
         std::size_t length     = end_offset - frag_start_offset_;
         auto        seg        = xml_segment(counter_, active_idx_, frag_start_offset_, length, prefix_);
-        if (logger_ && logger_->should_log(logger_->level())) [[unlikely]]
+        if (logger_ && logger_->should_log(spdlog::level::debug)) [[unlikely]]
         {
           logger_->debug("pushing to queue: {} {}", x_str(qname).to_string(), seg.dump());
           logger_->trace("{}", seg.dump_all(base_addr_));

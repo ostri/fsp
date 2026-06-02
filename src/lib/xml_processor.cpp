@@ -231,7 +231,7 @@ namespace fsp
                       {
                         log_thread_name = "valid>";
                         auto start      = std::chrono::steady_clock::now();
-                        if (logger && logger->should_log(logger->level()))
+                        if (logger && logger->should_log(spdlog::level::info))
                           logger->info(fmt::format("Validation started. file: xsd:{}", xsd_path));
 
                         try
@@ -273,7 +273,7 @@ namespace fsp
 
                           vparser->parse(src);
 
-                          if (logger && logger->should_log(logger->level()))
+                          if (logger && logger->should_log(spdlog::level::info))
                           {
                             auto end      = std::chrono::steady_clock::now();
                             auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
@@ -334,7 +334,7 @@ namespace fsp
 
     try
     {
-      if (ctx.logger && ctx.logger->should_log(ctx.logger->level()))
+      if (ctx.logger && ctx.logger->should_log(spdlog::level::debug))
       {
         ctx.logger->debug(fmt::format("seg: {} started ", seg.dump()));
         ctx.logger->trace(fmt::format("{}", seg.dump_all(ctx.xml_mmap.data(), 0)));
@@ -443,7 +443,7 @@ namespace fsp
 
       if (depth >= limits.size())
       {
-        if (ctx.logger && ctx.logger->should_log(ctx.logger->level()))
+        if (ctx.logger && ctx.logger->should_log(spdlog::level::debug))
           ctx.logger->debug("pruning subtree: '{}' too deep: '{}' max allowed: '{}'", safe_tag, depth, limits.size());
         read_status = xmlTextReaderNext(reader); // Skip all children, move to sibling or the end of parent tag
         return true;                             // Indicates that a 'continue' should be executed in the outer loop
@@ -452,13 +452,13 @@ namespace fsp
       auto tmp  = xml_node{safe_uri, safe_tag};
       auto low  = limits[depth].low_tag;
       auto high = limits[depth].high_tag;
-      if (ctx.logger && ctx.logger->should_log(ctx.logger->level()))
+      if (ctx.logger && ctx.logger->should_log(spdlog::level::trace))
       {
         ctx.logger->trace("tag: '{:15}' uri: '{:30}' low: {} high: {}", safe_tag, safe_uri, low, high);
       }
       if ((depth >= limits.size()) || (tmp.tag() < low) || (tmp.tag() > high))
       {
-        if (ctx.logger && ctx.logger->should_log(ctx.logger->level()))
+        if (ctx.logger && ctx.logger->should_log(spdlog::level::debug))
           ctx.logger->debug("pruning subtree: '{}' min: '{}' max: '{}'", safe_tag, limits[depth].low_tag, limits[depth].high_tag);
 
         read_status = xmlTextReaderNext(reader); // Skip all children, move to sibling or the end of parent tag
@@ -468,7 +468,7 @@ namespace fsp
       // depth++;
       return false; // Indicates normal execution flow, no pruning happened
     }
-    inline bool log(auto& log) { return log && log->should_log(log->level()); }
+    inline bool log(auto& log, spdlog::level::level_enum lvl = spdlog::level::trace) { return log && log->should_log(lvl); }
   } // namespace
   result<segment_result> xml_processor::extract_xml_values(cstr_t                xml_buf,
                                                            const segment_result& sr,
@@ -610,7 +610,7 @@ namespace fsp
         ctx.error_count++;
       }
     }
-    if (ctx.logger && ctx.logger->should_log(ctx.logger->level()))
+    if (ctx.logger && ctx.logger->should_log(spdlog::level::info))
     {
       auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count();
       //      ctx.logger->debug("Worker thread '{}' finished in {} ms.", log_thread_name, duration);
