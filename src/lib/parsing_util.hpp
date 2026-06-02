@@ -41,16 +41,16 @@ namespace fsp
   struct raw_attr
   {
     // raw_attr
-    [[nodiscard]] consteval std::size_t        xpath_size() const { return xpath_size(path); }
-    [[nodiscard]] static consteval std::size_t xpath_size(cstr_t path)
-    {
-      char ch = '/';
-      if (path.empty()) return 0;
-      if (path[0] == ch) return std::ranges::count(path.substr(1), ch) + 1;
-      return std::ranges::count(path, ch) + 1;
-    }
+    // [[nodiscard]] consteval std::size_t        xpath_size() const { return xpath_size(path); }
+    // [[nodiscard]] static consteval std::size_t xpath_size(cstr_t path)
+    // {
+    //   char ch = '/';
+    //   if (path.empty()) return 0;
+    //   if (path[0] == ch) return std::ranges::count(path.substr(1), ch) + 1;
+    //   return std::ranges::count(path, ch) + 1;
+    // }
 
-    bool operator==(const raw_attr& o) const { return (o.name == name) && (o.path == path); }
+    constexpr bool operator==(const raw_attr& o) const { return (o.name == name) && (o.path == path); }
     // NOLINTBEGIN(misc-non-private-member-variables-in-classes)
     cstr_t name;           // name of the value
     cstr_t path;           // xml path
@@ -60,7 +60,7 @@ namespace fsp
 
   // Span type for raw inputs
   using raw_inputs = std::span<const raw_attr>;
-  using xpath_vec  = static_xpath_vec; // std::vector<xpath_el>;
+  using xpath_vec  = std::vector<xpath_el>;
   using xpath_span = std::span<const xpath_el>;
 
   // --- xml attribute (runtime friendly, built at compile time) ------------------------
@@ -70,13 +70,11 @@ namespace fsp
     constexpr xml_attr() = default;
     constexpr xml_attr(std::size_t original_ndx, const raw_attr& raw, std::span<const ns> ns_arr);
 
-    [[nodiscard]] std::string full_xpath() const;
-    [[nodiscard]] std::string full_xpath_with_uri() const;
+    [[nodiscard]] constexpr std::string full_xpath() const;
+    [[nodiscard]] constexpr std::string full_xpath_with_uri() const;
 
     [[nodiscard]] constexpr cstr_t      name() const { return name_; }
     [[nodiscard]] constexpr cstr_t      path() const { return path_; }
-    static constexpr cstr_t             uri_from_prefix(cstr_t prefix, std::span<const ns> ns_arr);
-    static constexpr xpath_vec          parse_xpath_to_elements(cstr_t input, std::span<const ns> ns_arr);
     [[nodiscard]] constexpr bool        is_opt() const { return is_opt_; }
     [[nodiscard]] constexpr bool        is_attr() const { return ! attr_.tag.empty(); }
     [[nodiscard]] constexpr bool        is_array() const { return is_array_; }
@@ -84,25 +82,13 @@ namespace fsp
     [[nodiscard]] constexpr std::size_t xpath_size() const { return xpath_.size(); }
     [[nodiscard]] constexpr cstr_t      attr_name() const { return attr_.tag; }
     [[nodiscard]] constexpr cstr_t      attr_uri() const { return attr_.ns; }
-    [[nodiscard]] constexpr auto        last() const { return xpath_[xpath_.size() - 1]; }
+    [[nodiscard]] constexpr xpath_el    last() const { return xpath_.back(); }
     [[nodiscard]] constexpr std::size_t original_ndx() const { return original_ndx_; }
-    [[nodiscard]] constexpr std::string dump(int offs = 0) const
-    {
-      auto msg = fmt::format(                                                                                    //
-        "{}name: {:15} path: {:40} is_array: {:5} is_opt {:5} attr: {}:{:15} xpath size:{:2} original ndx:{:2}", //
-        std::string(offs, ' '),
-        name_,
-        path_,
-        is_array_,
-        is_opt_,
-        attr_.ns,
-        attr_.tag,
-        xpath_size_,
-        original_ndx_);
-      return msg;
-    }
+    [[nodiscard]] constexpr std::string dump(int offs = 0) const;
   private:
-    static constexpr cstr_t trim_xpath(cstr_t str);
+    static constexpr cstr_t    trim_xpath(cstr_t str);
+    static constexpr cstr_t    uri_from_prefix(cstr_t prefix, std::span<const ns> ns_arr);
+    static constexpr xpath_vec parse_xpath_to_elements(cstr_t input, std::span<const ns> ns_arr);
   private:
     cstr_t      name_;
     cstr_t      path_;
@@ -110,8 +96,9 @@ namespace fsp
     bool        is_opt_   = false;
     xpath_vec   xpath_;
     xpath_el    attr_;
-    std::size_t xpath_size_   = 0;
+    std::size_t xpath_size_   = 0; //
     std::size_t original_ndx_ = 0; // original index before sorting to connect with child structure
+    std::string normalized_path_;  // all prefixes are expanded with uri and attribute and array marks added
   };
 
   // --- main structure (non-templated) -------------------------------------------------
@@ -121,22 +108,17 @@ namespace fsp
     xpath_node_struct() = default;
     constexpr xpath_node_struct(raw_inputs inputs, std::span<const ns> ns_arr);
 
-    [[nodiscard]] constexpr const xml_attr& operator[](std::size_t ndx) const { return data_.at(ndx); }
+    [[nodiscard]] constexpr const xml_attr& operator[](std::size_t ndx) const;
     [[nodiscard]] constexpr const xml_attr& operator[](cstr_t name) const;
 
     [[nodiscard]] constexpr auto        begin() const { return data_.begin(); }
     [[nodiscard]] constexpr auto        end() const { return data_.end(); }
     [[nodiscard]] constexpr std::size_t size() const { return data_.size(); }
-    [[nodiscard]] constexpr std::size_t max_xpath_size() const { return max_xpath_size_; }
+    [[nodiscard]] constexpr std::size_t max_xpath_size() const;
 
     [[nodiscard]] constexpr std::pair<cstr_t, std::size_t> last_xpath_tag_name(std::size_t depth) const;
     [[nodiscard]] constexpr std::pair<cstr_t, std::size_t> first_xpath_tag_name(std::size_t depth) const;
-    [[nodiscard]] std::string                              dump(int offs) const
-    {
-      std::string msg;
-      msg = fmt::format("{}data.size; {} max_path_size: {}", std::string(offs, ' '), data_.size(), max_xpath_size_);
-      return msg;
-    }
+    [[nodiscard]] constexpr std::string                    dump(int offs) const;
   private:
     std::vector<xml_attr> data_;
     std::size_t           max_xpath_size_ = 0;
@@ -163,36 +145,42 @@ namespace fsp
   : name_(raw.name)
   , path_(trim_xpath(raw.path))
   , is_opt_(raw.is_opt)
+  , xpath_(parse_xpath_to_elements(path_, ns_arr))
+  , xpath_size_(xpath_.size())
   , original_ndx_(original_ndx)
+  , normalized_path_(this->full_xpath_with_uri())
   {
-    auto tmp    = parse_xpath_to_elements(path_, ns_arr);
-    xpath_size_ = tmp.size();
-    // xpath_.reserve(tmp.size());
-
-    for (const auto& el : tmp)
+    auto& el = xpath_.back();
+    if (el.tag.starts_with('@'))
     {
-      if (el.tag.starts_with('@'))
-      {
-        xpath_size_--;
-        attr_ = xpath_el{.ns = el.ns, .tag = el.tag.substr(1)};
-        continue;
-      }
-      if (el.tag.starts_with('*'))
-      {
-        is_array_ = true;
-        xpath_.emplace_back(xpath_el{.ns = el.ns, .tag = el.tag.substr(1)});
-        continue;
-      }
-      xpath_.push_back(el);
+      attr_ = xpath_el{.ns = el.ns, .tag = el.tag.substr(1)};
+      xpath_.pop_back();
+    }
+    else if (el.tag.starts_with('*'))
+    {
+      is_array_     = true;
+      xpath_.back() = xpath_el{.ns = el.ns, .tag = el.tag.substr(1)};
     }
   }
 
-  inline std::string xml_attr::full_xpath() const
+
+  constexpr std::string xml_attr::full_xpath() const
   {
     std::string tmp;
     for (std::size_t i = 0; i < xpath_size_; ++i) tmp += fmt::format("/{}", xpath_[i].tag);
 
     if (is_attr()) tmp += fmt::format("/@{}", attr_name());
+    else if (is_array()) tmp += "/*";
+
+    return tmp;
+  }
+
+  [[nodiscard]] constexpr std::string xml_attr::full_xpath_with_uri() const
+  {
+    std::string tmp;
+    for (std::size_t i = 0; i < xpath_size_; ++i) tmp += fmt::format("/{}:{}", xpath_[i].ns, xpath_[i].tag);
+
+    if (is_attr()) tmp += fmt::format("/@{}:{}", attr_uri(), attr_name());
     else if (is_array()) tmp += "/*";
 
     return tmp;
@@ -222,12 +210,12 @@ namespace fsp
       if (segment.empty()) continue;
 
       xpath_el element{};
-      auto     colon = segment.find(':');
+      auto     colon_pos = segment.find(':');
 
-      if (colon != cstr_t::npos)
+      if (colon_pos != cstr_t::npos)
       {
-        element.ns  = uri_from_prefix(segment.substr(0, colon), ns_arr);
-        element.tag = segment.substr(colon + 1);
+        element.ns  = uri_from_prefix(segment.substr(0, colon_pos), ns_arr);
+        element.tag = segment.substr(colon_pos + 1);
       }
       else
       {
@@ -237,6 +225,22 @@ namespace fsp
       result.push_back(element);
     }
     return result;
+  }
+
+  [[nodiscard]] constexpr std::string xml_attr::dump(int offs) const
+  {
+    auto msg = fmt::format(                                                                                    //
+      "{}name: {:15} path: {:40} is_array: {:5} is_opt {:5} attr: {}:{:15} xpath size:{:2} original ndx:{:2}", //
+      std::string(offs, ' '),
+      name_,
+      path_,
+      is_array_,
+      is_opt_,
+      attr_.ns,
+      attr_.tag,
+      xpath_size_,
+      original_ndx_);
+    return msg;
   }
 
   constexpr cstr_t xml_attr::trim_xpath(cstr_t str)
@@ -269,6 +273,8 @@ namespace fsp
     std::ranges::sort(data_, [](const xml_attr& a, const xml_attr& b) { return a.path() < b.path(); });
   }
 
+  [[nodiscard]] constexpr const xml_attr& xpath_node_struct::operator[](std::size_t ndx) const { return data_.at(ndx); }
+
   [[nodiscard]] constexpr const xml_attr& xpath_node_struct::operator[](cstr_t name) const
   {
     for (const auto& el : data_)
@@ -276,6 +282,8 @@ namespace fsp
 
     throw compile_error(fmt::format("unknown path '{}'.", name).data());
   }
+
+  [[nodiscard]] constexpr std::size_t xpath_node_struct::max_xpath_size() const { return max_xpath_size_; }
 
   [[nodiscard]] constexpr std::pair<cstr_t, std::size_t> xpath_node_struct::last_xpath_tag_name(std::size_t depth) const
   {
@@ -304,5 +312,12 @@ namespace fsp
       if (res.first.empty() || val < res.first) res = {val, ndx};
     }
     return res;
+  }
+
+  [[nodiscard]] constexpr std::string xpath_node_struct::dump(int offs) const
+  {
+    std::string msg;
+    msg = fmt::format("{}data.size; {} max_path_size: {}", std::string(offs, ' '), data_.size(), max_xpath_size_);
+    return msg;
   }
 } // namespace fsp
