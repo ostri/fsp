@@ -44,6 +44,25 @@ namespace fsp
     bool        success     = false;
     std::string error_message;
   };
+  // Worker context — vse kar worker potrebuje
+  // NOLINTBEGIN(cppcoreguidelines-avoid-const-or-ref-data-members)
+  struct worker_context
+  {
+    int                             worker_id;       // unique id of the worker
+    segment_queue&                  seg_queue;       // input queue
+    const fsp::mmap_file&           xml_mmap;        // mmap mapping for buffer segment
+    std::vector<segment_result>&    results;         // output queue for valid transactions
+    std::vector<segment_result>&    errors;          // output queue for transactions with errors
+    std::mutex&                     results_mutex;   // results queue mutex
+    std::mutex&                     errors_mutex;    // errors queue mitex
+    std::atomic<std::size_t>&       processed_count; // number of processed segments
+    std::atomic<std::size_t>&       error_count;     // number of detected errors
+    std::atomic<bool>&              cancel_flag;     // is the operation cancelled?
+    std::shared_ptr<spdlog::logger> logger;          // logger
+    const proc_data&                targets;         // how to partition the xml buffer and which
+                                                     // tags to extract from each partition type
+  };
+  // NOLINTEND(cppcoreguidelines-avoid-const-or-ref-data-members)
 
   // 1. Global thread-local variable (each thread gets its own isolated instance)
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables, cert-err58-cpp)
@@ -98,26 +117,6 @@ namespace fsp
 
     [[nodiscard]] std::shared_ptr<spdlog::logger> get_logger() const { return logger_; }
   private:
-    // Worker context — vse kar worker potrebuje
-    // NOLINTBEGIN(cppcoreguidelines-avoid-const-or-ref-data-members)
-    struct worker_context
-    {
-      int                             worker_id;       // unique id of the worker
-      segment_queue&                  seg_queue;       // input queue
-      const fsp::mmap_file&           xml_mmap;        // mmap mapping for buffer segment
-      std::vector<segment_result>&    results;         // output queue for valid transactions
-      std::vector<segment_result>&    errors;          // output queue for transactions with errors
-      std::mutex&                     results_mutex;   // results queue mutex
-      std::mutex&                     errors_mutex;    // errors queue mitex
-      std::atomic<std::size_t>&       processed_count; // number of processed segments
-      std::atomic<std::size_t>&       error_count;     // number of detected errors
-      std::atomic<bool>&              cancel_flag;     // is the operation cancelled?
-      std::shared_ptr<spdlog::logger> logger;          // logger
-      const proc_data&                targets;         // how to partition the xml buffer and which
-                                                       // tags to extract from each partition type
-    };
-    // NOLINTEND(cppcoreguidelines-avoid-const-or-ref-data-members)
-
     fsp::xerces_mgr                         xerces_life_; // must be first to be destructed last
     processor_config                        config_;
     std::unique_ptr<xercesc::SAX2XMLReader> parser_;
