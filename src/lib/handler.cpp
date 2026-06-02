@@ -177,10 +177,11 @@ namespace fsp
     }
   }
 
-  inline void Handler::check_xpath_matches([[maybe_unused]] const XMLCh*               uri,
-                                           [[maybe_unused]] const XMLCh*               localname,
-                                           [[maybe_unused]] const XMLCh*               qname,
-                                           [[maybe_unused]] const xercesc::Attributes& attrs)
+  inline void Handler::check_xpath_matches( //
+    const XMLCh*               uri,
+    const XMLCh*               localname,
+    const XMLCh*               qname,
+    const xercesc::Attributes& attrs)
   {
     // Advance all candidates matching the current depth
     for (std::size_t i = 0; i < targets_.targets.size(); ++i)
@@ -206,7 +207,7 @@ namespace fsp
     for (auto i = 0U; i < targets_wide_.size(); ++i)
     {
       if (matched_[i] == static_cast<int>(targets_wide_[i].size()))
-      {
+      { // start of the subtree
         capturing_  = true;
         frag_depth_ = 0;
         active_idx_ = static_cast<int>(i);
@@ -221,7 +222,6 @@ namespace fsp
           auto ns_uri = x_str(uri).to_string();
           logger_->trace("tag:'{}' ns:'{}' offset:{} prefix:'{}'", ln, ns_uri, frag_start_offset_, prefix_);
         }
-
         break;
       }
     }

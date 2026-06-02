@@ -117,10 +117,11 @@ namespace fsp
 
     // --- helper methods ---------
     void check_validation_status();
-    void check_xpath_matches([[maybe_unused]] const XMLCh*               uri,
-                             [[maybe_unused]] const XMLCh*               localname,
-                             [[maybe_unused]] const XMLCh*               qname,
-                             [[maybe_unused]] const xercesc::Attributes& attrs);
+    void check_xpath_matches( //
+      const XMLCh*               uri,
+      const XMLCh*               localname,
+      const XMLCh*               qname,
+      const xercesc::Attributes& attrs);
 
     // --- Fragment akumulacija ---
     bool capturing_  = false;
