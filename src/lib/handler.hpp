@@ -43,10 +43,7 @@ namespace fsp
       const XMLCh* prefix,
       const XMLCh* uri) override;
     // void endPrefixMapping() override;
-    void startElement(const XMLCh*                  uri,
-                      [[maybe_unused]] const XMLCh* localname,
-                      [[maybe_unused]] const XMLCh* qname,
-                      const xercesc::Attributes&    attrs) override;
+    void startElement(const XMLCh* uri, const XMLCh* localname, const XMLCh* qname, const xercesc::Attributes& attrs) override;
     void endElement( //
       [[maybe_unused]] const XMLCh* uri,
       [[maybe_unused]] const XMLCh* localname,
@@ -131,8 +128,8 @@ namespace fsp
     std::size_t frag_start_offset_ = 0; // byte offset of start of the fragment
 
     // --- Output ---
-    segment_queue& queue_;
-    std::size_t    counter_ = 0;
+    [[maybe_unused]] segment_queue& queue_;
+    std::size_t                     counter_ = 0;
 
     const xercesc::SAX2XMLReader*   parser_;    // reference to parser; for getSrcOffs
     std::shared_ptr<spdlog::logger> logger_;    /// logger

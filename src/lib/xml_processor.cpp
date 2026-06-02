@@ -501,7 +501,7 @@ namespace fsp
     limits_vec limits = prepare_limits(ctx.targets.xpaths.at(subtree_type));
     // ---------------------------------------------------------------------------------------------
     read_status = xmlTextReaderRead(reader.get());
-
+    // return res;
     while (read_status == 1)
     {
       int  type      = xmlTextReaderNodeType(reader.get());
@@ -569,19 +569,20 @@ namespace fsp
   void xml_processor::worker_function( //
     [[maybe_unused]] const std::stop_token& st,
     int                                     worker_id,
-    [[maybe_unused]] worker_context         ctx)
+    worker_context                          ctx)
   {
     auto t0         = std::chrono::steady_clock::now();
     log_thread_name = fmt::format("wrk{:03}", worker_id);
-    if (ctx.logger) ctx.logger->debug("Worker thread '{}' started.", log_thread_name);
-    ctx.worker_id = worker_id;
-
+    //    if (ctx.logger) ctx.logger->debug("Worker thread '{}' started.", log_thread_name);
+    if (ctx.logger) ctx.logger->info("Worker thread '{}' started.", log_thread_name);
+    ctx.worker_id                          = worker_id;
+    thread_local std::size_t txn_processed = 0;
     while (! ctx.cancel_flag.load())
     {
       xml_segment seg{};
       if (! ctx.seg_queue.pop(seg)) break;
       auto res = process_segment(ctx, seg);
-
+      txn_processed++;
       if (res)
       {
         if (res->success)
@@ -612,7 +613,8 @@ namespace fsp
     if (ctx.logger && ctx.logger->should_log(ctx.logger->level()))
     {
       auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count();
-      ctx.logger->debug("Worker thread '{}' finished in {} ms.", log_thread_name, duration);
+      //      ctx.logger->debug("Worker thread '{}' finished in {} ms.", log_thread_name, duration);
+      ctx.logger->info("Worker thread '{}' finished in {} ms txn processed: {}.", log_thread_name, duration, txn_processed);
     }
   }
 

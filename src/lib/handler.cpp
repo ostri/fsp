@@ -94,13 +94,13 @@ namespace fsp
     if (tag.ns().empty()) return true;
 
     // Z NS — razrešimo prefix in primerjamo URI
-    auto expected_uri = resolve_ns(tag.ns());
-    if (expected_uri.empty())
+    const XMLCh* expected_uri = resolve_ns(tag.ns()).data();
+    if (nullptr == expected_uri)
     {
       // Prefix ni znan — primerjamo direktno z ns_uri iz SAX eventa
       return tag.ns() == ns_uri;
     }
-    return expected_uri == x_str(ns_uri).to_string();
+    return xercesc::XMLString::equals(expected_uri, ns_uri);
   }
 
   /*!
@@ -187,8 +187,8 @@ namespace fsp
     for (std::size_t i = 0; i < targets_.targets.size(); ++i)
     {
       // const auto& xpath      = targets_[i];
-      const auto& xpath_wide = targets_wide_[i];
-      int&        m          = matched_[i];
+      const xpath_wide_t& xpath_wide = targets_wide_[i];
+      int&                m          = matched_[i];
 
       if (m >= static_cast<int>(xpath_wide.size())) continue;
 
@@ -199,7 +199,7 @@ namespace fsp
         continue;
       }
 
-      const auto& step = xpath_wide[m];
+      const e_tag_wide& step = xpath_wide[m];
       if (tag_matches(step, localname, uri)) m++;
     }
 
@@ -227,15 +227,12 @@ namespace fsp
     }
   }
 
-  void Handler::startElement(const XMLCh*                  uri,
-                             [[maybe_unused]] const XMLCh* localname,
-                             [[maybe_unused]] const XMLCh* qname,
-                             const xercesc::Attributes&    attrs)
+  void Handler::startElement(const XMLCh* uri, const XMLCh* localname, const XMLCh* qname, const xercesc::Attributes& attrs)
   {
     check_validation_status();
     open_ns_scope();
     doc_depth_++;
-    if (logger_ && logger_->should_log(logger_->level()))
+    if (logger_ && logger_->should_log(logger_->level())) [[unlikely]]
       logger_->trace("startElement depth:{:2} local:'{:10}' uri:'{}'", doc_depth_, x_str(localname).to_string(), x_str(uri).to_string());
     if (! capturing_) check_xpath_matches(uri, localname, qname, attrs);
     if (capturing_) [[likely]]

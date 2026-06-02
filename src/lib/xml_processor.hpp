@@ -171,7 +171,7 @@ namespace fsp
     static void worker_function( //
       [[maybe_unused]] const std::stop_token& st,
       int                                     worker_id,
-      [[maybe_unused]] worker_context         ctx);
+      worker_context                          ctx);
 
     static result<segment_result> process_segment(const worker_context& ctx, const xml_segment& seg);
     static result<segment_result> extract_xml_values( //
