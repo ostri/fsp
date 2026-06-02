@@ -208,7 +208,7 @@ namespace fsp
     {
       if (matched_[i] == static_cast<int>(targets_wide_[i].size()))
       { // start of the subtree
-        capturing_  = true;
+        // capturing_  = true;
         frag_depth_ = 0;
         active_idx_ = static_cast<int>(i);
 
@@ -234,8 +234,8 @@ namespace fsp
     doc_depth_++;
     if (logger_ && logger_->should_log(spdlog::level::debug)) [[unlikely]]
       logger_->trace("startElement depth:{:2} local:'{:10}' uri:'{}'", doc_depth_, x_str(localname).to_string(), x_str(uri).to_string());
-    if (! capturing_) check_xpath_matches(uri, localname, qname, attrs);
-    if (capturing_) [[likely]]
+    if (! is_capturing()) check_xpath_matches(uri, localname, qname, attrs);
+    if (is_capturing()) [[likely]]
       frag_depth_++;
   }
 
@@ -248,7 +248,7 @@ namespace fsp
     [[maybe_unused]] const XMLCh* localname,
     [[maybe_unused]] const XMLCh* qname)
   {
-    if (capturing_) [[likely]]
+    if (is_capturing()) [[likely]]
     {
       frag_depth_--;
       if (frag_depth_ == 0) [[unlikely]]
@@ -263,7 +263,8 @@ namespace fsp
         }
         queue_.push(std::move(seg));
         counter_++;
-        capturing_  = false;
+        frag_depth_ = -1; // we are outside of capturing
+        // capturing_  = false;
         active_idx_ = -1;
       }
     }

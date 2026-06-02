@@ -67,9 +67,10 @@ namespace fsp
     // --- NS context stack ---
     // Vsak nivo je map prefix→uri za en XML element scope.
     // open_ns_scope() potisne nov nivo, close_ns_scope() ga odstrani.
-    void open_ns_scope();
-    void close_ns_scope();
-    void push_ns_mapping(const XMLCh* prefix, const XMLCh* uri);
+    void               open_ns_scope();
+    void               close_ns_scope();
+    void               push_ns_mapping(const XMLCh* prefix, const XMLCh* uri);
+    [[nodiscard]] bool is_capturing() const { return frag_depth_ != -1; }
 
     // Razreši prefix v URI. Prazen string če prefix ni znan.
     [[nodiscard]] x_str resolve_ns(const x_str& prefix) const noexcept;
@@ -87,7 +88,6 @@ namespace fsp
     // static std::string to_str(const XMLCh* xstr, XMLSize_t len);
     /// prepare message to report exception
     std::string prepare_msg(const xercesc::SAXParseException& e);
-
     // --- subtree xpaths ---
     proc_data                 targets_;      // xpath rules
     std::vector<xpath_wide_t> targets_wide_; // xpath rules as XMLCh* strings
@@ -101,17 +101,12 @@ namespace fsp
       ns_def_t ns_vec;
     };
     std::vector<ns_level> ns_stack_;
-    //
     // the ns_pending_structure is a temporary buffer that transfers information between
     // methods startPrefixMapping and startElement
-    //
     ns_def_t ns_pending_;
-
-    // --- Matching stanje ---
-    // matched_[i] = koliko korakov xpath[i] je že ujeto
+    // --- Matching state ---
     std::vector<int> matched_;
     int              doc_depth_ = 0; // globina v dokumentu (1 = koreni elem.)
-
     // --- helper methods ---------
     void check_validation_status();
     void check_xpath_matches( //
@@ -121,9 +116,9 @@ namespace fsp
       const xercesc::Attributes& attrs);
 
     // --- Fragment akumulacija ---
-    bool capturing_  = false;
-    int  frag_depth_ = 0;  // debth inside the fragment
-    int  active_idx_ = -1; // which subtry type we are processing
+    // bool capturing_  = false;
+    int frag_depth_ = -1; // depth inside the fragment
+    int active_idx_ = -1; // which subtry type we are processing
     // std::string fragment_;              // akumuliran XML fragment
     std::size_t frag_start_offset_ = 0; // byte offset of start of the fragment
 
@@ -134,7 +129,8 @@ namespace fsp
     const xercesc::SAX2XMLReader*   parser_;    // reference to parser; for getSrcOffs
     std::shared_ptr<spdlog::logger> logger_;    /// logger
     std::string_view                base_addr_; // address of the start of the document
-    std::string                     prefix_;    // opening tag with inherited ns, ns and attributes
+    // TODO: ostri - ostri check if prefix_ is really related to handler
+    std::string prefix_; // opening tag with inherited ns, ns and attributes
 
     // [DODANO] Shared future na katerega validacijska nit postavi napako (ali nullopt).
     // Handler ga polling preverja v startElement() brez blokiranja.
