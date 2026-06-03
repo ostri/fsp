@@ -2,14 +2,13 @@
 #include "x_str.hpp"
 #include "xpath_helpers.hpp"
 #include "xml_node.hpp"
-
+#include "xpath_limits.hpp"
 #include <chrono>
 #include <fmt/format.h>
 #include <magic_enum.hpp>
 #include <spdlog/spdlog.h>
 #include <stack>
 #include <thread>
-#include <ranges>
 #include <libxml/xmlreader.h>
 namespace
 {
@@ -21,41 +20,20 @@ namespace
     }
   };
   using UniqueXmlTextReader = std::unique_ptr<std::remove_pointer_t<xmlTextReaderPtr>, XmlTextReaderDeleter>;
-  struct p_limits
-  {
-    fsp::cstr_t low_tag;
-    fsp::cstr_t high_tag;
-    std::size_t low_ndx;
-    std::size_t high_ndx;
-  };
-  using limits_vec = std::vector<p_limits>;
+
 
   inline bool log(const std::shared_ptr<spdlog::logger>& log, spdlog::level::level_enum lvl = spdlog::level::trace)
   { return log && log->should_log(lvl); }
 
-  static limits_vec prepare_limits(const fsp::xpath_node_struct& xpaths)
-  {
-    limits_vec vec;
-    vec.reserve(xpaths.max_xpath_size());
-    for (auto cnt = 0UL; cnt < xpaths.max_xpath_size(); cnt++)
-    {
-      // p_limits tmp;
-      auto low  = xpaths.first_xpath_tag_name(cnt);
-      auto high = xpaths.last_xpath_tag_name(cnt);
-      auto tmp  = p_limits{.low_tag = low.first, .high_tag = high.first, .low_ndx = low.second, .high_ndx = high.second};
-      vec.push_back(tmp);
-    }
-    return vec;
-  }
+
   struct pp_result
   {
   };
   static std::expected<int, std::string> process_and_prune_node(const auto&                reader,
                                                                 std::stack<fsp::xml_node>& stack,
-                                                                //                                       size_t&               depthx,
-                                                                const limits_vec& limits,
-                                                                const auto&       logger,
-                                                                int&              read_status)
+                                                                const auto&                limits,
+                                                                const auto&                logger,
+                                                                int&                       read_status)
   {
     const char* uri = reinterpret_cast<const char*>(xmlTextReaderConstNamespaceUri(reader));
     const char* tag = reinterpret_cast<const char*>(xmlTextReaderConstLocalName(reader));
@@ -73,22 +51,23 @@ namespace
     }
 
     auto current_tag = fsp::xml_node{safe_uri, safe_tag}; // tree node opening tag that the parser read
-    auto low         = limits[depth].low_tag;
-    auto high        = limits[depth].high_tag;
-    if (log(logger, spdlog::level::trace)) { logger->trace("tag: '{:15}' uri: '{:30}' low: {} high: {}", safe_tag, safe_uri, low, high); }
+    auto low         = limits[depth].low_tag();
+    auto high        = limits[depth].high_tag();
+    if (log(logger, spdlog::level::trace))
+      logger->trace(fmt::format("current tag: {} {} limits: {}", safe_tag, safe_uri, limits[depth].dump()));
     /// prune if we are:
     /// - deeper than any xpath we are searching for
     /// - the tag name is smaller than any available tag name in the list of xpaths we are searching for
     /// - the tag name is bigger than any available tag name in the list of xpaths we are searching for
     if ((depth >= limits.size()) || (current_tag.tag() < low) || (current_tag.tag() > high))
     {
-      if (log(logger, spdlog::level::debug))
-        logger->debug("pruning subtree: '{}' min: '{}' max: '{}'", safe_tag, limits[depth].low_tag, limits[depth].high_tag);
+      if (log(logger, spdlog::level::debug)) logger->debug("pruning subtree: '{}'", safe_tag);
 
       read_status = xmlTextReaderNext(reader); // Skip all children, move to sibling or the end of parent tag
       return std::unexpected(
         "Pruning, since it is too deep, too small or too big"); // Indicates that a 'continue' should be executed in the outer loop
     }
+    //   for (auto cnt : std::ranges::views::iota(limits[depth].low_ndx, limits[depth].high_ndx)) { if (current_tag.tag() == xp) }
     stack.emplace(current_tag);
     // depth++;
     return 1; // Indicates normal execution flow, no pruning happened
@@ -233,13 +212,6 @@ namespace fsp
     {
       parser_.reset(xercesc::XMLReaderFactory::createXMLReader());
       // NOLINTBEGIN(hicpp-no-array-decay)
-
-      // [ODSTRANJENO] Validacijski featurji — zdaj v validacijski niti:
-      // parser_->setFeature(xercesc::XMLUni::fgSAX2CoreValidation, true);
-      // parser_->setFeature(xercesc::XMLUni::fgXercesSchema, true);
-      // parser_->setFeature(xercesc::XMLUni::fgXercesValidationErrorAsFatal, true);
-      // parser_->setFeature(xercesc::XMLUni::fgXercesUseCachedGrammarInParse, true);
-
       // Eksplicitno izklopi validacijo — brez tega bi Xerces morda validiral
       // po defaultu če je grammar v cache-u
       parser_->setFeature(xercesc::XMLUni::fgSAX2CoreValidation, false);
@@ -485,7 +457,7 @@ namespace fsp
     std::stack<xml_node> tag_tree_stack;
     auto                 subtree_type = ctx.targets.targets[seg.subtree_type()].original_ndx(); // seg.subtree_type();
     const auto&          xpaths       = ctx.targets.xpaths.at(subtree_type);
-    if (log(ctx.logger)) //
+    if (log(logger, spdlog::level::trace)) //
     {
       ctx.logger->trace(fmt::format("subtree type: {}", subtree_type));
       std::string msg;
@@ -495,28 +467,17 @@ namespace fsp
     std::vector<bool> maybe_usefull(xpaths.size(), true); // xpaths that we still need values for
     assert(xpaths.size() != 0);
     // --- available xpaths at points in tree -----------------------------------------------------------
-    using available_xpaths_at_pos = std::vector<int>;
+    using available_xpaths_at_pos = std::vector<bool>;
     std::stack<available_xpaths_at_pos> available_xpaths_stack;
-    const available_xpaths_at_pos       available = std::views::iota(0UL, xpaths.size()) | std::ranges::to<available_xpaths_at_pos>();
-    available_xpaths_stack.push(available); // all xpaths are available initially
+    const available_xpaths_at_pos       available = std::vector(xpaths.size(), false);
+    available_xpaths_stack.push(available); // all xpaths are initially unavailable, then we open them step by step
     // prepare pruning limits -----------------------------------------------------------------------
-    limits_vec limits = prepare_limits(ctx.targets.xpaths.at(subtree_type));
-    if (log(logger))
-    {
-      std::string msg = "Limits:\n";
-      int         cnt = 0;
-      for (const auto& el : limits)
-        msg += fmt::format("- {}: low:[{}:{}] high:[{}:{}]\n", //
-                           cnt++,
-                           el.low_tag,
-                           el.low_ndx,
-                           el.high_tag,
-                           el.high_ndx);
-      ctx.logger->trace(fmt::format("\n{}", msg));
-    }
+    // xpath_limits limits = prepare_limits(ctx.targets.xpaths.at(subtree_type));
+    const auto& limits = xpath_limits(ctx.targets.xpaths.at(subtree_type));
+    if (log(logger, spdlog::level::trace)) logger->trace(limits.dump());
     // ---------------------------------------------------------------------------------------------
     read_status = xmlTextReaderRead(reader.get());
-    // return res;
+
     while (read_status == 1)
     {
       int  type      = xmlTextReaderNodeType(reader.get());
@@ -529,11 +490,11 @@ namespace fsp
         if (! process_and_prune_node(reader.get(), tag_tree_stack, limits, ctx.logger, read_status))
         {
           if (log(logger))
-            logger->trace(
-              fmt::format("pruning: val:{} low: {} high: {}", tag_tree_stack.top().tag(), limits[depth].low_tag, limits[depth].high_tag));
+            logger->trace(fmt::format(
+              "pruning: val:{} low: {} high: {}", tag_tree_stack.top().tag(), limits[depth].low_tag(), limits[depth].high_tag()));
           continue;
         }
-        for (auto cnt = limits[depth].low_ndx; cnt <= limits[depth].high_ndx; cnt++)
+        for (auto cnt = limits[depth].low_ndx(); cnt <= limits[depth].high_ndx(); cnt++)
         { // walk over defined range on n-th xpath path (depth)
           if (tag_tree_stack.top().tag() != xpaths[cnt].xpath()[depth].tag)
           { // remove specific xpath from the search

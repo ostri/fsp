@@ -1,5 +1,8 @@
 #pragma once
 
+#include "xpath_el.hpp"
+#include "xml_attr.hpp"
+
 #include <algorithm>
 #include <chrono>
 #include <fmt/format.h>
@@ -31,82 +34,17 @@ namespace fsp
   };
 
   // --- namespace definition -----------------------------------------------------------
-  struct ns
-  {
-    cstr_t prefix;
-    cstr_t uri;
-  };
 
-  // --- raw attribute definition (compile-time) ----------------------------------------
-  struct raw_attr
-  {
-    // raw_attr
-    // [[nodiscard]] consteval std::size_t        xpath_size() const { return xpath_size(path); }
-    // [[nodiscard]] static consteval std::size_t xpath_size(cstr_t path)
-    // {
-    //   char ch = '/';
-    //   if (path.empty()) return 0;
-    //   if (path[0] == ch) return std::ranges::count(path.substr(1), ch) + 1;
-    //   return std::ranges::count(path, ch) + 1;
-    // }
-
-    constexpr bool operator==(const raw_attr& o) const { return (o.name == name) && (o.path == path); }
-    // NOLINTBEGIN(misc-non-private-member-variables-in-classes)
-    cstr_t name;           // name of the value
-    cstr_t path;           // xml path
-    bool   is_opt = false; // is optional?
-    // NOLINTEND(misc-non-private-member-variables-in-classes)
-  };
 
   // Span type for raw inputs
-  using raw_inputs = std::span<const raw_attr>;
-  using xpath_vec  = std::vector<xpath_el>;
-  using xpath_span = std::span<const xpath_el>;
 
-  // --- xml attribute (runtime friendly, built at compile time) ------------------------
-  struct xml_attr
-  {
-  public:
-    constexpr xml_attr() = default;
-    constexpr xml_attr(std::size_t original_ndx, const raw_attr& raw, std::span<const ns> ns_arr);
-
-    [[nodiscard]] constexpr std::string full_xpath() const;
-    [[nodiscard]] constexpr std::string full_xpath_with_uri() const;
-
-    [[nodiscard]] constexpr cstr_t      name() const { return name_; }
-    [[nodiscard]] constexpr cstr_t      path() const { return path_; }
-    [[nodiscard]] constexpr bool        is_opt() const { return is_opt_; }
-    [[nodiscard]] constexpr bool        is_attr() const { return ! attr_.tag.empty(); }
-    [[nodiscard]] constexpr bool        is_array() const { return is_array_; }
-    [[nodiscard]] constexpr xpath_span  xpath() const { return xpath_; }
-    [[nodiscard]] constexpr std::size_t xpath_size() const { return xpath_.size(); }
-    [[nodiscard]] constexpr cstr_t      attr_name() const { return attr_.tag; }
-    [[nodiscard]] constexpr cstr_t      attr_uri() const { return attr_.ns; }
-    [[nodiscard]] constexpr xpath_el    last() const { return xpath_.back(); }
-    [[nodiscard]] constexpr std::size_t original_ndx() const { return original_ndx_; }
-    [[nodiscard]] constexpr std::string dump(int offs = 0) const;
-  private:
-    static constexpr cstr_t    trim_xpath(cstr_t str);
-    static constexpr cstr_t    uri_from_prefix(cstr_t prefix, std::span<const ns> ns_arr);
-    static constexpr xpath_vec parse_xpath_to_elements(cstr_t input, std::span<const ns> ns_arr);
-  private:
-    cstr_t      name_;
-    cstr_t      path_;
-    bool        is_array_ = false;
-    bool        is_opt_   = false;
-    xpath_vec   xpath_;
-    xpath_el    attr_;
-    std::size_t xpath_size_   = 0; //
-    std::size_t original_ndx_ = 0; // original index before sorting to connect with child structure
-    std::string normalized_path_;  // all prefixes are expanded with uri and attribute and array marks added
-  };
 
   // --- main structure (non-templated) -------------------------------------------------
   class xpath_node_struct
   {
   public:
     xpath_node_struct() = default;
-    constexpr xpath_node_struct(raw_inputs inputs, std::span<const ns> ns_arr);
+    constexpr xpath_node_struct(std::span<const raw_attr> inputs, std::span<const ns> ns_arr);
 
     [[nodiscard]] constexpr const xml_attr& operator[](std::size_t ndx) const;
     [[nodiscard]] constexpr const xml_attr& operator[](cstr_t name) const;
@@ -119,6 +57,7 @@ namespace fsp
     [[nodiscard]] constexpr std::pair<cstr_t, std::size_t> last_xpath_tag_name(std::size_t depth) const;
     [[nodiscard]] constexpr std::pair<cstr_t, std::size_t> first_xpath_tag_name(std::size_t depth) const;
     [[nodiscard]] constexpr std::string                    dump(int offs) const;
+    constexpr void                                         reserve(std::size_t size) { data_.reserve(size); }
   private:
     std::vector<xml_attr> data_;
     std::size_t           max_xpath_size_ = 0;
@@ -138,7 +77,7 @@ namespace fsp
 
   ///////////////////////////////////////////////////////////////////////////////////////////////////////
   // Build function
-  [[nodiscard]] constexpr xpath_node_struct build(raw_inputs raw_paths, std::span<const ns> ns_arr) //
+  [[nodiscard]] constexpr xpath_node_struct build(std::span<const raw_attr> raw_paths, std::span<const ns> ns_arr) //
   { return {raw_paths, ns_arr}; }
   // xml_attr
   constexpr xml_attr::xml_attr(std::size_t original_ndx, const raw_attr& raw, std::span<const ns> ns_arr)
@@ -255,7 +194,7 @@ namespace fsp
   }
 
   // path_node_struct
-  constexpr xpath_node_struct::xpath_node_struct(raw_inputs inputs, std::span<const ns> ns_arr)
+  constexpr xpath_node_struct::xpath_node_struct(std::span<const raw_attr> inputs, std::span<const ns> ns_arr)
   {
     data_.reserve(inputs.size());
     std::size_t max_d = 0;

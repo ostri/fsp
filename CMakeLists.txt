@@ -144,6 +144,11 @@ set(${b_target}_SOURCES
     ${CMAKE_SOURCE_DIR}/src/lib/e_tag_wide.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/static_sorted_set.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/xml_node.cpp
+    ${CMAKE_SOURCE_DIR}/src/lib/xml_attr.cpp
+    ${CMAKE_SOURCE_DIR}/src/lib/xpath_limits.cpp
+    ${CMAKE_SOURCE_DIR}/src/lib/xpath_el.cpp
+    ${CMAKE_SOURCE_DIR}/src/lib/static_xpath_vec.cpp
+    ${CMAKE_SOURCE_DIR}/src/lib/xpath_limits.cpp
 )
 # Additional libraries for main program
 set(FSP_TARGET_${PROJECT_NAME}_LIBS
