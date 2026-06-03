@@ -1,6 +1,7 @@
 #include "xml_processor.hpp"
 #include "x_str.hpp"
 #include "xpath_helpers.hpp"
+#include "xml_node.hpp"
 
 #include <chrono>
 #include <fmt/format.h>
@@ -8,8 +9,91 @@
 #include <spdlog/spdlog.h>
 #include <stack>
 #include <thread>
+#include <ranges>
 #include <libxml/xmlreader.h>
+namespace
+{
+  struct XmlTextReaderDeleter
+  {
+    void operator()(xmlTextReaderPtr reader) const
+    {
+      if (reader != nullptr) { xmlFreeTextReader(reader); }
+    }
+  };
+  using UniqueXmlTextReader = std::unique_ptr<std::remove_pointer_t<xmlTextReaderPtr>, XmlTextReaderDeleter>;
+  struct p_limits
+  {
+    fsp::cstr_t low_tag;
+    fsp::cstr_t high_tag;
+    std::size_t low_ndx;
+    std::size_t high_ndx;
+  };
+  using limits_vec = std::vector<p_limits>;
 
+  inline bool log(const std::shared_ptr<spdlog::logger>& log, spdlog::level::level_enum lvl = spdlog::level::trace)
+  { return log && log->should_log(lvl); }
+
+  static limits_vec prepare_limits(const fsp::xpath_node_struct& xpaths)
+  {
+    limits_vec vec;
+    vec.reserve(xpaths.max_xpath_size());
+    for (auto cnt = 0UL; cnt < xpaths.max_xpath_size(); cnt++)
+    {
+      // p_limits tmp;
+      auto low  = xpaths.first_xpath_tag_name(cnt);
+      auto high = xpaths.last_xpath_tag_name(cnt);
+      auto tmp  = p_limits{.low_tag = low.first, .high_tag = high.first, .low_ndx = low.second, .high_ndx = high.second};
+      vec.push_back(tmp);
+    }
+    return vec;
+  }
+  struct pp_result
+  {
+  };
+  static std::expected<int, std::string> process_and_prune_node(const auto&                reader,
+                                                                std::stack<fsp::xml_node>& stack,
+                                                                //                                       size_t&               depthx,
+                                                                const limits_vec& limits,
+                                                                const auto&       logger,
+                                                                int&              read_status)
+  {
+    const char* uri = reinterpret_cast<const char*>(xmlTextReaderConstNamespaceUri(reader));
+    const char* tag = reinterpret_cast<const char*>(xmlTextReaderConstLocalName(reader));
+
+    // Safely handle potential null pointers from libxml2
+    std::string_view safe_uri = uri ? uri : "";
+    std::string_view safe_tag = tag ? tag : "";
+    auto             depth    = stack.size(); // first available on stack a
+    if (depth >= limits.size())
+    {
+      if (log(logger, spdlog::level::debug))
+        logger->debug("pruning subtree: '{}' too deep: '{}' max allowed: '{}'", safe_tag, depth, limits.size());
+      read_status = xmlTextReaderNext(reader);                  // Skip all children, move to sibling or the end of parent tag
+      return std::unexpected("Pruning, since it is too deep."); // Indicates that a 'continue' should be executed in the outer loop
+    }
+
+    auto current_tag = fsp::xml_node{safe_uri, safe_tag}; // tree node opening tag that the parser read
+    auto low         = limits[depth].low_tag;
+    auto high        = limits[depth].high_tag;
+    if (log(logger, spdlog::level::trace)) { logger->trace("tag: '{:15}' uri: '{:30}' low: {} high: {}", safe_tag, safe_uri, low, high); }
+    /// prune if we are:
+    /// - deeper than any xpath we are searching for
+    /// - the tag name is smaller than any available tag name in the list of xpaths we are searching for
+    /// - the tag name is bigger than any available tag name in the list of xpaths we are searching for
+    if ((depth >= limits.size()) || (current_tag.tag() < low) || (current_tag.tag() > high))
+    {
+      if (log(logger, spdlog::level::debug))
+        logger->debug("pruning subtree: '{}' min: '{}' max: '{}'", safe_tag, limits[depth].low_tag, limits[depth].high_tag);
+
+      read_status = xmlTextReaderNext(reader); // Skip all children, move to sibling or the end of parent tag
+      return std::unexpected(
+        "Pruning, since it is too deep, too small or too big"); // Indicates that a 'continue' should be executed in the outer loop
+    }
+    stack.emplace(current_tag);
+    // depth++;
+    return 1; // Indicates normal execution flow, no pruning happened
+  }
+} // namespace
 namespace fsp
 {
 
@@ -82,7 +166,7 @@ namespace fsp
 
   void xml_processor::log_error(const error_info& e)
   {
-    if (logger_) logger_->error(e.to_string());
+    if (log(logger_)) logger_->error(e.to_string());
   }
   void xml_processor::log_info(const std::string& m)
   {
@@ -367,109 +451,7 @@ namespace fsp
     }
   }
 
-  namespace
-  {
-    struct XmlTextReaderDeleter
-    {
-      void operator()(xmlTextReaderPtr reader) const
-      {
-        if (reader != nullptr) { xmlFreeTextReader(reader); }
-      }
-    };
-    using UniqueXmlTextReader = std::unique_ptr<std::remove_pointer_t<xmlTextReaderPtr>, XmlTextReaderDeleter>;
 
-    struct xml_node
-    {
-    public:
-      xml_node() = default;
-      xml_node(const char* uri, const char* tag)
-      : uri_(uri)
-      , tag_(tag)
-      {
-      }
-      xml_node(cstr_t uri, cstr_t tag)
-      : uri_(uri)
-      , tag_(tag)
-      {
-      }
-      [[nodiscard]] std::string uri() const { return uri_; }
-      [[nodiscard]] std::string tag() const { return tag_; }
-    private:
-      std::string uri_;
-      std::string tag_;
-    };
-  } // namespace
-  // === extract_xml_values & Helpers ===================================================================
-
-
-  namespace
-  {
-    struct p_limits
-    {
-      cstr_t      low_tag;
-      cstr_t      high_tag;
-      std::size_t low_ndx;
-      std::size_t high_ndx;
-    };
-    using limits_vec = std::vector<p_limits>;
-
-    static limits_vec prepare_limits(const fsp::xpath_node_struct& xpaths)
-    {
-      limits_vec vec;
-      vec.reserve(xpaths.max_xpath_size());
-      for (auto cnt = 0UL; cnt < xpaths.max_xpath_size(); cnt++)
-      {
-        // p_limits tmp;
-        auto low  = xpaths.first_xpath_tag_name(cnt);
-        auto high = xpaths.last_xpath_tag_name(cnt);
-        auto tmp  = p_limits{.low_tag = low.first, .high_tag = high.first, .low_ndx = low.second, .high_ndx = high.second};
-        vec.push_back(tmp);
-      }
-      return vec;
-    }
-    static bool process_and_prune_node(const auto&           reader,
-                                       std::stack<xml_node>& stack,
-                                       size_t&               depth,
-                                       const limits_vec&     limits,
-                                       const worker_context& ctx,
-                                       int&                  read_status)
-    {
-      const char* uri = reinterpret_cast<const char*>(xmlTextReaderConstNamespaceUri(reader));
-      const char* tag = reinterpret_cast<const char*>(xmlTextReaderConstLocalName(reader));
-
-      // Safely handle potential null pointers from libxml2
-      std::string_view safe_uri = uri ? uri : "";
-      std::string_view safe_tag = tag ? tag : "";
-
-      if (depth >= limits.size())
-      {
-        if (ctx.logger && ctx.logger->should_log(spdlog::level::debug))
-          ctx.logger->debug("pruning subtree: '{}' too deep: '{}' max allowed: '{}'", safe_tag, depth, limits.size());
-        read_status = xmlTextReaderNext(reader); // Skip all children, move to sibling or the end of parent tag
-        return true;                             // Indicates that a 'continue' should be executed in the outer loop
-      }
-
-      auto tmp  = xml_node{safe_uri, safe_tag};
-      auto low  = limits[depth].low_tag;
-      auto high = limits[depth].high_tag;
-      if (ctx.logger && ctx.logger->should_log(spdlog::level::trace))
-      {
-        ctx.logger->trace("tag: '{:15}' uri: '{:30}' low: {} high: {}", safe_tag, safe_uri, low, high);
-      }
-      if ((depth >= limits.size()) || (tmp.tag() < low) || (tmp.tag() > high))
-      {
-        if (ctx.logger && ctx.logger->should_log(spdlog::level::debug))
-          ctx.logger->debug("pruning subtree: '{}' min: '{}' max: '{}'", safe_tag, limits[depth].low_tag, limits[depth].high_tag);
-
-        read_status = xmlTextReaderNext(reader); // Skip all children, move to sibling or the end of parent tag
-        return true;                             // Indicates that a 'continue' should be executed in the outer loop
-      }
-      stack.emplace(tmp);
-      // depth++;
-      return false; // Indicates normal execution flow, no pruning happened
-    }
-    inline bool log(auto& log, spdlog::level::level_enum lvl = spdlog::level::trace) { return log && log->should_log(lvl); }
-  } // namespace
   result<segment_result> xml_processor::extract_xml_values(cstr_t                xml_buf,
                                                            const segment_result& sr,
                                                            const xml_segment&    seg,
@@ -482,10 +464,11 @@ namespace fsp
     UniqueXmlTextReader reader(xmlReaderForMemory(xml_buf.data(), static_cast<int>(xml_buf.size()), nullptr, nullptr, flags));
 
     int                  read_status;
-    const char*          value = nullptr;
-    auto                 depth = 0UL;
-    const char           pad   = '.';
-    std::stack<xml_node> stack;
+    const char*          value  = nullptr;
+    auto                 depth  = 0UL;
+    const char           pad    = '.';
+    const auto&          logger = ctx.logger;
+    std::stack<xml_node> tag_tree_stack;
     auto                 subtree_type = ctx.targets.targets[seg.subtree_type()].original_ndx(); // seg.subtree_type();
     const auto&          xpaths       = ctx.targets.xpaths.at(subtree_type);
     if (log(ctx.logger)) //
@@ -497,8 +480,26 @@ namespace fsp
     }
     std::vector<bool> maybe_usefull(xpaths.size(), true); // xpaths that we still need values for
     assert(xpaths.size() != 0);
+    // --- available xpaths at points in tree -----------------------------------------------------------
+    using available_xpaths_at_pos = std::vector<int>;
+    std::stack<available_xpaths_at_pos> available_xpaths_stack;
+    const available_xpaths_at_pos       available = std::views::iota(0UL, xpaths.size()) | std::ranges::to<available_xpaths_at_pos>();
+    available_xpaths_stack.push(available); // all xpaths are available initially
     // prepare pruning limits -----------------------------------------------------------------------
     limits_vec limits = prepare_limits(ctx.targets.xpaths.at(subtree_type));
+    if (log(logger))
+    {
+      std::string msg = "Limits:\n";
+      int         cnt = 0;
+      for (const auto& el : limits)
+        msg += fmt::format("- {}: low:[{}:{}] high:[{}:{}]\n", //
+                           cnt++,
+                           el.low_tag,
+                           el.low_ndx,
+                           el.high_tag,
+                           el.high_ndx);
+      ctx.logger->trace(fmt::format("\n{}", msg));
+    }
     // ---------------------------------------------------------------------------------------------
     read_status = xmlTextReaderRead(reader.get());
     // return res;
@@ -510,29 +511,36 @@ namespace fsp
       {
       case XML_READER_TYPE_ELEMENT:
       {
-        if (process_and_prune_node(reader.get(), stack, depth, limits, ctx, read_status)) continue;
-        // for (auto cnt = limits[depth].low_ndx; cnt <= limits[depth].high_ndx; cnt++)
-        // { // walk over defined range on n-th xpath path (depth)
-        //   if (stack.top().tag() != xpaths[cnt].xpath()[depth].tag)
-        //   { // remove specific xpath from the search
-        //     continue;
-        //   }
-        // }
-        if (log(ctx.logger)) ctx.logger->debug(fmt::format("seg:{:5}{}{}", seg.id(), std::string(depth * 2, pad), stack.top().tag()));
+        //        if (process_and_prune_node(reader.get(), tag_tree_stack, depth, limits, ctx.logger, read_status))
+        if (! process_and_prune_node(reader.get(), tag_tree_stack, limits, ctx.logger, read_status))
+        {
+          if (log(logger))
+            logger->trace(
+              fmt::format("pruning: val:{} low: {} high: {}", tag_tree_stack.top().tag(), limits[depth].low_tag, limits[depth].high_tag));
+          continue;
+        }
+        for (auto cnt = limits[depth].low_ndx; cnt <= limits[depth].high_ndx; cnt++)
+        { // walk over defined range on n-th xpath path (depth)
+          if (tag_tree_stack.top().tag() != xpaths[cnt].xpath()[depth].tag)
+          { // remove specific xpath from the search
+          }
+        }
+        if (log(logger, spdlog::level::debug))
+          logger->debug(fmt::format("seg:{:5}{}{}", seg.id(), std::string(depth * 2, pad), tag_tree_stack.top().tag()));
         depth++;
         break;
       }
       case XML_READER_TYPE_TEXT:
       {
         value = reinterpret_cast<const char*>(xmlTextReaderConstValue(reader.get()));
-        if (log(ctx.logger)) ctx.logger->debug(fmt::format("seg:{:5}{}{}", seg.id(), std::string(depth * 2, pad), value));
+        if (log(logger)) logger->debug(fmt::format("seg:{:5}{}{}", seg.id(), std::string(depth * 2, pad), value));
         break;
       }
       case XML_READER_TYPE_END_ELEMENT:
       {
         depth--;
-        if (log(ctx.logger)) ctx.logger->debug(fmt::format("seg:{:5}{}/{}", seg.id(), std::string(depth * 2, pad), stack.top().tag()));
-        stack.pop();
+        if (log(logger)) logger->debug(fmt::format("seg:{:5}{}/{}", seg.id(), std::string(depth * 2, pad), tag_tree_stack.top().tag()));
+        tag_tree_stack.pop();
         break;
       }
       case XML_READER_TYPE_NONE:
@@ -552,7 +560,7 @@ namespace fsp
       case XML_READER_TYPE_XML_DECLARATION: [[fallthrough]];
       default:
         auto type_name = magic_enum::enum_name(enum_type);
-        if (log(ctx.logger)) ctx.logger->debug(fmt::format("nonprocessed: {} {}", type_name, type));
+        if (log(logger)) logger->debug(fmt::format("nonprocessed: {} {}", type_name, type));
       }
       read_status = xmlTextReaderRead(reader.get());
     }

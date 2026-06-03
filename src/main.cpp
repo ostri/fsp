@@ -69,9 +69,9 @@ int main(int argc, char* argv[])
     fsp::logger_config log_cfg{.enable_console = true,
                                .enable_file    = true,
                                .log_file_path  = "xml_processor.log",
-                               .log_level      = spdlog::level::info, // spdlog::level::info;
+                               .log_level      = spdlog::level::trace, // spdlog::level::info;
                                .logger_name    = "main_app"};
-    const auto         no_of_workers = 7U;
+    const auto         no_of_workers = 1U;
     auto               result        = fsp::process_xml_file( //
       xml_file,                                               // path to the xml file
       xsd_file,                                               // path to the xsd file that xml file must comply with

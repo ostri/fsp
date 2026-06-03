@@ -143,6 +143,7 @@ set(${b_target}_SOURCES
     ${CMAKE_SOURCE_DIR}/src/lib/parsing_util.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/e_tag_wide.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/static_sorted_set.cpp
+    ${CMAKE_SOURCE_DIR}/src/lib/xml_node.cpp
 )
 # Additional libraries for main program
 set(FSP_TARGET_${PROJECT_NAME}_LIBS
