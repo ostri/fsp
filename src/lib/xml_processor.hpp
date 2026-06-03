@@ -179,10 +179,12 @@ namespace fsp
       const segment_result& sr,
       const xml_segment&    seg,
       const worker_context& ctx);
+    void                          log_critical(const error_info& error);
     void                          log_error(const error_info& error);
+    void                          log_warning(const std::string& msg);
     void                          log_info(const std::string& msg);
     void                          log_debug(const std::string& msg);
-    void                          log_warning(const std::string& msg);
+    void                          log_trace(const std::string& msg);
   };
 
   using processing_result = std::expected<std::pair<std::vector<segment_result>, std::vector<segment_result>>, error_info>;

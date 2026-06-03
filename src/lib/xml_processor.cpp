@@ -164,21 +164,35 @@ namespace fsp
     log_info("Main program initialized.");
   }
 
+  void xml_processor::log_critical(const error_info& e)
+  {
+    if (log(logger_, spdlog::level::critical)) [[unlikely]]
+      logger_->critical(e.to_string());
+  }
   void xml_processor::log_error(const error_info& e)
   {
-    if (log(logger_)) logger_->error(e.to_string());
+    if (log(logger_, spdlog::level::err)) [[unlikely]]
+      logger_->error(e.to_string());
   }
   void xml_processor::log_info(const std::string& m)
   {
-    if (logger_) logger_->info(m);
-  }
-  void xml_processor::log_debug(const std::string& m)
-  {
-    if (logger_) logger_->debug(m);
+    if (log(logger_, spdlog::level::info)) [[unlikely]]
+      logger_->info(m);
   }
   void xml_processor::log_warning(const std::string& m)
   {
-    if (logger_) logger_->warn(m);
+    if (log(logger_, spdlog::level::warn)) [[unlikely]]
+      logger_->warn(m);
+  }
+  void xml_processor::log_debug(const std::string& m)
+  {
+    if (log(logger_, spdlog::level::debug)) [[unlikely]]
+      logger_->debug(m);
+  }
+  void xml_processor::log_trace(const std::string& m)
+  {
+    if (log(logger_, spdlog::level::trace)) [[unlikely]]
+      logger_->trace(m);
   }
 
   // ============================================================================
@@ -584,6 +598,7 @@ namespace fsp
     //    if (ctx.logger) ctx.logger->debug("Worker thread '{}' started.", log_thread_name);
     if (ctx.logger) ctx.logger->info("Worker thread '{}' started.", log_thread_name);
     ctx.worker_id                          = worker_id;
+    auto&                    logger        = ctx.logger;
     thread_local std::size_t txn_processed = 0;
     while (! ctx.cancel_flag.load())
     {
@@ -618,11 +633,11 @@ namespace fsp
         ctx.error_count++;
       }
     }
-    if (ctx.logger && ctx.logger->should_log(spdlog::level::info))
+    if (log(logger, spdlog::level::info))
     {
       auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count();
-      //      ctx.logger->debug("Worker thread '{}' finished in {} ms.", log_thread_name, duration);
-      ctx.logger->info("Worker thread '{}' finished in {} ms txn processed: {}.", log_thread_name, duration, txn_processed);
+      //      logger->debug("Worker thread '{}' finished in {} ms.", log_thread_name, duration);
+      logger->info("Worker thread '{}' finished in {} ms txn processed: {}.", log_thread_name, duration, txn_processed);
     }
   }
 
