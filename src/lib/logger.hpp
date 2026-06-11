@@ -1,8 +1,8 @@
 #pragma once
 
-#include <memory>
+// #include <memory>
 #include <string>
-#include <string_view>
+// #include <string_view>
 
 #include <spdlog/pattern_formatter.h>
 #include <spdlog/sinks/basic_file_sink.h>
@@ -20,7 +20,6 @@ namespace fsp
   // ---------------------------------------------------------------------------
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables, cert-err58-cpp)
   inline thread_local std::string log_thread_name = "unknown";
-
   // ---------------------------------------------------------------------------
   // Custom spdlog flag formatter: izpisuje log_thread_name trenutne niti.
   // Registriraj ga kot '%*' v vzorcu formatiranja.
@@ -60,39 +59,24 @@ namespace fsp
   {
   public:
     explicit fsp_logger(const logger_config& cfg);
-
     // Nekopirljiv, nepremakljiv — lastništvo se prenaša prek shared_ptr.
     fsp_logger(const fsp_logger&)            = delete;
     fsp_logger& operator=(const fsp_logger&) = delete;
     fsp_logger(fsp_logger&&)                 = delete;
     fsp_logger& operator=(fsp_logger&&)      = delete;
-
     ~fsp_logger();
-
-    // -----------------------------------------------------------------------
-    // Dostop do underlying spdlog loggerja
-    // -----------------------------------------------------------------------
-
     [[nodiscard]] std::shared_ptr<spdlog::logger> get() const;
-
-    // -----------------------------------------------------------------------
-    // Typed log metode — preverjanje ravni pred gradnjo sporočila.
-    // [[unlikely]] ker večina klicev v kritični poti ne bo logirala.
-    // -----------------------------------------------------------------------
-
-    void critical(const error_info& e) const;
-
-    void error(const error_info& e) const;
-
-    void                   critical(std::string_view msg) const;
-    void                   error(std::string_view msg) const;
-    void                   warn(std::string_view msg) const;
-    void                   info(std::string_view msg) const;
-    void                   debug(std::string_view msg) const;
-    void                   trace(std::string_view msg) const;
-    [[nodiscard]] bool     active(lvl_enum lvl = lvl_enum::trace) const noexcept;
-    [[nodiscard]] lvl_enum level() const noexcept;
-    void                   set_level(lvl_enum lvl);
+    void                                          critical(const error_info& e) const;
+    void                                          error(const error_info& e) const;
+    void                                          critical(std::string_view msg) const;
+    void                                          error(std::string_view msg) const;
+    void                                          warn(std::string_view msg) const;
+    void                                          info(std::string_view msg) const;
+    void                                          debug(std::string_view msg) const;
+    void                                          trace(std::string_view msg) const;
+    [[nodiscard]] bool                            active(lvl_enum lvl = lvl_enum::trace) const noexcept;
+    [[nodiscard]] lvl_enum                        level() const noexcept;
+    void                                          set_level(lvl_enum lvl);
   private: /// methods
     static std::unique_ptr<spdlog::pattern_formatter> make_formatter(std::string_view pattern);
     void                                              build(const logger_config& cfg);
@@ -100,12 +84,4 @@ namespace fsp
     std::shared_ptr<spdlog::logger> logger_;
     uint8_t                         level_ = spdlog::level::off; // local cache for level
   };
-
-  // // ---------------------------------------------------------------------------
-  // // Globalna pomožna funkcija — ohranjena za kompatibilnost z obstoječo kodo
-  // // ki preverja shared_ptr<spdlog::logger> neposredno (npr. v workerjih).
-  // // ---------------------------------------------------------------------------
-  // inline bool log_active(const std::shared_ptr<spdlog::logger>& lg, spdlog::level::level_enum lvl = spdlog::level::trace) noexcept
-  // { return lg && lg->should_log(lvl); }
-
 } // namespace fsp

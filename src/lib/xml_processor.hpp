@@ -7,11 +7,8 @@
 #include <stop_token>
 #include <string>
 #include <vector>
-
-// [DODANO] future/promise/optional za asinhrono validacijo
 #include <future>
 #include <optional>
-
 #include <fmt/format.h>
 #include <magic_enum.hpp>
 #include <spdlog/sinks/basic_file_sink.h>
@@ -50,29 +47,11 @@ namespace fsp
     std::atomic<std::size_t>&    processed_count; // number of processed segments
     std::atomic<std::size_t>&    error_count;     // number of detected errors
     std::atomic<bool>&           cancel_flag;     // is the operation cancelled?
-                                                  // std::shared_ptr<spdlog::logger> logger;          // logger
-                                                  //    std::shared_ptr<spdlog::logger> logger;
-    const fsp_logger& log;
-    const proc_data&  targets; // how to partition the xml buffer and which
-                               // tags to extract from each partition type
+    const fsp_logger&            log;             // logger wrapper
+    const proc_data&             targets;         // how to partition the xml buffer and which
+                                                  // tags to extract from each partition type
   };
   // NOLINTEND(cppcoreguidelines-avoid-const-or-ref-data-members)
-
-  // // 1. Global thread-local variable (each thread gets its own isolated instance)
-  // // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables, cert-err58-cpp)
-  // inline thread_local std::string log_thread_name = "unknown";
-
-  // // 2. Formatter class that reads the current thread's name
-  // class ThreadNameFormatter : public spdlog::custom_flag_formatter
-  // {
-  // public:
-  //   void format(const spdlog::details::log_msg& /*msg*/, const std::tm& /*tm*/, spdlog::memory_buf_t& dest) override
-  //   { // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic)
-  //     dest.append(log_thread_name.data(), log_thread_name.data() + log_thread_name.size());
-  //   }
-  //   [[nodiscard]] std::unique_ptr<custom_flag_formatter> clone() const override { return std::make_unique<ThreadNameFormatter>(); }
-  // };
-
   class xml_processor
   {
   public:
@@ -83,19 +62,12 @@ namespace fsp
     xml_processor& operator=(const xml_processor&) = delete;
     xml_processor(xml_processor&&)                 = delete;
     xml_processor& operator=(xml_processor&&)      = delete;
-
     // Procesiranje iz datoteke (mmap)
     void_result process_file(const std::string& xml_path, const std::string& xsd_path = "");
-
     // Procesiranje iz že mmap-ane datoteke
-    void_result process_from_buffer(fsp::mmap_file& xml_mmap, fsp::mmap_file* xsd_mmap = nullptr);
-
-    // // Procesiranje iz memory bufferja
-    // void_result process_buffer(const void* data, std::size_t size, const void* xsd_data = nullptr, std::size_t xsd_size = 0);
-
+    void_result                               process_from_buffer(fsp::mmap_file& xml_mmap, fsp::mmap_file* xsd_mmap = nullptr);
     [[nodiscard]] std::vector<segment_result> get_results();
     [[nodiscard]] std::vector<segment_result> get_errors();
-
     struct stats
     {
       std::size_t total_segments      = 0;
@@ -106,18 +78,12 @@ namespace fsp
     };
     [[nodiscard]] stats get_stats() const;
     [[nodiscard]] bool  is_successful() const { return success_.load(); }
-
-    void cancel();
-
-    [[nodiscard]] std::shared_ptr<spdlog::logger> get_logger() const { return logger_.get(); }
+    void                cancel();
   private: /// methods
     void_result setup_parser_no_validation();
-    // void_result setup_validation(fsp::mmap_file& xsd_mmap);
-    // void_result setup_validation_from_buffer(const void* data, std::size_t size, std::string_view schema_name);
     void_result start_workers();
     void        stop_workers();
-
-    // [DODANO] Zažene validacijo v ločeni niti. Vrne future ki se razreši z
+    // Zažene validacijo v ločeni niti. Vrne future ki se razreši z
     // nullopt (ok) ali error_info (napaka). Klic je neblokirajočen — validacija
     // teče vzporedno s SAX parsingom. Če XSD ni podan, future se takoj razreši
     // z nullopt da ostala koda ne rabi ločevati med "validacija vklopljena" in

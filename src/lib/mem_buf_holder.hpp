@@ -24,9 +24,6 @@ namespace fsp
     void reset();
 
     [[nodiscard]] bool is_valid() const;
-
-    // void set_source(const xercesc::MemBufInputSource>& source);
-    // void set_logger(const std::shared_ptr<spdlog::logger>& logger);
   private:
     std::unique_ptr<xercesc::MemBufInputSource> source_; // xerces file buffer
     std::shared_ptr<spdlog::logger>             logger_; // logger handler
