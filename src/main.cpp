@@ -69,7 +69,7 @@ int main(int argc, char* argv[])
     fsp::logger_config log_cfg{.enable_console = true,
                                .enable_file    = true,
                                .log_file_path  = "xml_processor.log",
-                               .log_level      = spdlog::level::debug, // spdlog::level::info;
+                               .log_level      = spdlog::level::info, // spdlog::level::info;
                                .logger_name    = "fsp"};
     const auto         no_of_workers = 3U;
     auto               result        = fsp::process_xml_file( //

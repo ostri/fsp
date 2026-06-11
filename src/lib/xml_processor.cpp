@@ -16,11 +16,10 @@ namespace
   {
     void operator()(xmlTextReaderPtr reader) const
     {
-      if (reader != nullptr) { xmlFreeTextReader(reader); }
+      if (reader != nullptr) xmlFreeTextReader(reader);
     }
   };
   using UniqueXmlTextReader = std::unique_ptr<std::remove_pointer_t<xmlTextReaderPtr>, XmlTextReaderDeleter>;
-
   std::optional<std::string> get_attribute_value_ns(xmlTextReaderPtr   reader,
                                                     const std::string& local_name,
                                                     const std::string& namespace_uri)
@@ -56,12 +55,7 @@ namespace
     auto local_name = std::string(xp.attr_name());
     auto uri        = std::string(xp.attr_uri());
     auto value      = get_attribute_value_ns(reader, local_name, uri);
-    if (value.has_value()) // non-null attribute
-    {
-      // if (log.active(spdlog::level::critical))
-      //   log.critical(fmt::format("attribute {}:{} value: {} cnt:{}", local_name, uri, value.value(), ndx));
-      return value.value();
-    }
+    if (value.has_value()) return value.value(); // non null value
     throw std::runtime_error(fmt::format("attribute '{}:{}' has no value.", local_name, uri));
   }
   static int process_positive_xpath_element( //
@@ -72,8 +66,8 @@ namespace
     const fsp::fsp_logger& log,
     fsp::segment_result&   seg_result)
   {
-    if (xp.is_last(depth))
-    {                   // we are at the end of the current xpath
+    if (xp.is_last(depth)) // are we reached the end of the current xpath?
+    {
       if (xp.is_attr()) // attribute xpath
       {
         auto value = process_attribute(reader, xp);
@@ -88,7 +82,7 @@ namespace
   }
 
   static std::expected<pp_result, err_result> process_and_prune_node( //
-    const auto&                   reader,
+    xmlTextReaderPtr              reader,
     const fsp::xpath_node_struct& xpaths,
     std::stack<stack_struct>&     stack,
     const fsp::xpath_limits&      limits_vec,
@@ -100,9 +94,9 @@ namespace
     const char* tag         = reinterpret_cast<const char*>(xmlTextReaderConstLocalName(reader));
 
     // Safely handle potential null pointers from libxml2
-    std::string_view safe_uri = uri ? uri : "";
-    std::string_view safe_tag = tag ? tag : "";
-    auto             depth    = stack.size() - 1; // first available on stack a
+    std::string_view safe_uri = uri != nullptr ? uri : "";
+    std::string_view safe_tag = tag != nullptr ? tag : "";
+    auto             depth    = stack.size() - 1; // first available on stack
     pp_result        result;
     if (depth >= stack.size()) // guard to not go too deep
     {
@@ -150,14 +144,10 @@ namespace
       std::string_view xp_tag = xp.xpath()[depth].tag;
       std::string_view xp_uri = xp.xpath()[depth].ns;
       if (log.active(spdlog::level::trace)) log.trace(fmt::format("tag:{} xp tag:{} depth:{} cnt: {}", safe_tag, xp_tag, depth, cnt));
-      if ((safe_tag == xp_tag) && (safe_uri == xp_uri))
-      { // let's remember the tag value index, attribute is handled inside
+      if ((safe_tag == xp_tag) && (safe_uri == xp_uri)) // remember the tag value index, attribute is handled inside
         result.status = std::max(process_positive_xpath_element(reader, xp, cnt, depth, log, seg_result), result.status);
-      }
-      else
-      { // current xpath does not match the tags read
+      else // current xpath tag does not match any tag on current level in xpaths searched
         limits.reset(cnt);
-      }
     } // for
     if (log.active(spdlog::level::trace)) log.trace(fmt::format("limits: {}", limits.dump()));
     if (limits.available().none())      // this subtree is an dead end. prune it
@@ -173,106 +163,6 @@ namespace
 } // namespace
 namespace fsp
 {
-
-  // ============================================================================
-  // Logger
-  // ============================================================================
-
-  // void xml_processor::setup_logger()
-  // {
-  //   std::vector<spdlog::sink_ptr> sinks;
-  //   log_thread_name = "main >";
-  //   // Using the official spdlog alias ensures identical type matching across GCC and Clang
-  //   if (config_.log_config.enable_console)
-  //   {
-  //     auto s = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
-
-  //     // Use explicit unordered_map type instead of the missing custom_flags alias
-  //     std::unordered_map<char, std::unique_ptr<spdlog::custom_flag_formatter>> flags;
-  //     flags['*'] = std::make_unique<ThreadNameFormatter>();
-  //     // Strict 4-argument constructor call for pattern_formatter
-  //     auto formatter = std::make_unique<spdlog::pattern_formatter>( //
-  //       "[%Y-%m-%d %H:%M:%S.%e] [%*] [%^%-5l%$] %v",
-  //       spdlog::pattern_time_type::local,
-  //       spdlog::details::os::default_eol,
-  //       std::move(flags));
-  //     s->set_formatter(std::move(formatter));
-  //     sinks.push_back(s);
-  //   }
-
-  //   if (config_.log_config.enable_file)
-  //   {
-  //     auto s = std::make_shared<spdlog::sinks::basic_file_sink_mt>(config_.log_config.log_file_path, true);
-
-  //     // Use explicit unordered_map type instead of the missing custom_flags alias
-  //     std::unordered_map<char, std::unique_ptr<spdlog::custom_flag_formatter>> flags;
-  //     flags['*'] = std::make_unique<ThreadNameFormatter>();
-
-  //     auto formatter = std::make_unique<spdlog::pattern_formatter>( //
-  //       "[%Y-%m-%d %H:%M:%S.%e] [%*] [%-5l] %v",
-  //       spdlog::pattern_time_type::local,
-  //       spdlog::details::os::default_eol,
-  //       std::move(flags));
-  //     s->set_formatter(std::move(formatter));
-  //     sinks.push_back(s);
-  //   }
-
-  //   if (sinks.empty())
-  //   {
-  //     auto s = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
-
-  //     // Use explicit unordered_map type instead of the missing custom_flags alias
-  //     std::unordered_map<char, std::unique_ptr<spdlog::custom_flag_formatter>> flags;
-  //     flags['*'] = std::make_unique<ThreadNameFormatter>();
-
-  //     auto formatter = std::make_unique<spdlog::pattern_formatter>( //
-  //       "[%Y-%m-%d %H:%M:%S.%e] [%*] [%^%-5l%$] %v",
-  //       spdlog::pattern_time_type::local,
-  //       spdlog::details::os::default_eol,
-  //       std::move(flags));
-  //     s->set_formatter(std::move(formatter));
-  //     sinks.push_back(s);
-  //   }
-
-  //   logger_ = std::make_shared<spdlog::logger>(config_.log_config.logger_name, sinks.begin(), sinks.end());
-  //   logger_->set_level(config_.log_config.log_level);
-  //   logger_->flush_on(spdlog::level::err);
-  //   logger_->flush();
-  //   log_info("Main program initialized.");
-  // }
-
-  // void xml_processor::log_critical(const error_info& e) { logger_.critical(e); }
-  // void xml_processor::log_error(const error_info& e) { logger_.error(e); }
-  // void xml_processor::log_critical(const std::string& m)
-  // {
-  //   if (logger_.active(spdlog::level::critical)) [[unlikely]]
-  //     logger_.critical(m);
-  // }
-  // void xml_processor::log_error(const std::string& m)
-  // {
-  //   if (logger_.active(spdlog::level::err)) [[unlikely]]
-  //     logger_.error(m);
-  // }
-  // void xml_processor::log_info(const std::string& m)
-  // {
-  //   if (logger_.active(spdlog::level::info)) [[unlikely]]
-  //     logger_.info(m);
-  // }
-  // void xml_processor::log_warning(const std::string& m)
-  // {
-  //   if (logger_.active(spdlog::level::warn)) [[unlikely]]
-  //     logger_.warning(m);
-  // }
-  // void xml_processor::log_debug(const std::string& m)
-  // {
-  //   if (logger_.active(spdlog::level::debug)) [[unlikely]]
-  //     logger_.debug(m);
-  // }
-  // void xml_processor::log_trace(const std::string& m)
-  // {
-  //   if (logger_.active(spdlog::level::trace)) [[unlikely]]
-  //     logger_.trace(m);
-  // }
 
   // ============================================================================
   // Constructor / Destructor
@@ -293,31 +183,20 @@ namespace fsp
     cancel();
     stop_workers();
     parser_.reset();
-    //    if (logger_.get()) logger_.get()->flush();
   }
 
   // ============================================================================
   // Parser setup
   // ============================================================================
-
-  // [SPREMENJENO] Preimenovano iz setup_parser() v setup_parser_no_validation().
-  // Odstranjeni so vsi XSD/validacijski featurji (fgSAX2CoreValidation,
-  // fgXercesSchema, fgXercesValidationErrorAsFatal, fgXercesUseCachedGrammarInParse)
-  // ker validacija zdaj teče v svoji niti z lastnim parserjem (launch_validation_thread).
-  // fgCalculateSrcOfs mora ostati — Handler::endElement() ga potrebuje za byte offsete.
   void_result xml_processor::setup_parser_no_validation()
   {
     try
     {
       parser_.reset(xercesc::XMLReaderFactory::createXMLReader());
       // NOLINTBEGIN(hicpp-no-array-decay)
-      // Eksplicitno izklopi validacijo — brez tega bi Xerces morda validiral
-      // po defaultu če je grammar v cache-u
-      parser_->setFeature(xercesc::XMLUni::fgSAX2CoreValidation, false);
-
-      // Obvezno — Handler::endElement() kliče parser_->getSrcOffset()
-      parser_->setFeature(xercesc::XMLUni::fgXercesCalculateSrcOfs, true);
-      parser_->setFeature(xercesc::XMLUni::fgSAX2CoreNameSpaces, true);
+      parser_->setFeature(xercesc::XMLUni::fgSAX2CoreValidation, false);   // must be false
+      parser_->setFeature(xercesc::XMLUni::fgXercesCalculateSrcOfs, true); // we need offset
+      parser_->setFeature(xercesc::XMLUni::fgSAX2CoreNameSpaces, true);    // we need namespaces
       parser_->setFeature(xercesc::XMLUni::fgSAX2CoreNameSpacePrefixes, true);
       // NOLINTEND(hicpp-no-array-decay)
 
@@ -332,42 +211,41 @@ namespace fsp
     }
   }
 
-  void_result xml_processor::setup_validation(fsp::mmap_file& xsd_mmap)
-  {
-    if (! config_.validate_against_xsd || ! xsd_mmap.is_open()) return {};
-    return setup_validation_from_buffer(xsd_mmap.data(), xsd_mmap.size(), xsd_mmap.path());
-  }
-  // FIXME we dont need this any more
-  void_result xml_processor::setup_validation_from_buffer(const void* data, std::size_t size, std::string_view schema_name)
-  {
-    if (! config_.validate_against_xsd) return {};
-    if (data == nullptr || size == 0)
-    {
-      auto err = error_info{processor_error::schema_not_found, "XSD buffer is empty.", "", 0};
-      logger_.error(err.to_string());
-      return std::unexpected(err);
-    }
-    try
-    {
-      xsd_holder_ = std::make_unique<mem_buf_holder>(data, size, schema_name, logger_.get());
+  // void_result xml_processor::setup_validation(fsp::mmap_file& xsd_mmap)
+  // {
+  //   if (! config_.validate_against_xsd || ! xsd_mmap.is_open()) return {};
+  //   return setup_validation_from_buffer(xsd_mmap.data(), xsd_mmap.size(), xsd_mmap.path());
+  // }
+  // // FIXME we dont need this any more
+  // void_result xml_processor::setup_validation_from_buffer(const void* data, std::size_t size, std::string_view schema_name)
+  // {
+  //   if (! config_.validate_against_xsd) return {};
+  //   if (data == nullptr || size == 0)
+  //   {
+  //     auto err = error_info{processor_error::schema_not_found, "XSD buffer is empty.", "", 0};
+  //     logger_.error(err.to_string());
+  //     return std::unexpected(err);
+  //   }
+  //   try
+  //   {
+  //     xsd_holder_ = std::make_unique<mem_buf_holder>(data, size, schema_name, logger_.get());
 
-      if (xsd_holder_->source() != nullptr)
-      {
-        // [OPOMBA] loadGrammar() se tukaj ne kliče več za SAX parser —
-        // validacijska nit si zgradi lasten parser z lastnim grammarjem.
-        // Ta metoda ostane za morebitno zunanjo rabo (setup_validation_from_buffer
-        // je public API) in za xsd_holder_ lifecycle management.
-        logger_.info(fmt::format("XSD schema: '{}' pripravljena.", schema_name));
-      }
-      return {};
-    }
-    catch (const xercesc::XMLException& e)
-    {
-      auto err = error_info{processor_error::xsd_validation_failed, fmt::format("XSD load: {}", x_str(e.getMessage()).to_string()), "", 0};
-      logger_.error(err.to_string());
-      return std::unexpected(err);
-    }
-  }
+  //     if (xsd_holder_->source() != nullptr)
+  //     {
+  //       // [OPOMBA] loadGrammar() se tukaj ne kliče več za SAX parser —
+  //       // validacijska nit si zgradi lasten parser z lastnim grammarjem.
+  //       // Ta metoda ostane za morebitno zunanjo rabo (setup_validation_from_buffer
+  //       // je public API) in za xsd_holder_ lifecycle management.
+  //       logger_.info(fmt::format("XSD schema: '{}' pripravljena.", schema_name));
+  //     }
+  //     return {};
+  //   }
+  //   catch (const xercesc::XMLException& e)
+  //   {
+  //     auto err = error_info{processor_error::xsd_validation_failed, fmt::format("XSD load: {}", x_str(e.getMessage()).to_string()), "",
+  //     0}; logger_.error(err.to_string()); return std::unexpected(err);
+  //   }
+  // }
 
   // ============================================================================
   // [DODANO] Validacijska nit
@@ -558,11 +436,10 @@ namespace fsp
 
     UniqueXmlTextReader reader(xmlReaderForMemory(xml_buf.data(), static_cast<int>(xml_buf.size()), nullptr, nullptr, flags));
 
-    int        read_status;
-    auto       depth = 0UL;
-    const char pad   = '.';
-    // const auto&              logger = ctx.logger;
-    const auto&              log = ctx.log;
+    int                      read_status;
+    auto                     depth = 0UL;
+    const char               pad   = '.';
+    const auto&              log   = ctx.log;
     std::stack<stack_struct> tree_stack;
     auto                     subtree_type = ctx.targets.targets[seg.subtree_type()].original_ndx(); // seg.subtree_type();
     const auto&              xpaths       = ctx.targets.xpaths.at(subtree_type);
@@ -681,7 +558,7 @@ namespace fsp
           ctx.processed_count++;
         }
         else
-        { // thre were error(s)
+        { // there were error(s)
           std::lock_guard lock(ctx.errors_mutex);
           ctx.errors.push_back(std::move(*res));
           ctx.error_count++;
@@ -692,8 +569,6 @@ namespace fsp
         segment_result err_res;
         err_res.segment_id  = seg.id();
         err_res.xpath_index = seg.subtree_type();
-        // err_res.success       = false;
-        // err_res.error_message = res.error().to_string();
         std::lock_guard lock(ctx.errors_mutex);
         ctx.errors.push_back(std::move(err_res));
         ctx.error_count++;
@@ -738,9 +613,8 @@ namespace fsp
       .processed_count = processed_count_, // number of processed segmetns
       .error_count     = error_count_,     // number of error segments
       .cancel_flag     = cancel_flag_,     // are we cancellig the operation?
-                                           //      .logger          = logger_.get(),    // logger
-      .log     = logger_,
-      .targets = config_.targets // how to split the xml tree and whic values to find
+      .log             = logger_,
+      .targets         = config_.targets // how to split the xml tree and whic values to find
     };
 
     workers_.reserve(config_.num_workers);
@@ -765,7 +639,7 @@ namespace fsp
   }
 
   // ============================================================================
-  // Procesiranje
+  // Processing
   // ============================================================================
 
   void_result xml_processor::process_file(const std::string& xml_path, const std::string& xsd_path)
@@ -810,9 +684,6 @@ namespace fsp
     return process_from_buffer(xml_mmap, xsd_mmap ? &*xsd_mmap : nullptr);
   }
 
-  // [SPREMENJENO] process_from_buffer — glavna sprememba v tej datoteki.
-  // Prej: setup_parser() z validacijo + sinhrono parsiranje (26s).
-  // Zdaj:
   //   1. setup_parser_no_validation() — SAX parser brez XSD overhead-a
   //   2. launch_validation_thread()   — validacija vzporedno v svoji niti
   //   3. handler_->set_validation_future() — handler dobi shared_future za
@@ -914,21 +785,15 @@ namespace fsp
     // na vrsti — workerji se ustavijo takoj ko pop() vrne false.
     // Brez tega bi workerji nadaljevali z obdelavo segmentov ki so že v vrsti,
     // kar bi bil nepotreben overhead pri validacijski napaki.
-    if (validation_interrupted) { cancel(); }
-    else
-    {
-      seg_queue_.set_finished();
-    }
-
+    if (validation_interrupted) cancel();
+    else seg_queue_.set_finished();
     // [DODANO] Počakamo validacijsko nit pred cleanup-om. val_future.wait() je
     // idempotenten — če je nit že končala (kar je verjetno pri 1M transakcijah),
     // se vrne takoj. Brez tega bi destruktor mem_buf_holder-ja v validacijski
     // niti tekel vzporedno z našim cleanup-om.
     if (val_future.valid()) val_future.wait();
-
     workers_.clear();
     active_mmap_ = nullptr;
-
     // [DODANO] Preverimo rezultat validacije.
     // get() na shared_future je varen ker:
     //   - validacijska nit je že končala (val_future.wait() zgoraj)

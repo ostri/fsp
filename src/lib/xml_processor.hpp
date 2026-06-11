@@ -110,45 +110,10 @@ namespace fsp
     void cancel();
 
     [[nodiscard]] std::shared_ptr<spdlog::logger> get_logger() const { return logger_.get(); }
-  private:
-    const fsp_logger                        logger_;      // logger must be created first and destructed last
-    fsp::xerces_mgr                         xerces_life_; // must be first to be destructed last
-    processor_config                        config_;
-    std::unique_ptr<xercesc::SAX2XMLReader> parser_;
-    std::unique_ptr<Handler>                handler_;
-    // std::shared_ptr<spdlog::logger>         logger_;
-
-    segment_queue               seg_queue_;
-    std::vector<segment_result> results_;
-    std::vector<segment_result> errors_;
-    std::mutex                  results_mutex_;
-    std::mutex                  errors_mutex_;
-    std::atomic<std::size_t>    processed_count_{0};
-    std::atomic<std::size_t>    error_count_{0};
-    std::atomic<bool>           cancel_flag_{false};
-    std::atomic<bool>           success_{false};
-    std::vector<std::jthread>   workers_;
-
-    std::chrono::steady_clock::time_point start_time_;
-    std::unique_ptr<mem_buf_holder>       xsd_holder_;
-
-    // Trajna mmap referenca za workers (živi med procesiranjem)
-    const fsp::mmap_file* active_mmap_ = nullptr;
-
-    // void setup_logger();
-
-    // [SPREMENJENO] setup_parser() razdeljen na dve funkciji:
-    // - setup_parser_no_validation(): za SAX nit — brez validacijskih featureov,
-    //   ker validacija teče v svoji niti z lastnim parserjem. fgCalculateSrcOfs
-    //   mora ostati vklopljen ker Handler potrebuje byte offsete.
-    // - setup_validation_parser(): za validacijsko nit — z vsemi XSD featurji,
-    //   brez fgCalculateSrcOfs ker offseti niso potrebni (zmanjša overhead).
-    // Stara setup_parser() je bila kombinacija obeh in se ne more več uporabiti
-    // ko sta niti ločeni.
+  private: /// methods
     void_result setup_parser_no_validation();
-
-    void_result setup_validation(fsp::mmap_file& xsd_mmap);
-    void_result setup_validation_from_buffer(const void* data, std::size_t size, std::string_view schema_name);
+    // void_result setup_validation(fsp::mmap_file& xsd_mmap);
+    // void_result setup_validation_from_buffer(const void* data, std::size_t size, std::string_view schema_name);
     void_result start_workers();
     void        stop_workers();
 
@@ -163,24 +128,31 @@ namespace fsp
                                                                            std::size_t xsd_size,
                                                                            std::string xsd_path);
 
-    static void worker_function( //
+    static void                   worker_function( //
       [[maybe_unused]] const std::stop_token& st,
       int                                     worker_id,
       worker_context                          ctx);
-
     static result<segment_result> process_segment(const worker_context& ctx, const xml_segment& seg);
-    static result<segment_result> extract_xml_values( //
-      cstr_t                xml_buf,
-      const xml_segment&    seg,
-      const worker_context& ctx);
-    // void                          log_critical(const error_info& error);
-    // void                          log_error(const error_info& error);
-    // void log_critical(const std::string& msg);
-    // void log_error(const std::string& msg);
-    // void log_warning(const std::string& msg);
-    // void log_info(const std::string& msg);
-    // void log_debug(const std::string& msg);
-    // void log_trace(const std::string& msg);
+    static result<segment_result> extract_xml_values(cstr_t xml_buf, const xml_segment& seg, const worker_context& ctx);
+  private:                                                /// members
+    const fsp_logger                        logger_;      // logger must be created first and destructed last
+    fsp::xerces_mgr                         xerces_life_; // must be first to be destructed last
+    processor_config                        config_;
+    std::unique_ptr<xercesc::SAX2XMLReader> parser_;
+    std::unique_ptr<Handler>                handler_;
+    segment_queue                           seg_queue_;
+    std::vector<segment_result>             results_;
+    std::vector<segment_result>             errors_;
+    std::mutex                              results_mutex_;
+    std::mutex                              errors_mutex_;
+    std::atomic<std::size_t>                processed_count_{0};
+    std::atomic<std::size_t>                error_count_{0};
+    std::atomic<bool>                       cancel_flag_{false};
+    std::atomic<bool>                       success_{false};
+    std::vector<std::jthread>               workers_;
+    std::chrono::steady_clock::time_point   start_time_;
+    std::unique_ptr<mem_buf_holder>         xsd_holder_;
+    const fsp::mmap_file*                   active_mmap_ = nullptr; // reference to mmap file (needed by workers)
   };
 
   using processing_result = std::expected<std::pair<std::vector<segment_result>, std::vector<segment_result>>, error_info>;
