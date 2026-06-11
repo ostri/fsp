@@ -157,7 +157,7 @@ namespace fsp
     // Ob napaki vržemo SAXParseException: to je edini način za prekinitev
     // Xerces SAX parsinga iz ContentHandler callbacka. Izjema se propagira
     // skozi parser_->parse() in jo ujame process_from_buffer().
-    constexpr const auto every = 8192 - 1U; // 2**13
+    constexpr const auto every = 32768 - 1U; // 2**15
     if ((element_counter_++ & every) == 0 && val_future_.valid())
     {
       if (val_future_.wait_for(std::chrono::seconds(0)) == std::future_status::ready)

@@ -4,6 +4,8 @@
 #include "xml_attr.hpp"
 
 #include <algorithm>
+#include <bitset>
+#include <cassert>
 #include <chrono>
 #include <fmt/format.h>
 #include <ranges>
@@ -43,7 +45,8 @@ namespace fsp
   class xpath_node_struct
   {
   public:
-    xpath_node_struct() = default;
+    static constexpr const int xpath_max = 64;
+    xpath_node_struct()                  = default;
     constexpr xpath_node_struct(std::span<const raw_attr> inputs, std::span<const ns> ns_arr);
 
     [[nodiscard]] constexpr const xml_attr& operator[](std::size_t ndx) const;
@@ -54,10 +57,11 @@ namespace fsp
     [[nodiscard]] constexpr std::size_t size() const { return data_.size(); }
     [[nodiscard]] constexpr std::size_t max_xpath_size() const;
 
-    [[nodiscard]] constexpr std::pair<cstr_t, std::size_t> last_xpath_tag_name(std::size_t depth) const;
-    [[nodiscard]] constexpr std::pair<cstr_t, std::size_t> first_xpath_tag_name(std::size_t depth) const;
-    [[nodiscard]] constexpr std::string                    dump(int offs) const;
-    constexpr void                                         reserve(std::size_t size) { data_.reserve(size); }
+    [[nodiscard]] constexpr std::size_t                               last(std::size_t depth) const;
+    [[nodiscard]] constexpr std::size_t                               first(std::size_t depth) const;
+    [[nodiscard]] constexpr std::string                               dump(int offs = 0) const;
+    constexpr void                                                    reserve(std::size_t size) { data_.reserve(size); }
+    [[nodiscard]] constexpr std::bitset<xpath_node_struct::xpath_max> available(std::size_t depth) const;
   private:
     std::vector<xml_attr> data_;
     std::size_t           max_xpath_size_ = 0;
@@ -66,7 +70,7 @@ namespace fsp
   {
     fsp::xpath_node_struct              targets; // NOLINT(misc-non-private-member-variables-in-classes)
     std::vector<fsp::xpath_node_struct> xpaths;  // NOLINT(misc-non-private-member-variables-in-classes)
-    [[nodiscard]] std::string           dump(int offs) const
+    [[nodiscard]] std::string           dump(int offs = 0) const
     {
       std::string msg;
       msg = fmt::format("{0}targets:{1}\n{0}xpaths.size:{2}", std::string(offs, ' '), targets.dump(offs), xpaths.size());
@@ -168,8 +172,10 @@ namespace fsp
 
   [[nodiscard]] constexpr std::string xml_attr::dump(int offs) const
   {
-    auto msg = fmt::format(                                                                                    //
-      "{}name: {:15} path: {:40} is_array: {:5} is_opt {:5} attr: {}:{:15} xpath size:{:2} original ndx:{:2}", //
+    std::string msg_xpath;
+    for (const auto& el : xpath_) msg_xpath += fmt::format("[{}:{}]/", el.tag, el.ns);
+    auto msg = fmt::format(                                                                                       //
+      "{}name: {:15} path: {:40} is_array: {:5} is_opt {:5} attr: {}:{:15} xpath size:{:2} original ndx:{:2} {}", //
       std::string(offs, ' '),
       name_,
       path_,
@@ -178,7 +184,8 @@ namespace fsp
       attr_.ns,
       attr_.tag,
       xpath_size_,
-      original_ndx_);
+      original_ndx_,
+      msg_xpath);
     return msg;
   }
 
@@ -203,60 +210,54 @@ namespace fsp
     for (const auto& input : inputs)
     {
       xml_attr attr(ndx++, input, ns_arr);
-      max_d = std::max(max_d, attr.xpath_size());
+      max_d = std::max(max_d, attr.size());
       data_.push_back(std::move(attr));
     }
 
     max_xpath_size_ = max_d;
 
-    std::ranges::sort(data_, [](const xml_attr& a, const xml_attr& b) { return a.path() < b.path(); });
+    // std::ranges::sort(data_, [](const xml_attr& a, const xml_attr& b) { return a.path() < b.path(); });
   }
-
   [[nodiscard]] constexpr const xml_attr& xpath_node_struct::operator[](std::size_t ndx) const { return data_.at(ndx); }
-
   [[nodiscard]] constexpr const xml_attr& xpath_node_struct::operator[](cstr_t name) const
   {
     for (const auto& el : data_)
       if (el.name() == name) return el;
-
     throw compile_error(fmt::format("unknown path '{}'.", name).data());
   }
-
   [[nodiscard]] constexpr std::size_t xpath_node_struct::max_xpath_size() const { return max_xpath_size_; }
-
-  [[nodiscard]] constexpr std::pair<cstr_t, std::size_t> xpath_node_struct::last_xpath_tag_name(std::size_t depth) const
+  [[nodiscard]] constexpr std::size_t xpath_node_struct::last(std::size_t depth) const
   {
     if (depth >= max_xpath_size_) throw compile_error(fmt::format("depth {} exceeds max xpath depth {}", depth, max_xpath_size_).data());
-
-    std::pair<cstr_t, std::size_t> res{};
-    for (const auto& [ndx, el] : std::views::enumerate(data_))
-    {
-      if (depth >= el.xpath_size()) continue;
-      auto val = el.xpath()[depth].tag;
-      if (res.first.empty() || val > res.first) res = {val, ndx};
-    }
-    return res;
+    for (const auto& [ndx, el] : std::views::enumerate(data_) | std::views::reverse)
+      if (depth < el.size()) return ndx;
+    throw std::runtime_error(fmt::format("max empty depth: {}", depth));
   }
 
-  [[nodiscard]] constexpr std::pair<cstr_t, std::size_t> xpath_node_struct::first_xpath_tag_name(std::size_t depth) const
+  [[nodiscard]] constexpr std::size_t xpath_node_struct::first(std::size_t depth) const
   {
     if (depth >= max_xpath_size_) throw compile_error(fmt::format("depth {} exceeds max xpath depth {}", depth, max_xpath_size_).data());
-
-    std::pair<cstr_t, std::size_t> res{};
     for (const auto& [ndx, el] : std::views::enumerate(data_))
-    {
-      if (depth >= el.xpath_size()) continue;
-      auto val = el.xpath()[depth].tag;
-      if (val.empty()) continue; // we are looking for minimum value but empty
-      if (res.first.empty() || val < res.first) res = {val, ndx};
-    }
-    return res;
+      if (depth < el.size()) return ndx;
+    throw std::runtime_error(fmt::format("min empty depth: {}", depth));
+  }
+  [[nodiscard]] constexpr std::bitset<xpath_node_struct::xpath_max> xpath_node_struct::available(std::size_t depth) const
+  {
+    if (depth >= max_xpath_size_) throw compile_error(fmt::format("depth {} exceeds max xpath depth {}", depth, max_xpath_size_).data());
+    assert(depth >= max_xpath_size_);
+    std::bitset<xpath_max> result{};
+
+    for (const auto& [ndx, el] : std::views::enumerate(data_))
+      if (depth < el.size()) result.set(ndx);
+    return result;
   }
 
   [[nodiscard]] constexpr std::string xpath_node_struct::dump(int offs) const
   {
     std::string msg;
-    msg = fmt::format("{}data.size; {} max_path_size: {}", std::string(offs, ' '), data_.size(), max_xpath_size_);
+    std::string msg_el;
+    for (const auto& el : data_) msg_el += fmt::format("{}\n", el.dump());
+    msg = fmt::format("{}data.size; {} max_path_size: {}\n{}", std::string(offs, ' '), data_.size(), max_xpath_size_, msg_el);
     return msg;
   }
 } // namespace fsp

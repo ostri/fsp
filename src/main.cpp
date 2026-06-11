@@ -35,27 +35,27 @@ int main(int argc, char* argv[])
     });
     // --- targets --------------------------------------------------------------
     static constexpr auto targets_raw = std::to_array<fsp::raw_attr>({
-      {.name="header",           .path="/x:Document/FIToFICstmrCdtTrf/x:GrpHdr"},
-      {.name="transaction",      .path="/Document/x:FIToFICstmrCdtTrf/x:CdtTrfTxInf"},
+      {.name="header",      .path="/x:Document/FIToFICstmrCdtTrf/x:GrpHdr"},
+      {.name="transaction", .path="/Document/x:FIToFICstmrCdtTrf/x:CdtTrfTxInf"},
     });
     // --- attributes in header -------------------------------------------------
     static constexpr auto xpath_hdr = std::to_array<fsp::raw_attr>({
-      {.name="msg_id",          .path="x:GrpHdr/MsgId"},
-      {.name="amount_sum",      .path="GrpHdr/TtlIntrBkSttlmAmt"},
-      {.name="amount_sum_cur",  .path="GrpHdr/TtlIntrBkSttlmAmt/@Ccy", .is_opt=true},
-      {.name="msg_ts",          .path="x:GrpHdr/CreDtTm",              .is_opt=true},
+      {.name="msg_id",         .path="x:GrpHdr/MsgId"},
+      {.name="amount_sum",     .path="GrpHdr/TtlIntrBkSttlmAmt"},
+      {.name="amount_sum_cur", .path="GrpHdr/TtlIntrBkSttlmAmt/@Ccy", .is_opt=true},
+      {.name="msg_ts",         .path="x:GrpHdr/CreDtTm",              .is_opt=true},
+      {.name="value_date",     .path="GrpHdr/IntrBkSttlmDt",     .is_opt=true},
     });
     // --- attributes in transaction --------------------------------------------
     static constexpr auto xpath_txn = std::to_array<fsp::raw_attr>({
-      {.name="txn_id",          .path="CdtTrfTxInf/PmtId/TxId"},
-      {.name="debtor_.iban_",   .path="CdtTrfTxInf/DbtrAcct/Id/IBAN"},
-      {.name="debtor_.bic_",    .path="CdtTrfTxInf/DbtrAgt/FinInstnId/BICFI"},
-      {.name="creditor_.iban_", .path="CdtTrfTxInf/CdtrAcct/Id/IBAN"},
-      {.name="creditor_.bic_",  .path="CdtTrfTxInf/CdtrAgt/FinInstnId/BICFI"},
-      {.name="amount_",         .path="CdtTrfTxInf/IntrBkSttlmAmt"},
-      {.name="currency_",       .path="CdtTrfTxInf/IntrBkSttlmAmt/@Ccy",        .is_opt=true},
-      {.name="value_date_",     .path="CdtTrfTxInf/IntrBkSttlmDt",              .is_opt=true},
-      {.name="remittance_",     .path="CdtTrfTxInf/RmtInf/Strd/RfrdDocInf/*Nb", .is_opt=true},
+      {.name="txn_id",        .path="CdtTrfTxInf/PmtId/TxId"},
+      {.name="debtor.iban",   .path="CdtTrfTxInf/DbtrAcct/Id/IBAN"},
+      {.name="debtor.bic",    .path="CdtTrfTxInf/DbtrAgt/FinInstnId/BICFI"},
+      {.name="creditor.iban", .path="CdtTrfTxInf/CdtrAcct/Id/IBAN"},
+      {.name="creditor.bic",  .path="CdtTrfTxInf/CdtrAgt/FinInstnId/BICFI"},
+      {.name="amount",        .path="CdtTrfTxInf/IntrBkSttlmAmt"},
+      {.name="currency",      .path="CdtTrfTxInf/IntrBkSttlmAmt/@Ccy",        .is_opt=true},
+      {.name="instr.agent",   .path="CdtTrfTxInf/InstgAgt/FinInstnId/*BICFI", .is_opt=true},
     });
     // clang-format on
     static const auto targets = fsp::build(targets_raw, ns); // xml tree node(s)
@@ -69,9 +69,9 @@ int main(int argc, char* argv[])
     fsp::logger_config log_cfg{.enable_console = true,
                                .enable_file    = true,
                                .log_file_path  = "xml_processor.log",
-                               .log_level      = spdlog::level::trace, // spdlog::level::info;
-                               .logger_name    = "main_app"};
-    const auto         no_of_workers = 1U;
+                               .log_level      = spdlog::level::debug, // spdlog::level::info;
+                               .logger_name    = "fsp"};
+    const auto         no_of_workers = 3U;
     auto               result        = fsp::process_xml_file( //
       xml_file,                                               // path to the xml file
       xsd_file,                                               // path to the xsd file that xml file must comply with

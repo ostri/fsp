@@ -21,7 +21,8 @@ namespace fsp
     invalid_xpath,
     schema_not_found,
     xml_empty,
-    internal_error
+    internal_error,
+    error_extracting_xpath_values
   };
   class error_info
   {

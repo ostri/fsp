@@ -26,7 +26,7 @@ namespace fsp
   };
   using raw_inputs = std::span<const raw_attr>;
   using xpath_vec  = std::vector<xpath_el>;
-  using xpath_span = std::span<const xpath_el>;
+  using xpath_span = xpath_vec; // std::vector<xpath_el>; // std::span<const xpath_el>;
   // --- xml attribute (runtime friendly, built at compile time) ------------------------
   struct xml_attr
   {
@@ -43,7 +43,11 @@ namespace fsp
     [[nodiscard]] constexpr bool        is_attr() const { return ! attr_.tag.empty(); }
     [[nodiscard]] constexpr bool        is_array() const { return is_array_; }
     [[nodiscard]] constexpr xpath_span  xpath() const { return xpath_; }
-    [[nodiscard]] constexpr std::size_t xpath_size() const { return xpath_.size(); }
+    [[nodiscard]] constexpr std::size_t size() const { return xpath_.size(); }
+    [[nodiscard]] constexpr bool        is_last(std::size_t ndx) const
+    { //
+      return ndx == xpath_.size() - 1;
+    }
     [[nodiscard]] constexpr cstr_t      attr_name() const { return attr_.tag; }
     [[nodiscard]] constexpr cstr_t      attr_uri() const { return attr_.ns; }
     [[nodiscard]] constexpr xpath_el    last() const { return xpath_.back(); }

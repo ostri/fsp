@@ -138,8 +138,8 @@ set(${b_target}_SOURCES
     ${CMAKE_SOURCE_DIR}/src/lib/processor_config.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/xpath_helpers.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/common.cpp
-    ${CMAKE_SOURCE_DIR}/src/lib/dom_parser.cpp
-    ${CMAKE_SOURCE_DIR}/src/lib/dom_handler.cpp
+    # ${CMAKE_SOURCE_DIR}/src/lib/dom_parser.cpp
+    # ${CMAKE_SOURCE_DIR}/src/lib/dom_handler.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/parsing_util.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/e_tag_wide.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/static_sorted_set.cpp
@@ -149,6 +149,7 @@ set(${b_target}_SOURCES
     ${CMAKE_SOURCE_DIR}/src/lib/xpath_el.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/static_xpath_vec.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/xpath_limits.cpp
+    ${CMAKE_SOURCE_DIR}/src/lib/segment_result.cpp
 )
 # Additional libraries for main program
 set(FSP_TARGET_${PROJECT_NAME}_LIBS

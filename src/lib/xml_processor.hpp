@@ -33,17 +33,11 @@
 #include "xerces_mgr.hpp"
 #include "xpath_helpers.hpp"
 #include "parsing_util.hpp"
+#include "segment_result.hpp"
 
 namespace fsp
 {
   using cstr_t = std::string_view;
-  struct segment_result
-  {
-    std::size_t segment_id  = 0;
-    int         xpath_index = -1;
-    bool        success     = false;
-    std::string error_message;
-  };
   // Worker context — vse kar worker potrebuje
   // NOLINTBEGIN(cppcoreguidelines-avoid-const-or-ref-data-members)
   struct worker_context
@@ -176,7 +170,6 @@ namespace fsp
     static result<segment_result> process_segment(const worker_context& ctx, const xml_segment& seg);
     static result<segment_result> extract_xml_values( //
       cstr_t                xml_buf,
-      const segment_result& sr,
       const xml_segment&    seg,
       const worker_context& ctx);
     void                          log_critical(const error_info& error);
