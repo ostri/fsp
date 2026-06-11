@@ -32,11 +32,11 @@ namespace fsp
   class Handler : public xercesc::DefaultHandler
   {
   public:
-    Handler(proc_data&                      targets,
-            segment_queue&                  queue,
-            std::shared_ptr<spdlog::logger> logger,
-            const xercesc::SAX2XMLReader*   parser,
-            std::string_view                base_addr);
+    Handler(proc_data&                             targets,
+            segment_queue&                         queue,
+            const std::shared_ptr<spdlog::logger>& logger,
+            const xercesc::SAX2XMLReader*          parser,
+            std::string_view                       base_addr);
 
     // --- SAX2 ContentHandler ---
     void startPrefixMapping( //

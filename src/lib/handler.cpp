@@ -15,16 +15,16 @@ namespace fsp
   // Konstrukcija
   // ============================================================================
 
-  Handler::Handler(proc_data&                      targets,
-                   segment_queue&                  queue,
-                   std::shared_ptr<spdlog::logger> logger,
-                   const xercesc::SAX2XMLReader*   parser,
-                   std::string_view                base_addr)
+  Handler::Handler(proc_data&                             targets,
+                   segment_queue&                         queue,
+                   const std::shared_ptr<spdlog::logger>& logger,
+                   const xercesc::SAX2XMLReader*          parser,
+                   std::string_view                       base_addr)
   : targets_(targets) //
   , queue_(queue)     //
   , parser_(parser)
-  , logger_(std::move(logger)) //
-  , base_addr_(base_addr)      //
+  , logger_(logger)       //
+  , base_addr_(base_addr) //
   {
     // targets are converted to wide characters
     for (const auto& el : targets_.targets)

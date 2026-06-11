@@ -28,18 +28,13 @@ namespace fsp
   class ThreadNameFormatter : public spdlog::custom_flag_formatter
   {
   public:
-    void format(const spdlog::details::log_msg& /*msg*/,
-                const std::tm&                  /*tm*/,
-                spdlog::memory_buf_t&           dest) override
+    void format(const spdlog::details::log_msg& /*msg*/, const std::tm& /*tm*/, spdlog::memory_buf_t& dest) override
     {
       // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic)
       dest.append(log_thread_name.data(), log_thread_name.data() + log_thread_name.size());
     }
 
-    [[nodiscard]] std::unique_ptr<custom_flag_formatter> clone() const override
-    {
-      return std::make_unique<ThreadNameFormatter>();
-    }
+    [[nodiscard]] std::unique_ptr<custom_flag_formatter> clone() const override { return std::make_unique<ThreadNameFormatter>(); }
   };
 
   // ---------------------------------------------------------------------------
@@ -64,10 +59,7 @@ namespace fsp
     // Zgradi logger glede na logger_config.
     // Če sta enable_console in enable_file oba false, samodejno odpre barvno
     // konzolno izhajanje kot rezervni izhod.
-    explicit fsp_logger(const logger_config& cfg)
-    {
-      build(cfg);
-    }
+    explicit fsp_logger(const logger_config& cfg) { build(cfg); }
 
     // Nekopirljiv, nepremakljiv — lastništvo se prenaša prek shared_ptr.
     fsp_logger(const fsp_logger&)            = delete;
@@ -104,6 +96,16 @@ namespace fsp
         logger_->error(e.to_string());
     }
 
+    void critical(std::string_view msg) const
+    {
+      if (active(spdlog::level::critical)) [[unlikely]]
+        logger_->critical(msg);
+    }
+    void error(std::string_view msg) const
+    {
+      if (active(spdlog::level::err)) [[unlikely]]
+        logger_->error(msg);
+    }
     void warning(std::string_view msg) const
     {
       if (active(spdlog::level::warn)) [[unlikely]]
@@ -134,10 +136,7 @@ namespace fsp
 
     /// Vrne true če je logger živ in ima aktivno raven >= lvl.
     [[nodiscard]] bool active(spdlog::level::level_enum lvl = spdlog::level::trace) const noexcept
-    {
-      return logger_ && logger_->should_log(lvl);
-    }
-
+    { return logger_ && logger_->should_log(lvl); }
   private:
     std::shared_ptr<spdlog::logger> logger_;
 
@@ -147,10 +146,7 @@ namespace fsp
       std::unordered_map<char, std::unique_ptr<spdlog::custom_flag_formatter>> flags;
       flags['*'] = std::make_unique<ThreadNameFormatter>();
       return std::make_unique<spdlog::pattern_formatter>(
-        std::string(pattern),
-        spdlog::pattern_time_type::local,
-        spdlog::details::os::default_eol,
-        std::move(flags));
+        std::string(pattern), spdlog::pattern_time_type::local, spdlog::details::os::default_eol, std::move(flags));
     }
 
     void build(const logger_config& cfg)
@@ -166,7 +162,7 @@ namespace fsp
         sinks.push_back(std::move(s));
       }
 
-      if (cfg.enable_file)
+      if (cfg.enable_file && ! cfg.log_file_path.empty())
       {
         auto s = std::make_shared<spdlog::sinks::basic_file_sink_mt>(cfg.log_file_path, true);
         s->set_formatter(make_formatter("[%Y-%m-%d %H:%M:%S.%e] [%*] [%-5l] %v"));
@@ -192,10 +188,7 @@ namespace fsp
   // Globalna pomožna funkcija — ohranjena za kompatibilnost z obstoječo kodo
   // ki preverja shared_ptr<spdlog::logger> neposredno (npr. v workerjih).
   // ---------------------------------------------------------------------------
-  inline bool log_active(const std::shared_ptr<spdlog::logger>& lg,
-                         spdlog::level::level_enum               lvl = spdlog::level::trace) noexcept
-  {
-    return lg && lg->should_log(lvl);
-  }
+  inline bool log_active(const std::shared_ptr<spdlog::logger>& lg, spdlog::level::level_enum lvl = spdlog::level::trace) noexcept
+  { return lg && lg->should_log(lvl); }
 
 } // namespace fsp

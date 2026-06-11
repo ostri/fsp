@@ -20,11 +20,9 @@
 #include <xercesc/framework/MemBufInputSource.hpp>
 #include <xercesc/sax2/SAX2XMLReader.hpp>
 #include <xercesc/sax2/XMLReaderFactory.hpp>
-
-// #include "e_tag.hpp"
-// #include "dom_parser.hpp"
 #include "error_info.hpp"
 #include "handler.hpp"
+#include "logger.hpp"
 #include "logger_config.hpp"
 #include "mem_buf_holder.hpp"
 #include "mmap_file.hpp"
@@ -42,36 +40,38 @@ namespace fsp
   // NOLINTBEGIN(cppcoreguidelines-avoid-const-or-ref-data-members)
   struct worker_context
   {
-    int                             worker_id;       // unique id of the worker
-    segment_queue&                  seg_queue;       // input queue
-    const fsp::mmap_file&           xml_mmap;        // mmap mapping for buffer segment
-    std::vector<segment_result>&    results;         // output queue for valid transactions
-    std::vector<segment_result>&    errors;          // output queue for transactions with errors
-    std::mutex&                     results_mutex;   // results queue mutex
-    std::mutex&                     errors_mutex;    // errors queue mitex
-    std::atomic<std::size_t>&       processed_count; // number of processed segments
-    std::atomic<std::size_t>&       error_count;     // number of detected errors
-    std::atomic<bool>&              cancel_flag;     // is the operation cancelled?
-    std::shared_ptr<spdlog::logger> logger;          // logger
-    const proc_data&                targets;         // how to partition the xml buffer and which
-                                                     // tags to extract from each partition type
+    int                          worker_id;       // unique id of the worker
+    segment_queue&               seg_queue;       // input queue
+    const fsp::mmap_file&        xml_mmap;        // mmap mapping for buffer segment
+    std::vector<segment_result>& results;         // output queue for valid transactions
+    std::vector<segment_result>& errors;          // output queue for transactions with errors
+    std::mutex&                  results_mutex;   // results queue mutex
+    std::mutex&                  errors_mutex;    // errors queue mitex
+    std::atomic<std::size_t>&    processed_count; // number of processed segments
+    std::atomic<std::size_t>&    error_count;     // number of detected errors
+    std::atomic<bool>&           cancel_flag;     // is the operation cancelled?
+                                                  // std::shared_ptr<spdlog::logger> logger;          // logger
+                                                  //    std::shared_ptr<spdlog::logger> logger;
+    const fsp_logger& log;
+    const proc_data&  targets; // how to partition the xml buffer and which
+                               // tags to extract from each partition type
   };
   // NOLINTEND(cppcoreguidelines-avoid-const-or-ref-data-members)
 
-  // 1. Global thread-local variable (each thread gets its own isolated instance)
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables, cert-err58-cpp)
-  inline thread_local std::string log_thread_name = "unknown";
+  // // 1. Global thread-local variable (each thread gets its own isolated instance)
+  // // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables, cert-err58-cpp)
+  // inline thread_local std::string log_thread_name = "unknown";
 
-  // 2. Formatter class that reads the current thread's name
-  class ThreadNameFormatter : public spdlog::custom_flag_formatter
-  {
-  public:
-    void format(const spdlog::details::log_msg& /*msg*/, const std::tm& /*tm*/, spdlog::memory_buf_t& dest) override
-    { // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic)
-      dest.append(log_thread_name.data(), log_thread_name.data() + log_thread_name.size());
-    }
-    [[nodiscard]] std::unique_ptr<custom_flag_formatter> clone() const override { return std::make_unique<ThreadNameFormatter>(); }
-  };
+  // // 2. Formatter class that reads the current thread's name
+  // class ThreadNameFormatter : public spdlog::custom_flag_formatter
+  // {
+  // public:
+  //   void format(const spdlog::details::log_msg& /*msg*/, const std::tm& /*tm*/, spdlog::memory_buf_t& dest) override
+  //   { // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic)
+  //     dest.append(log_thread_name.data(), log_thread_name.data() + log_thread_name.size());
+  //   }
+  //   [[nodiscard]] std::unique_ptr<custom_flag_formatter> clone() const override { return std::make_unique<ThreadNameFormatter>(); }
+  // };
 
   class xml_processor
   {
@@ -109,13 +109,14 @@ namespace fsp
 
     void cancel();
 
-    [[nodiscard]] std::shared_ptr<spdlog::logger> get_logger() const { return logger_; }
+    [[nodiscard]] std::shared_ptr<spdlog::logger> get_logger() const { return logger_.get(); }
   private:
+    const fsp_logger                        logger_;      // logger must be created first and destructed last
     fsp::xerces_mgr                         xerces_life_; // must be first to be destructed last
     processor_config                        config_;
     std::unique_ptr<xercesc::SAX2XMLReader> parser_;
     std::unique_ptr<Handler>                handler_;
-    std::shared_ptr<spdlog::logger>         logger_;
+    // std::shared_ptr<spdlog::logger>         logger_;
 
     segment_queue               seg_queue_;
     std::vector<segment_result> results_;
@@ -134,7 +135,7 @@ namespace fsp
     // Trajna mmap referenca za workers (živi med procesiranjem)
     const fsp::mmap_file* active_mmap_ = nullptr;
 
-    void setup_logger();
+    // void setup_logger();
 
     // [SPREMENJENO] setup_parser() razdeljen na dve funkciji:
     // - setup_parser_no_validation(): za SAX nit — brez validacijskih featureov,
@@ -172,12 +173,14 @@ namespace fsp
       cstr_t                xml_buf,
       const xml_segment&    seg,
       const worker_context& ctx);
-    void                          log_critical(const error_info& error);
-    void                          log_error(const error_info& error);
-    void                          log_warning(const std::string& msg);
-    void                          log_info(const std::string& msg);
-    void                          log_debug(const std::string& msg);
-    void                          log_trace(const std::string& msg);
+    // void                          log_critical(const error_info& error);
+    // void                          log_error(const error_info& error);
+    // void log_critical(const std::string& msg);
+    // void log_error(const std::string& msg);
+    // void log_warning(const std::string& msg);
+    // void log_info(const std::string& msg);
+    // void log_debug(const std::string& msg);
+    // void log_trace(const std::string& msg);
   };
 
   using processing_result = std::expected<std::pair<std::vector<segment_result>, std::vector<segment_result>>, error_info>;
