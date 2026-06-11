@@ -73,10 +73,17 @@ namespace fsp
     if (active(lvl_enum::trace)) [[unlikely]]
       logger_->trace(msg);
   }
+  /// true if level is right for logging
+  [[nodiscard]] bool fsp_logger::active(lvl_enum lvl) const noexcept //
+  { return static_cast<uint8_t>(lvl) >= level_; }
 
-  /// Vrne true če je logger živ in ima aktivno raven >= lvl.
-  [[nodiscard]] bool fsp_logger::active(lvl_enum lvl) const noexcept
-  { return logger_ && logger_->should_log(static_cast<spdlog::level::level_enum>(lvl)); }
+  [[nodiscard]] lvl_enum fsp_logger::level() const noexcept { return static_cast<lvl_enum>(level_); }
+
+  void fsp_logger::set_level(lvl_enum lvl)
+  {
+    level_ = static_cast<uint8_t>(lvl);
+    logger_->set_level(static_cast<spdlog::level::level_enum>(level_));
+  }
 
   // Pomožna funkcija: zgradi spdlog::pattern_formatter z '%*' flagom za ime niti.
   std::unique_ptr<spdlog::pattern_formatter> fsp_logger::make_formatter(std::string_view pattern)
@@ -90,35 +97,33 @@ namespace fsp
   void fsp_logger::build(const logger_config& cfg)
   {
     log_thread_name = "main >";
-
     std::vector<spdlog::sink_ptr> sinks;
-
-    if (cfg.enable_console)
+    if (cfg.enable_console) // console logger
     {
       auto s = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
       s->set_formatter(make_formatter("[%Y-%m-%d %H:%M:%S.%e] [%*] [%^%-5l%$] %v"));
       sinks.push_back(std::move(s));
     }
-
-    if (cfg.enable_file && ! cfg.log_file_path.empty())
+    if (cfg.enable_file && ! cfg.log_file_path.empty()) // file logger
     {
       auto s = std::make_shared<spdlog::sinks::basic_file_sink_mt>(cfg.log_file_path, true);
       s->set_formatter(make_formatter("[%Y-%m-%d %H:%M:%S.%e] [%*] [%-5l] %v"));
       sinks.push_back(std::move(s));
     }
-
-    // Rezervna konzola če noben sink ni bil konfiguriran
+    // backup console if no sink is configured
     if (sinks.empty())
     {
       auto s = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
       s->set_formatter(make_formatter("[%Y-%m-%d %H:%M:%S.%e] [%*] [%^%-5l%$] %v"));
       sinks.push_back(std::move(s));
     }
-
     logger_ = std::make_shared<spdlog::logger>(cfg.logger_name, sinks.begin(), sinks.end());
     logger_->set_level(cfg.log_level);
     logger_->flush_on(spdlog::level::err);
     logger_->flush();
+    level_ = static_cast<uint8_t>(cfg.log_level); // caching level to speedup
+                                                  // should one implement set_level method, it must set
+                                                  // level_ too
   }
 
 } // namespace fsp

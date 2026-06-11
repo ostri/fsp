@@ -17,14 +17,13 @@ namespace fsp
 
   Handler::Handler(proc_data&                    targets,
                    segment_queue&                queue,
-                   const fsp_logger&             logger,
+                   const fsp_logger&             log,
                    const xercesc::SAX2XMLReader* parser,
                    std::string_view              base_addr)
   : targets_(targets) //
   , queue_(queue)     //
   , parser_(parser)
-  //  , logger_(logger)       //
-  , log_(logger)          //
+  , log_(log)             //
   , base_addr_(base_addr) //
   {
     // targets are converted to wide characters
@@ -37,7 +36,8 @@ namespace fsp
     matched_.assign(targets_wide_.size(), 0);
     // Korenski NS nivo — vedno prisoten
     ns_stack_.emplace_back(ns_level{.depth = -1, .ns_vec = {}});
-    for (std::size_t i = 0; i < targets_.targets.size(); ++i) log_.debug(fmt::format("target[{}] = '{}'", i, targets_.targets[i].name()));
+    if (log_.active(debug)) [[unlikely]]
+      for (std::size_t i = 0; i < targets_.targets.size(); ++i) log_.debug(fmt::format("target[{}] = '{}'", i, targets_.targets[i].name()));
     constexpr const std::size_t max_space_for_make_open_tag = 1024;
     buf_.reserve(max_space_for_make_open_tag);
   }
@@ -167,7 +167,8 @@ namespace fsp
         const auto& val_result = val_future_.get();
         if (val_result.has_value())
         {
-          if (log_.active(lvl_enum::debug)) log_.debug("Handler: validacijska napaka zaznana, prekinjam SAX parsing.");
+          if (log_.active(lvl_enum::debug)) [[unlikely]]
+            log_.debug("Handler: validacijska napaka zaznana, prekinjam SAX parsing.");
           // Vržemo SAXParseException — Xerces jo ujame interno in ustavi parsing.
           // Sporočilo prenesemo naprej; row/col ni znan na tej točki (0,0).
           // TODO: ostri - ostri - preveri kako prenesemo informacijo

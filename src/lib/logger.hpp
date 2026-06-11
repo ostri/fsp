@@ -84,18 +84,21 @@ namespace fsp
 
     void error(const error_info& e) const;
 
-    void               critical(std::string_view msg) const;
-    void               error(std::string_view msg) const;
-    void               warn(std::string_view msg) const;
-    void               info(std::string_view msg) const;
-    void               debug(std::string_view msg) const;
-    void               trace(std::string_view msg) const;
-    [[nodiscard]] bool active(lvl_enum lvl = lvl_enum::trace) const noexcept;
+    void                   critical(std::string_view msg) const;
+    void                   error(std::string_view msg) const;
+    void                   warn(std::string_view msg) const;
+    void                   info(std::string_view msg) const;
+    void                   debug(std::string_view msg) const;
+    void                   trace(std::string_view msg) const;
+    [[nodiscard]] bool     active(lvl_enum lvl = lvl_enum::trace) const noexcept;
+    [[nodiscard]] lvl_enum level() const noexcept;
+    void                   set_level(lvl_enum lvl);
   private: /// methods
     static std::unique_ptr<spdlog::pattern_formatter> make_formatter(std::string_view pattern);
     void                                              build(const logger_config& cfg);
   private:
     std::shared_ptr<spdlog::logger> logger_;
+    uint8_t                         level_ = spdlog::level::off; // local cache for level
   };
 
   // // ---------------------------------------------------------------------------
