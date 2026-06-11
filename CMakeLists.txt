@@ -150,6 +150,7 @@ set(${b_target}_SOURCES
     ${CMAKE_SOURCE_DIR}/src/lib/static_xpath_vec.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/xpath_limits.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/segment_result.cpp
+    ${CMAKE_SOURCE_DIR}/src/lib/logger.cpp
 )
 # Additional libraries for main program
 set(FSP_TARGET_${PROJECT_NAME}_LIBS
