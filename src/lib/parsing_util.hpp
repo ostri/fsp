@@ -1,5 +1,6 @@
 #pragma once
 
+#include "compile_error.hpp"
 #include "xpath_el.hpp"
 #include "xml_attr.hpp"
 
@@ -12,7 +13,7 @@
 #include <string_view>
 #include <vector>
 #include <span>
-#include <exception>
+// #include <exception>
 #include <string>
 #include "static_xpath_vec.hpp"
 
@@ -21,19 +22,6 @@ namespace fsp
   using date_t = std::chrono::year_month_day;
   using cstr_t = std::string_view;
 
-  // --- compile time exception ----------------------------------------------------------
-  class compile_error : public std::exception
-  {
-  public:
-    // compile_error
-    constexpr explicit compile_error(const char* msg) noexcept
-    : message(msg)
-    {
-    }
-    [[nodiscard]] constexpr const char* what() const noexcept override { return message; }
-  private:
-    const char* message;
-  };
 
   // --- namespace definition -----------------------------------------------------------
 
@@ -83,122 +71,7 @@ namespace fsp
   // Build function
   [[nodiscard]] constexpr xpath_node_struct build(std::span<const raw_attr> raw_paths, std::span<const ns> ns_arr) //
   { return {raw_paths, ns_arr}; }
-  // xml_attr
-  constexpr xml_attr::xml_attr(std::size_t original_ndx, const raw_attr& raw, std::span<const ns> ns_arr)
-  : name_(raw.name)
-  , path_(trim_xpath(raw.path))
-  , is_opt_(raw.is_opt)
-  , xpath_(parse_xpath_to_elements(path_, ns_arr))
-  , xpath_size_(xpath_.size())
-  , original_ndx_(original_ndx)
-  , normalized_path_(this->full_xpath_with_uri())
-  {
-    auto& el = xpath_.back();
-    if (el.tag.starts_with('@'))
-    {
-      attr_ = xpath_el{.ns = el.ns, .tag = el.tag.substr(1)};
-      xpath_.pop_back();
-    }
-    else if (el.tag.starts_with('*'))
-    {
-      is_array_     = true;
-      xpath_.back() = xpath_el{.ns = el.ns, .tag = el.tag.substr(1)};
-    }
-  }
 
-
-  constexpr std::string xml_attr::full_xpath() const
-  {
-    std::string tmp;
-    for (std::size_t i = 0; i < xpath_size_; ++i) tmp += fmt::format("/{}", xpath_[i].tag);
-
-    if (is_attr()) tmp += fmt::format("/@{}", attr_name());
-    else if (is_array()) tmp += "/*";
-
-    return tmp;
-  }
-
-  [[nodiscard]] constexpr std::string xml_attr::full_xpath_with_uri() const
-  {
-    std::string tmp;
-    for (std::size_t i = 0; i < xpath_size_; ++i) tmp += fmt::format("/{}:{}", xpath_[i].ns, xpath_[i].tag);
-
-    if (is_attr()) tmp += fmt::format("/@{}:{}", attr_uri(), attr_name());
-    else if (is_array()) tmp += "/*";
-
-    return tmp;
-  }
-
-  constexpr cstr_t xml_attr::uri_from_prefix(cstr_t prefix, std::span<const ns> ns_arr)
-  {
-    for (const auto& el : ns_arr)
-      if (el.prefix == prefix) return el.uri;
-    std::string msg;
-    for (const auto& el : ns_arr) { msg += fmt::format("prefix:'{}'\turi:'{}'\n", el.prefix, el.uri); }
-    throw std::runtime_error(fmt::format( //
-      "Prefix '{}' has no matching definition in ns structure.\n{}",
-      prefix,
-      msg));
-  }
-
-  constexpr xpath_vec xml_attr::parse_xpath_to_elements(cstr_t input, std::span<const ns> ns_arr)
-  {
-    if (input.empty()) throw compile_error("empty xpath");
-
-    xpath_vec result;
-
-    for (auto segment_range : input | std::ranges::views::split('/'))
-    {
-      cstr_t segment{segment_range};
-      if (segment.empty()) continue;
-
-      xpath_el element{};
-      auto     colon_pos = segment.find(':');
-
-      if (colon_pos != cstr_t::npos)
-      {
-        element.ns  = uri_from_prefix(segment.substr(0, colon_pos), ns_arr);
-        element.tag = segment.substr(colon_pos + 1);
-      }
-      else
-      {
-        element.ns  = segment.starts_with('@') ? "" : uri_from_prefix("", ns_arr);
-        element.tag = segment;
-      }
-      result.push_back(element);
-    }
-    return result;
-  }
-
-  [[nodiscard]] constexpr std::string xml_attr::dump(int offs) const
-  {
-    std::string msg_xpath;
-    for (const auto& el : xpath_) msg_xpath += fmt::format("[{}:{}]/", el.tag, el.ns);
-    auto msg = fmt::format(                                                                                       //
-      "{}name: {:15} path: {:40} is_array: {:5} is_opt {:5} attr: {}:{:15} xpath size:{:2} original ndx:{:2} {}", //
-      std::string(offs, ' '),
-      name_,
-      path_,
-      is_array_,
-      is_opt_,
-      attr_.ns,
-      attr_.tag,
-      xpath_size_,
-      original_ndx_,
-      msg_xpath);
-    return msg;
-  }
-
-  constexpr cstr_t xml_attr::trim_xpath(cstr_t str)
-  {
-    auto is_ws_or_slash = [](char c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '/'; };
-
-    const auto* start = std::ranges::find_if_not(str, is_ws_or_slash);
-    if (start == str.end()) throw compile_error(fmt::format("Empty xpath after trimming: '{}'", str).data());
-
-    const auto* end = std::ranges::find_if_not(str | std::views::reverse, is_ws_or_slash).base();
-    return {start, end};
-  }
 
   // path_node_struct
   constexpr xpath_node_struct::xpath_node_struct(std::span<const raw_attr> inputs, std::span<const ns> ns_arr)
