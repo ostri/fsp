@@ -17,6 +17,7 @@
 // #include "common.hpp"
 #include "e_tag_wide.hpp"
 #include "error_info.hpp"
+#include "logger.hpp"
 #include "parsing_util.hpp"
 #include "queue.hpp"
 #include "x_str.hpp"
@@ -32,16 +33,14 @@ namespace fsp
   class Handler : public xercesc::DefaultHandler
   {
   public:
-    Handler(proc_data&                             targets,
-            segment_queue&                         queue,
-            const std::shared_ptr<spdlog::logger>& logger,
-            const xercesc::SAX2XMLReader*          parser,
-            std::string_view                       base_addr);
+    Handler(proc_data&                    targets,
+            segment_queue&                queue,
+            const fsp_logger&             logger,
+            const xercesc::SAX2XMLReader* parser,
+            std::string_view              base_addr);
 
     // --- SAX2 ContentHandler ---
-    void startPrefixMapping( //
-      const XMLCh* prefix,
-      const XMLCh* uri) override;
+    void startPrefixMapping(const XMLCh* prefix, const XMLCh* uri) override;
     // void endPrefixMapping() override;
     void startElement(const XMLCh* uri, const XMLCh* localname, const XMLCh* qname, const xercesc::Attributes& attrs) override;
     void endElement( //
@@ -71,17 +70,13 @@ namespace fsp
     void               close_ns_scope();
     void               push_ns_mapping(const XMLCh* prefix, const XMLCh* uri);
     [[nodiscard]] bool is_capturing() const { return frag_depth_ != -1; }
-
     // Razreši prefix v URI. Prazen string če prefix ni znan.
     [[nodiscard]] x_str resolve_ns(const x_str& prefix) const noexcept;
-
     // Vrne snapshot vseh aktivnih NS preslikav (za vbrizganje v fragment).
     [[nodiscard]] ns_def_t active_ns() const; // FIXME ostri - should be vector
-
     // Razreši NS URI za e_tag (enkrat, ko je NS context zgrajen).
     [[nodiscard]] bool tag_matches(const e_tag_wide& tag, const XMLCh* local_name, const XMLCh* ns_uri) const noexcept;
-
-    std::string make_open_tag(const XMLCh* qname, const xercesc::Attributes& attrs);
+    std::string        make_open_tag(const XMLCh* qname, const xercesc::Attributes& attrs);
 
     // // --- Xerces string helpers ---
     // static std::string to_str(const XMLCh* xstr);
@@ -126,9 +121,10 @@ namespace fsp
     [[maybe_unused]] segment_queue& queue_;
     std::size_t                     counter_ = 0;
 
-    const xercesc::SAX2XMLReader*   parser_;    // reference to parser; for getSrcOffs
-    std::shared_ptr<spdlog::logger> logger_;    /// logger
-    std::string_view                base_addr_; // address of the start of the document
+    const xercesc::SAX2XMLReader* parser_; // reference to parser; for getSrcOffs
+    // std::shared_ptr<spdlog::logger> logger_;    /// logger
+    const fsp_logger& log_;       // logger
+    std::string_view  base_addr_; // address of the start of the document
     // TODO: ostri - ostri check if prefix_ is really related to handler
     std::string prefix_; // opening tag with inherited ns, ns and attributes
 
@@ -142,6 +138,7 @@ namespace fsp
     // Preverjanje se izvede vsakih 2^10 (1024) elementov z bitno masko,
     // kar je zanemarljiva cena pri 1M transakcijah (~1000 preverjanj skupaj).
     std::size_t element_counter_ = 0;
+    std::string buf_; // space for "make_open_tag"
   };
 
 } // namespace fsp

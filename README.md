@@ -26,7 +26,7 @@ Fast SEPA xml file parser
 
 ```bash
     sudo dnf install -y xerces-c-devel xerces-c-doc.noarch
-    sudo dnf install -y pugixml-devel pugixml-doc
+    sudo dnf install -y libxml2 libxml2-devel
 ```
 
 ### profiling

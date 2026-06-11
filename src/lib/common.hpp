@@ -19,7 +19,7 @@ namespace fsp
   // Trims whitespace from both ends of the string_view
   [[nodiscard]] constexpr cstr_t trim(cstr_t str, cstr_t ws = WHITESPACE) noexcept;
 
-  std::string escape_xml_attr(const std::string& s);
+  std::string escape_xml_attr(std::string_view s);
 
   constexpr cstr_t ltrim(cstr_t str, cstr_t ws) noexcept
   {

@@ -83,13 +83,12 @@ namespace fsp
     char* utf8 = xercesc::XMLString::transcode(data_);
     if (utf8 == nullptr) throw std::runtime_error("XMLString::transcode failed");
 
-    // RAII za Xerces char*
+    // RAII for Xerces char*
     auto deleter = [](char* p)
     {
       if (p) xercesc::XMLString::release(&p);
     };
     std::unique_ptr<char, decltype(deleter)> guard(utf8, deleter);
-
     return {utf8};
   }
 

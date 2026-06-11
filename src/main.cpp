@@ -71,7 +71,7 @@ int main(int argc, char* argv[])
                                .log_file_path  = "xml_processor.log",
                                .log_level      = spdlog::level::info, // spdlog::level::info;
                                .logger_name    = "fsp"};
-    const auto         no_of_workers = 3U;
+    const auto         no_of_workers = 5U;
     auto               result        = fsp::process_xml_file( //
       xml_file,                                               // path to the xml file
       xsd_file,                                               // path to the xsd file that xml file must comply with

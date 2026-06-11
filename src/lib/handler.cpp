@@ -15,15 +15,16 @@ namespace fsp
   // Konstrukcija
   // ============================================================================
 
-  Handler::Handler(proc_data&                             targets,
-                   segment_queue&                         queue,
-                   const std::shared_ptr<spdlog::logger>& logger,
-                   const xercesc::SAX2XMLReader*          parser,
-                   std::string_view                       base_addr)
+  Handler::Handler(proc_data&                    targets,
+                   segment_queue&                queue,
+                   const fsp_logger&             logger,
+                   const xercesc::SAX2XMLReader* parser,
+                   std::string_view              base_addr)
   : targets_(targets) //
   , queue_(queue)     //
   , parser_(parser)
-  , logger_(logger)       //
+  //  , logger_(logger)       //
+  , log_(logger)          //
   , base_addr_(base_addr) //
   {
     // targets are converted to wide characters
@@ -36,7 +37,9 @@ namespace fsp
     matched_.assign(targets_wide_.size(), 0);
     // Korenski NS nivo — vedno prisoten
     ns_stack_.emplace_back(ns_level{.depth = -1, .ns_vec = {}});
-    for (std::size_t i = 0; i < targets_.targets.size(); ++i) logger_->debug("target[{}] = '{}'", i, targets_.targets[i].name());
+    for (std::size_t i = 0; i < targets_.targets.size(); ++i) log_.debug(fmt::format("target[{}] = '{}'", i, targets_.targets[i].name()));
+    constexpr const std::size_t max_space_for_make_open_tag = 1024;
+    buf_.reserve(max_space_for_make_open_tag);
   }
 
   // ============================================================================
@@ -109,30 +112,29 @@ namespace fsp
    */
   inline std::string Handler::make_open_tag(const XMLCh* qname, const xercesc::Attributes& attrs)
   {
-    std::string str;
-    str += R"(<?xml version="1.0" encoding="UTF-8"?><)";
-    str += x_str(qname).to_string();
+    // std::string str;
+    buf_ = R"(<?xml version="1.0" encoding="UTF-8"?><)";
+    buf_ += x_str(qname).to_string();
 
-    // vbrizgamo aktivne NS deklaracije
-    // da workerjev DOM parser pravilno razreši namespace-e
+    // insert active NS declarations from higher levels, so that the xml fragment works ok
     for (const auto& [prefix, uri] : active_ns())
     {
       if (prefix.empty()) [[unlikely]]
-        str += std::format(" xmlns=\"{}\"", uri.to_string());
-      else str += fmt::format(" xmlns:{}=\"{}\"", prefix.to_string(), uri.to_string());
+        buf_ += std::format(" xmlns=\"{}\"", uri.to_string());
+      else buf_ += fmt::format(" xmlns:{}=\"{}\"", prefix.to_string(), uri.to_string());
     }
 
-    // Atributi — xmlns:* preskočimo, že smo jih vbrizgali
+    // Atributs — xmlns:* skip, they were inserted in the previous loop
     for (XMLSize_t i = 0; i < attrs.getLength(); ++i)
     {
       const auto qname = x_str(attrs.getQName(i)).to_string();
-      if (qname.starts_with("xmlns")) continue;
-      const auto aval = escape_xml_attr(x_str(attrs.getValue(i)).to_string());
-      str += fmt::format(" {}=\"{}\"", qname, aval);
+      if (qname.starts_with("xmlns")) [[unlikely]]
+        continue;
+      const auto escaped_str = escape_xml_attr(x_str(attrs.getValue(i)).to_string());
+      buf_ += fmt::format(" {}=\"{}\"", qname, escaped_str);
     }
-
-    str += '>';
-    return str;
+    buf_ += '>';
+    return buf_;
   }
 
   // ============================================================================
@@ -157,7 +159,7 @@ namespace fsp
     // Ob napaki vržemo SAXParseException: to je edini način za prekinitev
     // Xerces SAX parsinga iz ContentHandler callbacka. Izjema se propagira
     // skozi parser_->parse() in jo ujame process_from_buffer().
-    constexpr const auto every = 32768 - 1U; // 2**15
+    constexpr const auto every = 524287U - 1U; // 2**15
     if ((element_counter_++ & every) == 0 && val_future_.valid())
     {
       if (val_future_.wait_for(std::chrono::seconds(0)) == std::future_status::ready)
@@ -165,8 +167,7 @@ namespace fsp
         const auto& val_result = val_future_.get();
         if (val_result.has_value())
         {
-          if (logger_ && logger_->should_log(spdlog::level::debug))
-            logger_->debug("Handler: validacijska napaka zaznana, prekinjam SAX parsing.");
+          if (log_.active(lvl_enum::debug)) log_.debug("Handler: validacijska napaka zaznana, prekinjam SAX parsing.");
           // Vržemo SAXParseException — Xerces jo ujame interno in ustavi parsing.
           // Sporočilo prenesemo naprej; row/col ni znan na tej točki (0,0).
           // TODO: ostri - ostri - preveri kako prenesemo informacijo
@@ -208,7 +209,6 @@ namespace fsp
     {
       if (matched_[i] == static_cast<int>(targets_wide_[i].size()))
       { // start of the subtree
-        // capturing_  = true;
         frag_depth_ = 0;
         active_idx_ = static_cast<int>(i);
 
@@ -216,11 +216,11 @@ namespace fsp
         frag_start_offset_ = parser_->getSrcOffset(); //
         prefix_            = make_open_tag(qname, attrs);
 
-        if (logger_ && logger_->should_log(spdlog::level::trace)) [[unlikely]]
+        if (log_.active(lvl_enum::trace)) [[unlikely]]
         {
           auto ln     = x_str(localname).to_string();
           auto ns_uri = x_str(uri).to_string();
-          logger_->trace("tag:'{}' ns:'{}' offset:{} prefix:'{}'", ln, ns_uri, frag_start_offset_, prefix_);
+          log_.trace(fmt::format("tag:'{}' ns:'{}' offset:{} prefix:'{}'", ln, ns_uri, frag_start_offset_, prefix_));
         }
         break;
       }
@@ -232,8 +232,9 @@ namespace fsp
     check_validation_status();
     open_ns_scope();
     doc_depth_++;
-    if (logger_ && logger_->should_log(spdlog::level::debug)) [[unlikely]]
-      logger_->trace("startElement depth:{:2} local:'{:10}' uri:'{}'", doc_depth_, x_str(localname).to_string(), x_str(uri).to_string());
+    if (log_.active(lvl_enum::debug)) [[unlikely]]
+      log_.trace(
+        fmt::format("startElement depth:{:2} local:'{:10}' uri:'{}'", doc_depth_, x_str(localname).to_string(), x_str(uri).to_string()));
     if (! is_capturing()) check_xpath_matches(uri, localname, qname, attrs);
     if (is_capturing()) [[likely]]
       frag_depth_++;
@@ -256,10 +257,10 @@ namespace fsp
         std::size_t end_offset = parser_->getSrcOffset();
         std::size_t length     = end_offset - frag_start_offset_;
         auto        seg        = xml_segment(counter_, active_idx_, frag_start_offset_, length, prefix_);
-        if (logger_ && logger_->should_log(spdlog::level::debug)) [[unlikely]]
+        if (log_.active(lvl_enum::debug)) [[unlikely]]
         {
-          logger_->debug("pushing to queue: {} {}", x_str(qname).to_string(), seg.dump());
-          logger_->trace("{}", seg.dump_all(base_addr_));
+          log_.debug(fmt::format("pushing to queue: {} {}", x_str(qname).to_string(), seg.dump()));
+          log_.trace(fmt::format("{}", seg.dump_all(base_addr_)));
         }
         queue_.push(std::move(seg));
         counter_++;
@@ -288,15 +289,15 @@ namespace fsp
   }
   void Handler::warning(const xercesc::SAXParseException& e)
   {
-    if (logger_) { logger_->warn(prepare_msg(e)); }
+    if (log_.active(lvl_enum::warn)) { log_.warn(prepare_msg(e)); }
   }
   void Handler::error(const xercesc::SAXParseException& e)
   {
-    if (logger_) { logger_->error(prepare_msg(e)); }
+    if (log_.active(lvl_enum::err)) { log_.error(prepare_msg(e)); }
   }
   void Handler::fatalError(const xercesc::SAXParseException& e)
   {
-    if (logger_) { logger_->critical(prepare_msg(e)); }
+    if (log_.active(lvl_enum::crit)) { log_.critical(prepare_msg(e)); }
   }
   std::string_view Handler::base_addr() const { return base_addr_; }
 

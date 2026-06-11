@@ -27,7 +27,7 @@ if(MSVC)
 else()
     set(COMMON_RELEASE_FLAGS
         "-Wall" "-Wextra" "-Wpedantic" "-Werror"
-        "-Wnarrowing" "-Wswitch-enum" "-O3"
+        "-Wnarrowing" "-Wswitch-enum" "-O3" "-flto=auto" "-march=native" "-DNDEBUG"
     )
     set(COMMON_DEBUG_FLAGS
         "-Wall" "-Wextra" "-Wpedantic" "-Werror"
@@ -36,10 +36,10 @@ else()
         "-fno-omit-frame-pointer"
     )
     set(COMMON_LINK_FLAGS "-fsanitize=address,undefined,leak")
+    set(COMMON_LINK_FLAGS "${COMMON_LINK_FLAGS} -flto=auto")
     set(COMMON_PROFILE_FLAGS
     "-Wall" "-Wextra" "-Wpedantic"
-    "-Wnarrowing" "-Wswitch-enum"
-    "-O2"
+    "-Wnarrowing" "-Wswitch-enum" "-O3" "-flto" "-march=native" "-DNDEBUG"
     "-g" "-gdwarf-4"
     "-fno-omit-frame-pointer"
     "-pg"
@@ -49,7 +49,6 @@ endif()
 
 # --- 3. Find required packages ---
 find_package(XercesC REQUIRED)
-#find_package(pugixml REQUIRED)
 find_package(fmt REQUIRED)
 find_package(spdlog REQUIRED)
 find_package(magic_enum REQUIRED)
@@ -104,20 +103,20 @@ function(add_fsp_target TARGET_NAME TYPE)
 endfunction()
 
 # --- 5. Define targets ---
-
+set(b_target fsp_lib) # name of the target
 # 5.1 fsp_lib (static library)
-set(FSP_LIB_SOURCES
+set(${b_target}_SOURCES
     ${CMAKE_SOURCE_DIR}/src/lib/x_str.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/handler.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/queue.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/xml_segment.cpp
 )
 # Specify additional libraries for fsp_lib (if needed)
-set(FSP_TARGET_fsp_lib_LIBS
+set(FSP_TARGET_${b_target}_LIBS
     XercesC::XercesC
     LibXml2::LibXml2
 )
-add_fsp_target(fsp_lib STATIC ${FSP_LIB_SOURCES})
+add_fsp_target(fsp_lib STATIC ${fsp_lib_SOURCES})
 #
 # target: fsp
 #
@@ -138,8 +137,6 @@ set(${b_target}_SOURCES
     ${CMAKE_SOURCE_DIR}/src/lib/processor_config.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/xpath_helpers.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/common.cpp
-    # ${CMAKE_SOURCE_DIR}/src/lib/dom_parser.cpp
-    # ${CMAKE_SOURCE_DIR}/src/lib/dom_handler.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/parsing_util.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/e_tag_wide.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/static_sorted_set.cpp
@@ -154,7 +151,6 @@ set(${b_target}_SOURCES
 )
 # Additional libraries for main program
 set(FSP_TARGET_${PROJECT_NAME}_LIBS
-#    fsp_lib
     fmt::fmt
     spdlog::spdlog
     magic_enum::magic_enum

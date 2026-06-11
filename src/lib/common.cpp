@@ -2,7 +2,7 @@
 namespace fsp
 {
 
-  std::string escape_xml_attr(const std::string& s)
+  std::string escape_xml_attr(std::string_view s)
   {
     std::string res;
     res.reserve(s.size() + 10); // NOLINT(readability-magic-numbers)
