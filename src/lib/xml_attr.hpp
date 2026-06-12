@@ -69,9 +69,8 @@ namespace fsp
     // dump() ni constexpr — uporablja fmt::format
     [[nodiscard]] std::string dump(int offs = 0) const;
   private:
-    static constexpr cstr_t trim_xpath(cstr_t str);
-    static constexpr cstr_t uri_from_prefix(cstr_t prefix, std::span<const ns> ns_arr);
-    // FIX 1: vrne xpath_parse_result namesto std::vector — brez heap alokacije
+    static constexpr cstr_t             trim_xpath(cstr_t str);
+    static constexpr cstr_t             uri_from_prefix(cstr_t prefix, std::span<const ns> ns_arr);
     static constexpr xpath_parse_result parse_xpath_to_elements(cstr_t input, std::span<const ns> ns_arr);
   private:
     cstr_t      name_;
@@ -82,28 +81,18 @@ namespace fsp
     xpath_el    attr_{};
     std::size_t xpath_size_   = 0;
     std::size_t original_ndx_ = 0;
-    // FIX 5: std::string normalized_path_ ODSTRANJEN — preprečeval je constexpr shranjevanje.
-    //        Uporabi full_xpath_with_uri() on-demand kadar je potrebno.
   };
-
-
-  // FIX 1: parse_xpath_to_elements vrne fiksni array + size, brez std::vector
   constexpr xpath_parse_result xml_attr::parse_xpath_to_elements(cstr_t input, std::span<const ns> ns_arr)
   {
     if (input.empty()) throw compile_error("empty xpath");
-
     xpath_parse_result result{};
-
     for (auto segment_range : input | std::ranges::views::split('/'))
     {
       cstr_t segment{segment_range};
       if (segment.empty()) continue;
-
       if (result.size >= max_xpath_len) throw compile_error("xpath exceeds max_xpath_len");
-
       xpath_el element{};
       auto     colon_pos = segment.find(':');
-
       if (colon_pos != cstr_t::npos)
       {
         element.ns  = uri_from_prefix(segment.substr(0, colon_pos), ns_arr);
@@ -120,7 +109,6 @@ namespace fsp
     return result;
   }
 
-  // dump() ni constexpr — fmt::format alokira
   [[nodiscard]] inline std::string xml_attr::dump(int offs) const
   {
     std::string msg_xpath;
@@ -142,42 +130,30 @@ namespace fsp
 
   constexpr cstr_t xml_attr::trim_xpath(cstr_t str)
   {
-    auto is_ws_or_slash = [](char c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '/'; };
-
-    const auto* start = std::ranges::find_if_not(str, is_ws_or_slash);
-    if (start == str.end())
-      // FIX 4: ne kličemo fmt::format v constexpr throw — string literal zadostuje
-      throw compile_error("Empty xpath after trimming");
-
+    auto        is_ws_or_slash = [](char c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '/'; };
+    const auto* start          = std::ranges::find_if_not(str, is_ws_or_slash);
+    if (start == str.end()) throw compile_error("Empty xpath after trimming");
     const auto* end = std::ranges::find_if_not(str | std::views::reverse, is_ws_or_slash).base();
     return {start, end};
   }
 
-  // FIX 3: runtime_error zamenjano s compile_error — constexpr-kompatibilno
   constexpr cstr_t xml_attr::uri_from_prefix(cstr_t prefix, std::span<const ns> ns_arr)
   {
     for (const auto& el : ns_arr)
       if (el.prefix == prefix) return el.uri;
-
-    // V constexpr kontekstu: vsakršna throw pot mora biti compile_error.
-    // Podrobno diagnostično sporočilo z fmt::format ni možno brez runtime poti —
-    // napaka bo zaznavna prek compile_error sporočila in stacka pri prevajanju.
     throw compile_error("Prefix has no matching definition in ns structure");
   }
 
-  // FIX 2: normalized_path_ ni več data member — konstruktor je sedaj čist constexpr
   constexpr xml_attr::xml_attr(std::size_t original_ndx, const raw_attr& raw, std::span<const ns> ns_arr)
   : name_(raw.name)
   , path_(trim_xpath(raw.path))
   , is_opt_(raw.is_opt)
   , original_ndx_(original_ndx)
   {
-    // FIX 1+2: parse rezultat gre neposredno v array — brez vector, brez UB
     auto parsed = parse_xpath_to_elements(path_, ns_arr);
     xpath_size_ = parsed.size;
     // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic)
     std::copy(parsed.elements.begin(), parsed.elements.begin() + xpath_size_, xpath_.begin());
-
     // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-constant-array-index)
     auto& el = xpath_[xpath_size_ - 1];
     if (el.tag.starts_with('@'))
@@ -193,16 +169,13 @@ namespace fsp
     }
   }
 
-  // full_xpath ni constexpr — fmt::format ni constexpr (alokira string na heap)
   [[nodiscard]] inline std::string xml_attr::full_xpath() const
   {
     std::string tmp;
     // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-constant-array-index)
     for (std::size_t i = 0; i < xpath_size_; ++i) tmp += fmt::format("/{}", xpath_[i].tag);
-
     if (is_attr()) tmp += fmt::format("/@{}", attr_name());
     else if (is_array()) tmp += "/*";
-
     return tmp;
   }
 
@@ -211,11 +184,8 @@ namespace fsp
     std::string tmp;
     // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-constant-array-index)
     for (std::size_t i = 0; i < xpath_size_; ++i) tmp += fmt::format("/{}:{}", xpath_[i].ns, xpath_[i].tag);
-
     if (is_attr()) tmp += fmt::format("/@{}:{}", attr_uri(), attr_name());
     else if (is_array()) tmp += "/*";
-
     return tmp;
   }
-
 } // namespace fsp

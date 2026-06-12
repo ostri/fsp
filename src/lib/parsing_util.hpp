@@ -24,6 +24,12 @@ namespace fsp
   // --- main structure -----------------------------------------------------------------
   class xpath_node_struct
   {
+    struct min_max
+    {
+      cstr_t min; // minimal xpath element tag value
+      cstr_t max; // maximum xpath element tag value
+    };
+    using xpath_min_max = std::array<min_max, max_xpath_len>;
   public:
     static constexpr std::size_t xpath_max = 64;
 
@@ -49,12 +55,14 @@ namespace fsp
     [[nodiscard]] std::string dump(int offs = 0) const;
 
     // reserve() je bil samo za vector — ni več potreben, a ga obdržimo za kompatibilnost
-    constexpr void reserve(std::size_t /*size*/) { }
+    constexpr void                 reserve(std::size_t /*size*/) { }
+    [[nodiscard]] constexpr cstr_t max(std::size_t depth) const;
+    [[nodiscard]] constexpr cstr_t min(std::size_t depth) const;
   private:
-    // FIX 1: std::vector → std::array + size_ (literal type, constexpr možen)
     std::array<xml_attr, xpath_max> data_{};
-    std::size_t                     size_           = 0;
-    std::size_t                     max_xpath_size_ = 0;
+    //    xpath_min_max                   mm_; // min max for each xpath element
+    std::size_t size_           = 0;
+    std::size_t max_xpath_size_ = 0;
   };
 
   // --- proc_data ----------------------------------------------------------------------
@@ -74,22 +82,19 @@ namespace fsp
   { return {raw_paths, ns_arr}; }
 
   // --- xpath_node_struct impl ---------------------------------------------------------
-
-  // FIX 1+2: konstruktor brez vector::reserve / push_back — piše direktno v array
   constexpr xpath_node_struct::xpath_node_struct(std::span<const raw_attr> inputs, std::span<const ns> ns_arr)
   {
     if (inputs.size() > xpath_max) throw compile_error("inputs exceed xpath_max");
-
     std::size_t max_d = 0;
     for (const auto& input : inputs)
     {
       xml_attr attr(size_, input, ns_arr);
       max_d = std::max(max_d, attr.size());
-      // FIX 2: push_back zamenjano z direktnim pisanjem v array
       // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-constant-array-index)
       data_[size_++] = attr;
     }
     max_xpath_size_ = max_d;
+    // data_[0].xpath()[0].tag = "xxx";
   }
 
   [[nodiscard]] constexpr const xml_attr& xpath_node_struct::operator[](std::size_t ndx) const
@@ -124,6 +129,31 @@ namespace fsp
       // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-constant-array-index)
       if (depth < data_[i].size()) return i;
     throw compile_error("no element at depth");
+  }
+  [[nodiscard]] constexpr cstr_t xpath_node_struct::max(std::size_t depth) const
+  {
+    if (depth >= max_xpath_size_) throw compile_error("depth exceeds max xpath depth");
+    auto   first_ndx = first(depth);
+    auto   last_ndx  = last(depth);
+    cstr_t val       = data_.at(first_ndx).xpath()[depth].tag;
+    for (std::size_t i = first_ndx + 1; i < last_ndx + 1; i++)
+      // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-constant-array-index)
+      if (depth < data_[i].size() && data_.at(i).xpath()[depth].tag > val) //
+        val = data_.at(i).xpath()[depth].tag;
+    return val;
+  }
+
+  [[nodiscard]] constexpr cstr_t xpath_node_struct::min(std::size_t depth) const
+  {
+    if (depth >= max_xpath_size_) throw compile_error("depth exceeds max xpath depth");
+    auto   first_ndx = first(depth);
+    auto   last_ndx  = last(depth);
+    cstr_t val       = data_.at(first_ndx).xpath()[depth].tag;
+    for (std::size_t i = first_ndx + 1; i < last_ndx + 1; i++)
+      // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-constant-array-index)
+      if (depth < data_[i].size() && data_.at(i).xpath()[depth].tag < val) //
+        val = data_.at(i).xpath()[depth].tag;
+    return val;
   }
 
   // FIX 5: std::bitset → std::uint64_t (constexpr v C++20)
