@@ -22,11 +22,6 @@ int main(int argc, char* argv[])
     const std::string xml_file = argv[1];                  // NOLINT
     const std::string xsd_file = argc == 3 ? argv[2] : ""; // NOLINT
 
-    // std::vector<std::string> xpath_strings;
-
-    // xpath_strings.emplace_back("/Document/FIToFICstmrCdtTrf/GrpHdr");      // header
-    // xpath_strings.emplace_back("/Document/FIToFICstmrCdtTrf/CdtTrfTxInf"); // transaction
-
     // clang-format off
     static constexpr auto ns = std::to_array<fsp::ns>({
       {.prefix = "",   .uri = "urn:iso:std:iso:20022:tech:xsd:pacs.008.001.08"}, // default namespace
@@ -58,14 +53,12 @@ int main(int argc, char* argv[])
       {.name="instr.agent",   .path="CdtTrfTxInf/InstgAgt/FinInstnId/*BICFI", .is_opt=true},
     });
     // clang-format on
-    static const auto targets = fsp::build(targets_raw, ns); // xml tree node(s)
+    static constexpr auto targets = fsp::build(targets_raw, ns);
     static_assert(targets.size() == targets_raw.size(), "split xpaths are not ok.");
-    static const auto hdr = fsp::build(xpath_hdr, ns); // xml tree node(s)
-    static const auto xtn = fsp::build(xpath_txn, ns); // xml tree node(s)
-    // static const auto xps     = {hdr, xtn};
-    static auto all = fsp::proc_data{.targets = targets, .xpaths = {hdr, xtn}};
+    static const auto hdr = fsp::build(xpath_hdr, ns);
+    static const auto xtn = fsp::build(xpath_txn, ns);
+    static auto       all = fsp::proc_data{.targets = targets, .xpaths = {hdr, xtn}};
     assert(all.targets.size() == all.xpaths.size());
-    // static_assert(xtn.size() == raw.size(), "The sizes must be equal");
     //  Configure logging
     fsp::logger_config log_cfg{.enable_console = true,
                                .enable_file    = true,
