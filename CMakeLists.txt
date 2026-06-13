@@ -27,13 +27,13 @@ if(MSVC)
 else()
     set(COMMON_RELEASE_FLAGS
         "-Wall" "-Wextra" "-Wpedantic" "-Werror"
-        "-Wnarrowing" "-Wswitch-enum" "-O3"  "-march=native" "-DNDEBUG"
+        "-Wnarrowing" "-Wswitch-enum" "-O3"  "-march=native" "-DNDEBUG" "-freflection"
     )
     set(COMMON_DEBUG_FLAGS
         "-Wall" "-Wextra" "-Wpedantic" "-Werror"
         "-Wnarrowing" "-Wswitch-enum" "-g" "-O0" "-gdwarf-4"
         "-fsanitize=address,undefined,leak"
-        "-fno-omit-frame-pointer"
+        "-fno-omit-frame-pointer" "-freflection"
     )
     set(COMMON_LINK_FLAGS "-fsanitize=address,undefined,leak")
     set(COMMON_PROFILE_FLAGS
@@ -41,7 +41,7 @@ else()
     "-Wnarrowing" "-Wswitch-enum" "-O3" "-march=native" "-DNDEBUG"
     "-g" "-gdwarf-4"
     "-fno-omit-frame-pointer"
-    "-pg"
+    "-pg" "-freflection"
     )
     set(COMMON_PROFILE_LINK_FLAGS "-pg")
 endif()
