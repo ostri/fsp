@@ -4,6 +4,7 @@
 #include "xml_processor.hpp"
 #include <fmt/format.h>
 #include "parsing_util.hpp"
+#include "reflection.hpp"
 
 
 int main(int argc, char* argv[])
