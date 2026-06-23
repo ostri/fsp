@@ -26,6 +26,12 @@ namespace fsp
   , log_(log)             //
   , base_addr_(base_addr) //
   {
+    log_trace_ = log_.active(lvl_enum::trace);
+    log_debug_ = log_.active(lvl_enum::debug);
+    log_info_  = log_.active(lvl_enum::info);
+    log_warn_  = log_.active(lvl_enum::warn);
+    log_err_   = log_.active(lvl_enum::err);
+    log_crit_  = log_.active(lvl_enum::crit);
     // targets are converted to wide characters
     for (const auto& el : targets_.targets)
     {
@@ -34,9 +40,9 @@ namespace fsp
       targets_wide_.push_back(tmp_vec);
     }
     matched_.assign(targets_wide_.size(), 0);
-    // Korenski NS nivo — vedno prisoten
-    ns_stack_.emplace_back(ns_level{.depth = -1, .ns_vec = {}});
-    if (log_.active(debug)) [[unlikely]]
+    // root level - alway present
+    ns_stack_.emplace_back(ns_level{.depth = -1, .ns_vec = {}, .ns_decl_string = {}});
+    if (log_debug_) [[unlikely]]
       for (std::size_t i = 0; i < targets_.targets.size(); ++i) log_.debug(fmt::format("target[{}] = '{}'", i, targets_.targets[i].name()));
     constexpr const std::size_t max_space_for_make_open_tag = 1024;
     buf_.reserve(max_space_for_make_open_tag);
@@ -53,10 +59,33 @@ namespace fsp
     if (! ns_pending_.empty())
     { // new push only if new ns definitions
       ns_stack_.emplace_back(doc_depth_, std::move(ns_pending_));
-      ns_pending_.clear();
+      ns_pending_.clear(); // clear the buffer, since the contents is on the stack already
+      rebuild_ns_decl_for_current_level();
     }
   }
+  inline void Handler::rebuild_ns_decl_for_current_level()
+  {
+    if (ns_stack_.empty()) return;
 
+    auto& current = ns_stack_.back();
+    current.ns_decl_string.clear();
+    current.ns_decl_string.reserve(512);
+
+    // copy ns tring from previous level
+    if (ns_stack_.size() >= 2)
+    {
+      const auto& previous   = ns_stack_[ns_stack_.size() - 2];
+      current.ns_decl_string = previous.ns_decl_string;
+    }
+
+    // add only declarations of the current level
+    for (const auto& [prefix, uri] : current.ns_vec)
+    {
+      if (prefix.empty()) [[unlikely]]
+        fmt::format_to(std::back_inserter(current.ns_decl_string), " xmlns=\"{}\"", uri.to_string());
+      else fmt::format_to(std::back_inserter(current.ns_decl_string), " xmlns:{}=\"{}\"", prefix.to_string(), uri.to_string());
+    }
+  }
   inline void Handler::close_ns_scope()
   {
     if (ns_stack_.back().depth == doc_depth_) ns_stack_.pop_back();
@@ -75,14 +104,14 @@ namespace fsp
     return {};
   }
 
-  inline ns_def_t Handler::active_ns() const
-  {
-    ns_def_t result;
-    // Od dna navzgor — globji nivo prekrije višjega
-    for (const auto& level : ns_stack_)
-      for (const auto& [prefix, uri] : level.ns_vec) result.emplace_back(prefix, uri);
-    return result;
-  }
+  // inline ns_def_t Handler::active_ns() const
+  // {
+  //   ns_def_t result;
+  //   // Od dna navzgor — globji nivo prekrije višjega
+  //   for (const auto& level : ns_stack_)
+  //     for (const auto& [prefix, uri] : level.ns_vec) result.emplace_back(prefix, uri);
+  //   return result;
+  // }
 
   // ============================================================================
   // Tag matching
@@ -116,13 +145,7 @@ namespace fsp
     buf_ = R"(<?xml version="1.0" encoding="UTF-8"?><)";
     buf_ += x_str(qname).to_string();
 
-    // insert active NS declarations from higher levels, so that the xml fragment works ok
-    for (const auto& [prefix, uri] : active_ns())
-    {
-      if (prefix.empty()) [[unlikely]]
-        buf_ += std::format(" xmlns=\"{}\"", uri.to_string());
-      else buf_ += fmt::format(" xmlns:{}=\"{}\"", prefix.to_string(), uri.to_string());
-    }
+    if (! ns_stack_.empty()) buf_ += ns_stack_.back().ns_decl_string; // namespaces
 
     // Atributs — xmlns:* skip, they were inserted in the previous loop
     for (XMLSize_t i = 0; i < attrs.getLength(); ++i)
@@ -167,7 +190,7 @@ namespace fsp
         const auto& val_result = val_future_.get();
         if (val_result.has_value())
         {
-          if (log_.active(lvl_enum::debug)) [[unlikely]]
+          if (log_debug_) [[unlikely]]
             log_.debug("Handler: validacijska napaka zaznana, prekinjam SAX parsing.");
           // Vržemo SAXParseException — Xerces jo ujame interno in ustavi parsing.
           // Sporočilo prenesemo naprej; row/col ni znan na tej točki (0,0).
@@ -217,7 +240,7 @@ namespace fsp
         frag_start_offset_ = parser_->getSrcOffset(); //
         prefix_            = make_open_tag(qname, attrs);
 
-        if (log_.active(lvl_enum::trace)) [[unlikely]]
+        if (log_trace_) [[unlikely]]
         {
           auto ln     = x_str(localname).to_string();
           auto ns_uri = x_str(uri).to_string();
@@ -233,7 +256,7 @@ namespace fsp
     check_validation_status();
     open_ns_scope();
     doc_depth_++;
-    if (log_.active(lvl_enum::debug)) [[unlikely]]
+    if (log_debug_) [[unlikely]]
       log_.trace(
         fmt::format("startElement depth:{:2} local:'{:10}' uri:'{}'", doc_depth_, x_str(localname).to_string(), x_str(uri).to_string()));
     if (! is_capturing()) check_xpath_matches(uri, localname, qname, attrs);
@@ -258,7 +281,7 @@ namespace fsp
         std::size_t end_offset = parser_->getSrcOffset();
         std::size_t length     = end_offset - frag_start_offset_;
         auto        seg        = xml_segment(counter_, active_idx_, frag_start_offset_, length, prefix_);
-        if (log_.active(lvl_enum::debug)) [[unlikely]]
+        if (log_debug_) [[unlikely]]
         {
           log_.debug(fmt::format("pushing to queue: {} {}", x_str(qname).to_string(), seg.dump()));
           log_.trace(fmt::format("{}", seg.dump_all(base_addr_)));
@@ -290,15 +313,15 @@ namespace fsp
   }
   void Handler::warning(const xercesc::SAXParseException& e)
   {
-    if (log_.active(lvl_enum::warn)) { log_.warn(prepare_msg(e)); }
+    if (log_warn_) { log_.warn(prepare_msg(e)); }
   }
   void Handler::error(const xercesc::SAXParseException& e)
   {
-    if (log_.active(lvl_enum::err)) { log_.error(prepare_msg(e)); }
+    if (log_err_) { log_.error(prepare_msg(e)); }
   }
   void Handler::fatalError(const xercesc::SAXParseException& e)
   {
-    if (log_.active(lvl_enum::crit)) { log_.critical(prepare_msg(e)); }
+    if (log_crit_) { log_.critical(prepare_msg(e)); }
   }
   std::string_view Handler::base_addr() const { return base_addr_; }
 

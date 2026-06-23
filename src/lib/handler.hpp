@@ -3,6 +3,7 @@
 // #include <spdlog/logger.h>
 #include <string>
 #include <vector>
+#include <string_view>
 
 // [DODANO] future/optional za sprejem validacijske napake iz validacijske niti
 #include <future>
@@ -14,21 +15,18 @@
 #include <xercesc/sax2/DefaultHandler.hpp>
 #include <xercesc/sax2/SAX2XMLReader.hpp>
 
-// #include "common.hpp"
 #include "e_tag_wide.hpp"
 #include "error_info.hpp"
 #include "logger.hpp"
 #include "parsing_util.hpp"
 #include "queue.hpp"
 #include "x_str.hpp"
-// #include "x_str.hpp"
 
 namespace fsp
 {
   using cstr_t       = std::string_view;
   using cstr_XMLCh_t = std::basic_string_view<XMLCh>;
   using ns_def_t     = std::vector<std::pair<x_str, x_str>>;
-
 
   class Handler : public xercesc::DefaultHandler
   {
@@ -77,15 +75,15 @@ namespace fsp
     void               close_ns_scope();
     void               push_ns_mapping(const XMLCh* prefix, const XMLCh* uri);
     [[nodiscard]] bool is_capturing() const { return frag_depth_ != -1; }
-    // Razreši prefix v URI. Prazen string če prefix ni znan.
+    // Translate prefix to uri. Empty string if prefix is not defined
     [[nodiscard]] x_str resolve_ns(const x_str& prefix) const noexcept;
-    // Vrne snapshot vseh aktivnih NS preslikav (za vbrizganje v fragment).
-    [[nodiscard]] ns_def_t active_ns() const; // FIXME ostri - should be vector
     // Razreši NS URI za e_tag (enkrat, ko je NS context zgrajen).
     [[nodiscard]] bool tag_matches(const e_tag_wide& tag, const XMLCh* local_name, const XMLCh* ns_uri) const noexcept;
     std::string        make_open_tag(const XMLCh* qname, const xercesc::Attributes& attrs);
     /// prepare message to report exception
     std::string prepare_msg(const xercesc::SAXParseException& e);
+    void        rebuild_ns_decl_for_current_level();
+  private: /// members
     // --- subtree xpaths ---
     proc_data                 targets_;      // xpath rules
     std::vector<xpath_wide_t> targets_wide_; // xpath rules as XMLCh* strings
@@ -95,8 +93,9 @@ namespace fsp
     // occurs. on endElement of the same tag this is removed.
     struct ns_level
     {
-      int      depth;
-      ns_def_t ns_vec;
+      int         depth;
+      ns_def_t    ns_vec;
+      std::string ns_decl_string{}; //< namespaces as string
     };
     std::vector<ns_level> ns_stack_;
     // the ns_pending_structure is a temporary buffer that transfers information between
@@ -111,7 +110,7 @@ namespace fsp
     std::size_t frag_start_offset_ = 0;  // byte offset of start of the fragment
 
     // --- Output ---
-    [[maybe_unused]] segment_queue& queue_;
+    [[maybe_unused]] segment_queue& queue_; // NOLINT(cppcoreguidelines-avoid-const-or-ref-data-members)
     std::size_t                     counter_ = 0;
 
     const xercesc::SAX2XMLReader* parser_;    // reference to parser; for getSrcOffs
@@ -126,6 +125,12 @@ namespace fsp
     std::shared_future<std::optional<error_info>> val_future_;
     std::size_t                                   element_counter_ = 0; // pooling counter check also "every"
     std::string                                   buf_;                 // space for "make_open_tag"
+    bool                                          log_trace_ = false;
+    bool                                          log_debug_ = false;
+    bool                                          log_info_  = false;
+    bool                                          log_warn_  = false;
+    bool                                          log_err_   = false;
+    bool                                          log_crit_  = false;
   };
 
 } // namespace fsp
