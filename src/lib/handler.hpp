@@ -93,9 +93,16 @@ namespace fsp
     // occurs. on endElement of the same tag this is removed.
     struct ns_level
     {
-      int         depth;
-      ns_def_t    ns_vec;
+      int         depth;            // depth in the tree where these ns are valid
+      ns_def_t    ns_vec;           // list of ns that are defined at this level
       std::string ns_decl_string{}; //< namespaces as string
+      // public:
+      //   ns_level(int d = -1, ns_def_t v = {}, std::string s = {})
+      //   : depth(d)
+      //   , ns_vec(std::move(v))
+      //   , ns_decl_string(std::move(s))
+      //   {
+      //   }
     };
     std::vector<ns_level> ns_stack_;
     // the ns_pending_structure is a temporary buffer that transfers information between
@@ -103,7 +110,7 @@ namespace fsp
     ns_def_t ns_pending_;
     // --- Matching state ---
     std::vector<int> matched_;
-    int              doc_depth_ = 0; // globina v dokumentu (1 = koreni elem.)
+    int              doc_depth_ = 0; // depth in the document (1 = koreni elem.)
     // --- Fragment akumulacija ---
     int         frag_depth_        = -1; // depth inside the fragment
     int         active_idx_        = -1; // which subtry type we are processing
@@ -114,7 +121,7 @@ namespace fsp
     std::size_t                     counter_ = 0;
 
     const xercesc::SAX2XMLReader* parser_;    // reference to parser; for getSrcOffs
-    const fsp_logger&             log_;       // logger
+    const fsp_logger&             log_;       // logger NOLINT(cppcoreguidelines-avoid-const-or-ref-data-members)
     std::string_view              base_addr_; // address of the start of the document
     std::string                   prefix_;    // opening tag with inherited ns, ns and attributes
 
