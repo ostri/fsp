@@ -1,2 +1,20 @@
 CompileFlags:
-  Add: [-Wno-unused-value]
+  Add:
+    - -Wno-unused-value
+    - -std=c++26
+    - --driver-mode=g++
+    - -D__cpp_impl_reflection=202603L
+    - -D__glibcxx_reflection=202603L
+  Remove:
+    - -freflection
+    - -std=c++2c
+Diagnostics:
+  Suppress:
+    - UnknownArgument
+    - UnknownIdentifier
+    - ExpectedExpression
+    - InvalidToken
+    - UnknownType
+    - UnusedIncludes
+Index:
+  StandardLibrary: Yes
