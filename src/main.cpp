@@ -1,13 +1,36 @@
-#include <iostream>
-#include <string>
-#include <vector>
+// #include <cstdint>
+// #include <meta>
+// #include <string_view>
+
+// #include "work.hpp"
+// #include "fmt/format.h"
+
+
+// int main()
+// {
+//   // fsp::print_namespace<^^work>();
+//   constexpr auto x = fsp::reflex<^^work>();
+//   static_assert(x.ns() == "work", "namespace name error");
+//   std::string msg = fmt::format("namespace: {}\n", x.ns());
+//   fmt::print("{}", msg);
+//   return 0;
+// }
+
+
+// ============================================================
+// PRIMER UPORABE
+// ============================================================
+
+
+#include "parsing_util.hpp"
+#include "xml_attr.hpp"
 #include "xml_processor.hpp"
 #include <fmt/format.h>
-#include "parsing_util.hpp"
-#include "reflection.hpp"
-
-
-int main(int argc, char* argv[])
+#include <iostream>
+#include <spdlog/common.h>
+#include <string>
+#include <vector>
+int main(int argc, const char* argv[])
 {
   std::vector<std::string> args(argv, argv + argc); // NOLINT (cppcoreguidelines-pro-bounds-pointer-arithmetic)
   if (argc != 3 && argc != 2)
@@ -20,7 +43,7 @@ int main(int argc, char* argv[])
 
   try
   {
-    const std::string xml_file = argv[1];                  // NOLINT
+    const std::string xml_file(argv[1]);                   // NOLINT
     const std::string xsd_file = argc == 3 ? argv[2] : ""; // NOLINT
 
     // clang-format off
