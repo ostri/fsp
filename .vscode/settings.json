@@ -4,4 +4,7 @@
   ],
   "lldb.library": "/usr/lib64/liblldb.so.20.1.8",
   "C_mantic.caseStyle": "snake_case",
+  // Add these lines to connect IntelliSense with CMake:
+  "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools",
+  "C_Cpp.default.compileCommands": "${workspaceFolder}/build/compile_commands.json"
 }
