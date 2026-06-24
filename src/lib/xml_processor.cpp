@@ -176,7 +176,7 @@ namespace fsp
 #ifdef NDEBUG
     constexpr std::string_view build_type = "release";
 #else
-    constexpr std::string_view build_type = "debug"
+    constexpr std::string_view build_type = "debug";
 #endif
     if (config_.num_workers == 0) config_.num_workers = std::thread::hardware_concurrency();
     if (config_.num_workers == 0) config_.num_workers = 1; // if statement above fails
