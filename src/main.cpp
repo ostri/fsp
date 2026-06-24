@@ -43,8 +43,8 @@ int main(int argc, const char* argv[])
 
   try
   {
-    const std::string xml_file(argv[1]);                   // NOLINT
-    const std::string xsd_file = argc == 3 ? argv[2] : ""; // NOLINT
+    const std::string xml_file(argv[1]);                  // NOLINT
+    const std::string xsd_file(argc == 3 ? argv[2] : ""); // NOLINT
 
     // clang-format off
     static constexpr auto ns = std::to_array<fsp::ns>({
@@ -100,7 +100,7 @@ int main(int argc, const char* argv[])
                                .log_file_path  = "xml_processor.log",
                                .log_level      = spdlog::level::info, // spdlog::level::info;
                                .logger_name    = "fsp"};
-    const auto         no_of_workers = 5U;
+    const auto         no_of_workers = 4U;
     auto               result        = fsp::process_xml_file( //
       xml_file,                                               // path to the xml file
       xsd_file,                                               // path to the xsd file that xml file must comply with

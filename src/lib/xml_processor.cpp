@@ -10,6 +10,7 @@
 #include <stack>
 #include <thread>
 #include <libxml/xmlreader.h>
+#include <fmt/chrono.h>
 namespace
 {
   struct XmlTextReaderDeleter
@@ -130,7 +131,7 @@ namespace
     // std::size_t result_value_ndx = -1; // -1 no value, 0..n index of the result value
     if (log_trace) log.trace(fmt::format("{}", xpaths.dump()));
     // bool at_least_once = false;
-    //for (auto cnt : std::views::iota(first, last + 1))
+    // for (auto cnt : std::views::iota(first, last + 1))
     for (auto cnt = first; cnt <= last; ++cnt)
     {                                          // compare with all possible options on xpath[depth]
       if (! limits.available()[cnt]) continue; // It has been removed in earlier iterations
@@ -173,16 +174,16 @@ namespace fsp
   , config_(std::move(cfg))
   {
 #ifdef NDEBUG
-constexpr bool is_debug = false;
+    constexpr std::string_view build_type = "release";
 #else
-constexpr bool is_debug = true;
+    constexpr std::string_view build_type = "debug"
 #endif
-    if constexpr (is_debug) logger_.info("Main program initialized (DEBUG).");
-    else logger_.info("Main program initialized (RELEASE).");
-
     if (config_.num_workers == 0) config_.num_workers = std::thread::hardware_concurrency();
-    if (config_.num_workers == 0) config_.num_workers = 1;
-    logger_.info(fmt::format("XML Processor: {} workers, validation: {}", config_.num_workers, config_.validate_against_xsd));
+    if (config_.num_workers == 0) config_.num_workers = 1; // if statement above fails
+    logger_.info(fmt::format("XML Processor: started: build type: {} -> {} workers, validation: {}",
+                             build_type,
+                             config_.num_workers,
+                             config_.validate_against_xsd));
   }
 
   xml_processor::~xml_processor()
@@ -190,6 +191,16 @@ constexpr bool is_debug = true;
     cancel();
     stop_workers();
     parser_.reset();
+    // auto end      = std::chrono::steady_clock::now();
+    // auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start_);
+    // logger_.info(fmt::format("XML Processor: finished: {}.", duration));
+    auto       stat = get_stats();
+    const auto kilo = 1000;
+    logger_.info(fmt::format("XML Processor: finished: {:.3f} sec segments:{} (ok:{} err:{})",
+                             stat.processing_time_ms / kilo, // converting from milisecond to seconds
+                             stat.total_segments,
+                             stat.successful_segments,
+                             stat.failed_segments));
   }
 
   // ============================================================================
@@ -398,7 +409,7 @@ constexpr bool is_debug = true;
     }
   }
 
-
+  // NOLINTNEXTLINE(readability-function-cognitive-complexity)
   result<segment_result> xml_processor::extract_xml_values(cstr_t xml_buf, const xml_segment& seg, const worker_context& ctx)
   {
     segment_result res;
@@ -413,17 +424,23 @@ constexpr bool is_debug = true;
     const auto&              log       = ctx.log;
     const bool               log_trace = log.active(fsp::lvl_enum::trace);
     const bool               log_debug = log.active(fsp::lvl_enum::debug);
+    const bool               log_crit  = log.active(fsp::lvl_enum::crit);
     std::stack<stack_struct> tree_stack;
     auto                     subtree_type = ctx.targets.targets[seg.subtree_type()].original_ndx(); // seg.subtree_type();
     const auto&              xpaths       = ctx.targets.xpaths.at(subtree_type);
-    if (log_trace) log.trace(fmt::format("subtree type: {}\n{}", subtree_type, xpaths.dump()));
     assert(xpaths.size() != 0);
     const auto& limits = xpath_limits(ctx.targets.xpaths.at(subtree_type));
-    if (log_trace) log.trace(limits.dump());
+    if (log_trace)
+    {
+      log.trace(fmt::format("subtree type: {}\n{}", subtree_type, xpaths.dump()));
+      log.trace(limits.dump());
+    }
     // ---------------------------------------------------------------------------------------------
     read_status = xmlTextReaderRead(reader.get());
     tree_stack.emplace(stack_struct{.node = xml_node{"top", "top_uri"}, .limits = fsp::p_limits(0, xpaths.size())});
-    int value_ndx = -1; // xpath index of the value
+    int                      value_ndx          = -1; // xpath index of the value
+    const std::size_t        initial_tree_depth = 50;
+    thread_local std::string indent(initial_tree_depth * 2, pad);
     while (read_status == 1)
     {
       int  type      = xmlTextReaderNodeType(reader.get());
@@ -443,10 +460,8 @@ constexpr bool is_debug = true;
         value_ndx = x.value().status;
         if (log_debug)
         {
-          thread_local std::string indent;
-          indent.assign(depth * 2, ' ');
-          log.debug(
-            fmt::format("seg:{:5} {}{} value_ndx: {}", seg.id(), indent, tree_stack.top().node.tag(), value_ndx));
+          if (indent.size() < depth * 2) indent.assign(depth * 2 * 2, pad);
+          log.debug(fmt::format("seg:{:5} {}{} value_ndx: {}", seg.id(), indent.substr(depth * 2), tree_stack.top().node.tag(), value_ndx));
         }
         break;
       }
@@ -460,21 +475,19 @@ constexpr bool is_debug = true;
           value_ndx = -1; // again undefined
           if (log_debug)
           {
-            thread_local std::string indent;
-            indent.assign(depth * 2, pad);
+            if (indent.size() < depth * 2) indent.assign(depth * 2 * 2, pad);
             log.debug(fmt::format("seg:{:5} {}name: {} tag:'{}' value: {}",
                                   seg.id(),
-                                  indent,
+                                  indent.substr(depth * 2),
                                   value_name,
                                   tree_stack.top().node.tag(),
                                   value));
-            }
+          }
         }
         else if (log_debug)
         {
-          thread_local std::string indent;
-          indent.assign(depth * 2, pad);
-          log.debug(fmt::format("seg:{:5} {} tag: {} no value", seg.id(), indent, tree_stack.top().node.tag()));
+          if (indent.size() < depth * 2) indent.assign(depth * 2 * 2, pad);
+          log.debug(fmt::format("seg:{:5} {} tag: {} no value", seg.id(), indent.substr(depth * 2), tree_stack.top().node.tag()));
         }
         break;
       }
@@ -482,9 +495,8 @@ constexpr bool is_debug = true;
       {
         if (log_debug) // -2 to align with start element
         {
-          thread_local std::string indent;
-          indent.assign((tree_stack.size() - 2) * 2, pad);
-          log.debug(fmt::format("seg:{:5} {}/{}", seg.id(), indent, tree_stack.top().node.tag()));
+          if (indent.size() < depth * 2) indent.assign(depth * 2 * 2, pad);
+          log.debug(fmt::format("seg:{:5} {}/{}", seg.id(), indent.substr(depth * 2), tree_stack.top().node.tag()));
         }
         tree_stack.pop();
         break;
@@ -506,7 +518,7 @@ constexpr bool is_debug = true;
       case XML_READER_TYPE_XML_DECLARATION: [[fallthrough]];
       default:
         auto type_name = magic_enum::enum_name(enum_type);
-        if (log.active(fsp::lvl_enum::crit)) log.critical(fmt::format("nonsupported: {} {}", type_name, type));
+        if (log_crit) log.critical(fmt::format("nonsupported: {} {}", type_name, type));
       }
       read_status = xmlTextReaderRead(reader.get());
     }
@@ -797,15 +809,15 @@ constexpr bool is_debug = true;
         return std::unexpected(*val_result);
       }
     }
-    auto       stat = get_stats();
-    const auto kilo = 1000;
-    logger_.info(fmt::format("Processing time: {:.3f}sec workers:{} segments:{} (ok:{} err:{}) size:{} byte(s)",
-                             stat.processing_time_ms / kilo, // converting from milisecond to seconds
-                             stat.active_workers,
-                             stat.total_segments,
-                             stat.successful_segments,
-                             stat.failed_segments,
-                             xml_mmap.size()));
+    // auto       stat = get_stats();
+    // const auto kilo = 1000;
+    // logger_.info(fmt::format("Processing time: {:.3f}sec workers:{} segments:{} (ok:{} err:{}) size:{} byte(s)",
+    //                          stat.processing_time_ms / kilo, // converting from milisecond to seconds
+    //                          stat.active_workers,
+    //                          stat.total_segments,
+    //                          stat.successful_segments,
+    //                          stat.failed_segments,
+    //                          xml_mmap.size()));
 
     success_ = true;
     return {};

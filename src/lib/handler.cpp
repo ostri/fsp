@@ -6,9 +6,6 @@
 #include <ranges>
 #include <xercesc/sax/SAXParseException.hpp>
 #include <xercesc/util/XMLString.hpp>
-
-#include <format>
-
 namespace fsp
 {
 
@@ -26,14 +23,14 @@ namespace fsp
   , parser_(parser)
   , log_(log)             //
   , base_addr_(base_addr) //
+  , log_trace_(log_.active(lvl_enum::trace))
+  , log_debug_(log_.active(lvl_enum::debug))
+  , log_info_(log_.active(lvl_enum::info))
+  , log_warn_(log_.active(lvl_enum::warn))
+  , log_err_(log_.active(lvl_enum::err))
+  , log_crit_(log_.active(lvl_enum::crit))
+  , max_xpath_depth_(static_cast<int>(targets_.targets.max_xpath_size()))
   {
-    log_trace_       = log_.active(lvl_enum::trace);
-    log_debug_       = log_.active(lvl_enum::debug);
-    log_info_        = log_.active(lvl_enum::info);
-    log_warn_        = log_.active(lvl_enum::warn);
-    log_err_         = log_.active(lvl_enum::err);
-    log_crit_        = log_.active(lvl_enum::crit);
-    max_xpath_depth_ = targets_.targets.max_xpath_size();
     // targets are converted to wide characters
     for (const auto& el : targets_.targets)
     {
@@ -67,11 +64,12 @@ namespace fsp
   }
   inline void Handler::rebuild_ns_decl_for_current_level()
   {
+    static const int buf_size = 512;
     if (ns_stack_.empty()) return;
 
     auto& current = ns_stack_.back();
     current.ns_decl_string.clear();
-    current.ns_decl_string.reserve(512);
+    current.ns_decl_string.reserve(buf_size);
 
     // copy ns tring from previous level
     if (ns_stack_.size() >= 2)
@@ -135,7 +133,7 @@ namespace fsp
   inline std::string Handler::make_open_tag(const XMLCh* qname, const xercesc::Attributes& attrs)
   {
     buf_.clear();
-    buf_.append( R"(<?xml version="1.0" encoding="UTF-8"?><)");
+    buf_.append(R"(<?xml version="1.0" encoding="UTF-8"?><)");
     buf_.append(x_str(qname).to_string());
 
     if (! ns_stack_.empty()) buf_.append(ns_stack_.back().ns_decl_string); // namespaces
@@ -149,7 +147,7 @@ namespace fsp
       const auto escaped_str = escape_xml_attr(x_str(attrs.getValue(i)).to_string());
       buf_.append(fmt::format(" {}=\"{}\"", qname, escaped_str));
     }
-    buf_+='>';
+    buf_ += '>';
     return buf_;
   }
 

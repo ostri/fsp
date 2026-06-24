@@ -100,7 +100,9 @@ namespace fsp
       worker_context                          ctx);
     static result<segment_result> process_segment(const worker_context& ctx, const xml_segment& seg);
     static result<segment_result> extract_xml_values(cstr_t xml_buf, const xml_segment& seg, const worker_context& ctx);
-  private:                                                /// members
+    using s_clock = std::chrono::time_point<std::chrono::steady_clock>;
+  private: /// members
+    const s_clock                           start_ = std::chrono::steady_clock::now();
     const fsp_logger                        logger_;      // logger must be created first and destructed last
     fsp::xerces_mgr                         xerces_life_; // must be first to be destructed last
     processor_config                        config_;

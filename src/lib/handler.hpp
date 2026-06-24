@@ -93,9 +93,9 @@ namespace fsp
     // occurs. on endElement of the same tag this is removed.
     struct ns_level
     {
-      int         depth;            // depth in the tree where these ns are valid
-      ns_def_t    ns_vec;           // list of ns that are defined at this level
-      std::string ns_decl_string{}; //< namespaces as string
+      int         depth;          // depth in the tree where these ns are valid
+      ns_def_t    ns_vec;         // list of ns that are defined at this level
+      std::string ns_decl_string; //< namespaces as string
       // public:
       //   ns_level(int d = -1, ns_def_t v = {}, std::string s = {})
       //   : depth(d)
@@ -132,12 +132,12 @@ namespace fsp
     std::shared_future<std::optional<error_info>> val_future_;
     std::size_t                                   element_counter_ = 0; // pooling counter check also "every"
     std::string                                   buf_;                 // space for "make_open_tag"
-    bool                                          log_trace_ = false;
-    bool                                          log_debug_ = false;
-    bool                                          log_info_  = false;
-    bool                                          log_warn_  = false;
-    bool                                          log_err_   = false;
-    bool                                          log_crit_  = false;
+    bool                                          log_trace_       = false;
+    bool                                          log_debug_       = false;
+    bool                                          log_info_        = false;
+    bool                                          log_warn_        = false;
+    bool                                          log_err_         = false;
+    bool                                          log_crit_        = false;
     int                                           max_xpath_depth_ = 0;
   };
 
