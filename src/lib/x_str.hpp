@@ -21,31 +21,33 @@ namespace fsp
     //    x_str(const x_str&)            = delete;
     //    x_str& operator=(const x_str&) = delete;
     /// operators
-    x_str&                       operator=(const x_str& other);
-    x_str&                       operator=(x_str&& other) noexcept;
-    void                         assign(const XMLCh* other);
-    void                         assign(cstr_t other);
-    void                         reset() noexcept;
-    void                         reset(XMLCh* ptr) noexcept;
-    [[nodiscard]] std::string    to_string() const;
-    [[nodiscard]] std::u16string to_u16string() const;
-    bool                         operator==(const x_str& other) const noexcept;
-    bool                         operator!=(const x_str& other) const noexcept;
-    auto                         operator<=>(const x_str& other) const noexcept;
-    bool                         operator==(const XMLCh* other) const noexcept;
-    bool                         operator!=(const XMLCh* other) const noexcept;
-    auto                         operator<=>(const XMLCh* other) const noexcept;
-    bool                         operator==(std::string_view utf8) const;
-    bool                         operator!=(std::string_view utf8) const;
-    bool                         operator==(std::u16string_view u16) const;
-    bool                         operator!=(std::u16string_view u16) const;
-    explicit                     operator const XMLCh*() const noexcept;
-    [[nodiscard]] const XMLCh*   c_str() const noexcept;
-    [[nodiscard]] XMLCh*         data() const noexcept;
-    [[nodiscard]] bool           empty() const noexcept;
-    [[nodiscard]] std::size_t    length() const noexcept;
+    x_str&                         operator=(const x_str& other);
+    x_str&                         operator=(x_str&& other) noexcept;
+    void                           assign(const XMLCh* other);
+    void                           assign(cstr_t other);
+    void                           reset() noexcept;
+    void                           reset(XMLCh* ptr) noexcept;
+    [[nodiscard]] std::string      to_string() const;
+    [[nodiscard]] std::u16string   to_u16string() const;
+    [[nodiscard]] std::string_view to_string_view() const;
+    bool                           operator==(const x_str& other) const noexcept;
+    bool                           operator!=(const x_str& other) const noexcept;
+    auto                           operator<=>(const x_str& other) const noexcept;
+    bool                           operator==(const XMLCh* other) const noexcept;
+    bool                           operator!=(const XMLCh* other) const noexcept;
+    auto                           operator<=>(const XMLCh* other) const noexcept;
+    bool                           operator==(std::string_view utf8) const;
+    bool                           operator!=(std::string_view utf8) const;
+    bool                           operator==(std::u16string_view u16) const;
+    bool                           operator!=(std::u16string_view u16) const;
+    explicit                       operator const XMLCh*() const noexcept;
+    [[nodiscard]] const XMLCh*     c_str() const noexcept;
+    [[nodiscard]] XMLCh*           data() const noexcept;
+    [[nodiscard]] bool             empty() const noexcept;
+    [[nodiscard]] std::size_t      length() const noexcept;
   private:
-    XMLCh* data_ = nullptr;
+    XMLCh*              data_ = nullptr;
+    mutable std::string cached_utf8_; //< utf8 equivalent of data_
   };
 } // namespace fsp
 

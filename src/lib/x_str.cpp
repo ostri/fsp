@@ -37,6 +37,7 @@ namespace fsp
 
   x_str::x_str(x_str&& other) noexcept
   : data_(std::exchange(other.data_, nullptr))
+  , cached_utf8_(std::move(other.cached_utf8_))
   {
   }
 
@@ -44,18 +45,30 @@ namespace fsp
   {
     if (this != &other)
     {
-      if (other.data_ != nullptr) reset(xercesc::XMLString::replicate(other.data_));
+      if (other.data_ != nullptr)
+      {
+        reset(other.data_ != nullptr ? xercesc::XMLString::replicate(other.data_) : nullptr);
+        cached_utf8_.clear(); // FIXME os3 duplicate?
+      }
     }
     return *this;
   }
 
   x_str& x_str::operator=(x_str&& other) noexcept
   {
-    if (this != &other) { reset(std::exchange(other.data_, nullptr)); }
+    if (this != &other)
+    {
+      reset(std::exchange(other.data_, nullptr));
+      cached_utf8_.clear();
+    }
     return *this;
   }
 
-  void x_str::assign(const XMLCh* other) { reset(xercesc::XMLString::replicate(other)); }
+  void x_str::assign(const XMLCh* other)
+  {
+    reset(other != nullptr ? xercesc::XMLString::replicate(other) : nullptr);
+    cached_utf8_.clear();
+  }
   void x_str::assign(const cstr_t other)
   {
     x_str tmp(other);
@@ -69,31 +82,53 @@ namespace fsp
       xercesc::XMLString::release(&data_);
       data_ = nullptr; // must be eventhough the xerces documentation claims that it clears data_
     }
+    cached_utf8_.clear();
   }
 
   void x_str::reset(XMLCh* ptr) noexcept
   {
     if (data_ != nullptr) xercesc::XMLString::release(&data_);
     data_ = ptr;
+    cached_utf8_.clear();
   }
 
-  [[nodiscard]] std::string x_str::to_string() const
+  [[nodiscard]] std::string x_str::to_string() const { return std::string(to_string_view()); }
+  // [[nodiscard]] std::string x_str::to_string() const
+  // {
+  //   if (empty()) return {};
+  //   char* utf8 = xercesc::XMLString::transcode(data_);
+  //   if (utf8 == nullptr) throw std::runtime_error("XMLString::transcode failed");
+
+  //   // RAII for Xerces char*
+  //   auto deleter = [](char* p)
+  //   {
+  //     if (p) xercesc::XMLString::release(&p);
+  //   };
+  //   std::unique_ptr<char, decltype(deleter)> guard(utf8, deleter);
+  //   return {utf8};
+  // }
+  [[nodiscard]] std::string_view x_str::to_string_view() const
   {
     if (empty()) return {};
-    char* utf8 = xercesc::XMLString::transcode(data_);
-    if (utf8 == nullptr) throw std::runtime_error("XMLString::transcode failed");
 
-    // RAII for Xerces char*
-    auto deleter = [](char* p)
+    if (cached_utf8_.empty() && data_ == nullptr)
     {
-      if (p) xercesc::XMLString::release(&p);
-    };
-    std::unique_ptr<char, decltype(deleter)> guard(utf8, deleter);
-    return {utf8};
+      char* utf8 = xercesc::XMLString::transcode(data_);
+      if (utf8 != nullptr)
+      {
+        auto deleter = [](char* p)
+        {
+          if (p) xercesc::XMLString::release(&p);
+        };
+        std::unique_ptr<char, decltype(deleter)> guard(utf8, deleter);
+        cached_utf8_.assign(utf8);
+      }
+    }
+    return cached_utf8_;
   }
 
   [[nodiscard]] std::u16string x_str::to_u16string() const
-  {
+  { // FIXME OS3 calculate the length
     if (empty()) return {};
     return {reinterpret_cast<const char16_t*>(data_)}; // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
   }
