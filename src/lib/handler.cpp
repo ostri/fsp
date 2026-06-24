@@ -1,5 +1,6 @@
 #include "handler.hpp"
 #include "common.hpp"
+#include "e_tag_wide.hpp"
 #include "x_str.hpp"
 
 #include <ranges>
@@ -26,12 +27,13 @@ namespace fsp
   , log_(log)             //
   , base_addr_(base_addr) //
   {
-    log_trace_ = log_.active(lvl_enum::trace);
-    log_debug_ = log_.active(lvl_enum::debug);
-    log_info_  = log_.active(lvl_enum::info);
-    log_warn_  = log_.active(lvl_enum::warn);
-    log_err_   = log_.active(lvl_enum::err);
-    log_crit_  = log_.active(lvl_enum::crit);
+    log_trace_       = log_.active(lvl_enum::trace);
+    log_debug_       = log_.active(lvl_enum::debug);
+    log_info_        = log_.active(lvl_enum::info);
+    log_warn_        = log_.active(lvl_enum::warn);
+    log_err_         = log_.active(lvl_enum::err);
+    log_crit_        = log_.active(lvl_enum::crit);
+    max_xpath_depth_ = targets_.targets.max_xpath_size();
     // targets are converted to wide characters
     for (const auto& el : targets_.targets)
     {
@@ -104,15 +106,6 @@ namespace fsp
     return {};
   }
 
-  // inline ns_def_t Handler::active_ns() const
-  // {
-  //   ns_def_t result;
-  //   // Od dna navzgor — globji nivo prekrije višjega
-  //   for (const auto& level : ns_stack_)
-  //     for (const auto& [prefix, uri] : level.ns_vec) result.emplace_back(prefix, uri);
-  //   return result;
-  // }
-
   // ============================================================================
   // Tag matching
   // ============================================================================
@@ -141,22 +134,22 @@ namespace fsp
    */
   inline std::string Handler::make_open_tag(const XMLCh* qname, const xercesc::Attributes& attrs)
   {
-    // std::string str;
-    buf_ = R"(<?xml version="1.0" encoding="UTF-8"?><)";
-    buf_ += x_str(qname).to_string();
+    buf_.clear();
+    buf_.append( R"(<?xml version="1.0" encoding="UTF-8"?><)");
+    buf_.append(x_str(qname).to_string());
 
-    if (! ns_stack_.empty()) buf_ += ns_stack_.back().ns_decl_string; // namespaces
+    if (! ns_stack_.empty()) buf_.append(ns_stack_.back().ns_decl_string); // namespaces
 
     // Atributs — xmlns:* skip, they were inserted in the previous loop
     for (XMLSize_t i = 0; i < attrs.getLength(); ++i)
     {
-      const auto qname = x_str(attrs.getQName(i)).to_string();
+      const std::string qname = x_str(attrs.getQName(i)).to_string();
       if (qname.starts_with("xmlns")) [[unlikely]]
         continue;
       const auto escaped_str = escape_xml_attr(x_str(attrs.getValue(i)).to_string());
-      buf_ += fmt::format(" {}=\"{}\"", qname, escaped_str);
+      buf_.append(fmt::format(" {}=\"{}\"", qname, escaped_str));
     }
-    buf_ += '>';
+    buf_+='>';
     return buf_;
   }
 
@@ -259,7 +252,7 @@ namespace fsp
     if (log_debug_) [[unlikely]]
       log_.trace(
         fmt::format("startElement depth:{:2} local:'{:10}' uri:'{}'", doc_depth_, x_str(localname).to_string(), x_str(uri).to_string()));
-    if (! is_capturing()) check_xpath_matches(uri, localname, qname, attrs);
+    if (! is_capturing() && doc_depth_ <= max_xpath_depth_) check_xpath_matches(uri, localname, qname, attrs);
     if (is_capturing()) [[likely]]
       frag_depth_++;
   }

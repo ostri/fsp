@@ -138,6 +138,7 @@ namespace fsp
     bool                                          log_warn_  = false;
     bool                                          log_err_   = false;
     bool                                          log_crit_  = false;
+    int                                           max_xpath_depth_ = 0;
   };
 
 } // namespace fsp

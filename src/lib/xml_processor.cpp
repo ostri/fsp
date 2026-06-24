@@ -66,14 +66,14 @@ namespace
     const fsp::fsp_logger& log,
     fsp::segment_result&   seg_result)
   {
+    const bool log_debug = log.active(fsp::lvl_enum::debug);
     if (xp.is_last(depth)) // are we reached the end of the current xpath?
     {
       if (xp.is_attr()) // attribute xpath
       {
         auto value = process_attribute(reader, xp);
         seg_result.values[xp.name()].emplace_back(value);
-        if (log.active(fsp::lvl_enum::debug))
-          log.debug(fmt::format("attribute name: '{}' tag: {} value: '{}'", xp.name(), xp.attr_name(), value));
+        if (log_debug) log.debug(fmt::format("attribute name: '{}' tag: {} value: '{}'", xp.name(), xp.attr_name(), value));
         return -1;
       }
       return static_cast<int>(ndx);
@@ -92,6 +92,7 @@ namespace
     int         read_status = 0;
     const char* uri         = reinterpret_cast<const char*>(xmlTextReaderConstNamespaceUri(reader));
     const char* tag         = reinterpret_cast<const char*>(xmlTextReaderConstLocalName(reader));
+    const bool  log_trace   = log.active(fsp::lvl_enum::trace);
 
     // Safely handle potential null pointers from libxml2
     std::string_view safe_uri = uri != nullptr ? uri : "";
@@ -100,8 +101,7 @@ namespace
     pp_result        result;
     if (depth >= stack.size()) // guard to not go too deep
     {
-      if (log.active(fsp::lvl_enum::trace))
-        log.trace(fmt::format("pruning subtree: '{}' too deep: '{}' max allowed: '{}'", safe_tag, depth, stack.size()));
+      if (log_trace) log.trace(fmt::format("pruning subtree: '{}' too deep: '{}' max allowed: '{}'", safe_tag, depth, stack.size()));
       read_status = xmlTextReaderNext(reader); // Skip all children, move to sibling or the end of parent tag
       return std::unexpected(err_result{.status = read_status, .err = "Pruning, since it is too deep."});
     }
@@ -111,7 +111,7 @@ namespace
     result.node = fsp::xml_node{safe_uri, safe_tag};
     // auto low         = limits.low_tag();
     // auto high        = limits.high_tag();
-    if (log.active(fsp::lvl_enum::trace)) //
+    if (log_trace) //
       log.trace(fmt::format("current tag: {} {} limits: {}", safe_tag, safe_uri, limits.dump()));
     /// prune if we are:
     /// - deeper than any xpath we are searching for (excluded before)
@@ -128,28 +128,28 @@ namespace
     //   return std::unexpected(err_result{.status = xmlTextReaderNext(reader), .err = "Pruning, grather than last xpath searched"});
     // bool at_least_one = false;
     // std::size_t result_value_ndx = -1; // -1 no value, 0..n index of the result value
-    if (log.active(fsp::lvl_enum::trace)) log.trace(fmt::format("{}", xpaths.dump()));
+    if (log_trace) log.trace(fmt::format("{}", xpaths.dump()));
     // bool at_least_once = false;
-    for (auto cnt : std::views::iota(first, last + 1))
+    //for (auto cnt : std::views::iota(first, last + 1))
+    for (auto cnt = first; cnt <= last; ++cnt)
     {                                          // compare with all possible options on xpath[depth]
       if (! limits.available()[cnt]) continue; // It has been removed in earlier iterations
       const auto& xp = xpaths[cnt];
       if (depth >= xp.xpath().size())
       { // if there is shorter xpath then exclude current path and move to next xpath
-        if (log.active(fsp::lvl_enum::trace))
-          log.trace(fmt::format("shorter xpath: tag:{} depth:{} cnt: {} xpath-id:{}", safe_tag, depth, cnt, xp.name()));
+        if (log_trace) log.trace(fmt::format("shorter xpath: tag:{} depth:{} cnt: {} xpath-id:{}", safe_tag, depth, cnt, xp.name()));
         limits.available().reset(cnt);
         continue;
       }
       std::string_view xp_tag = xp.xpath()[depth].tag;
       std::string_view xp_uri = xp.xpath()[depth].ns;
-      if (log.active(fsp::lvl_enum::trace)) log.trace(fmt::format("tag:{} xp tag:{} depth:{} cnt: {}", safe_tag, xp_tag, depth, cnt));
+      if (log_trace) log.trace(fmt::format("tag:{} xp tag:{} depth:{} cnt: {}", safe_tag, xp_tag, depth, cnt));
       if ((safe_tag == xp_tag) && (safe_uri == xp_uri)) // remember the tag value index, attribute is handled inside
         result.status = std::max(process_positive_xpath_element(reader, xp, cnt, depth, log, seg_result), result.status);
       else // current xpath tag does not match any tag on current level in xpaths searched
         limits.reset(cnt);
     } // for
-    if (log.active(fsp::lvl_enum::trace)) log.trace(fmt::format("limits: {}", limits.dump()));
+    if (log_trace) log.trace(fmt::format("limits: {}", limits.dump()));
     if (limits.available().none())      // this subtree is an dead end. prune it
       return std::unexpected(err_result{//
                                         .status = xmlTextReaderNext(reader),
@@ -172,7 +172,14 @@ namespace fsp
   : logger_(cfg.log_config)
   , config_(std::move(cfg))
   {
-    logger_.info("Main program initialized.");
+#ifdef NDEBUG
+constexpr bool is_debug = false;
+#else
+constexpr bool is_debug = true;
+#endif
+    if constexpr (is_debug) logger_.info("Main program initialized (DEBUG).");
+    else logger_.info("Main program initialized (RELEASE).");
+
     if (config_.num_workers == 0) config_.num_workers = std::thread::hardware_concurrency();
     if (config_.num_workers == 0) config_.num_workers = 1;
     logger_.info(fmt::format("XML Processor: {} workers, validation: {}", config_.num_workers, config_.validate_against_xsd));
@@ -210,42 +217,6 @@ namespace fsp
       return std::unexpected(err);
     }
   }
-
-  // void_result xml_processor::setup_validation(fsp::mmap_file& xsd_mmap)
-  // {
-  //   if (! config_.validate_against_xsd || ! xsd_mmap.is_open()) return {};
-  //   return setup_validation_from_buffer(xsd_mmap.data(), xsd_mmap.size(), xsd_mmap.path());
-  // }
-  // // FIXME we dont need this any more
-  // void_result xml_processor::setup_validation_from_buffer(const void* data, std::size_t size, std::string_view schema_name)
-  // {
-  //   if (! config_.validate_against_xsd) return {};
-  //   if (data == nullptr || size == 0)
-  //   {
-  //     auto err = error_info{processor_error::schema_not_found, "XSD buffer is empty.", "", 0};
-  //     logger_.error(err.to_string());
-  //     return std::unexpected(err);
-  //   }
-  //   try
-  //   {
-  //     xsd_holder_ = std::make_unique<mem_buf_holder>(data, size, schema_name, logger_.get());
-
-  //     if (xsd_holder_->source() != nullptr)
-  //     {
-  //       // [OPOMBA] loadGrammar() se tukaj ne kliče več za SAX parser —
-  //       // validacijska nit si zgradi lasten parser z lastnim grammarjem.
-  //       // Ta metoda ostane za morebitno zunanjo rabo (setup_validation_from_buffer
-  //       // je public API) in za xsd_holder_ lifecycle management.
-  //       logger_.info(fmt::format("XSD schema: '{}' pripravljena.", schema_name));
-  //     }
-  //     return {};
-  //   }
-  //   catch (const xercesc::XMLException& e)
-  //   {
-  //     auto err = error_info{processor_error::xsd_validation_failed, fmt::format("XSD load: {}", x_str(e.getMessage()).to_string()), "",
-  //     0}; logger_.error(err.to_string()); return std::unexpected(err);
-  //   }
-  // }
 
   // ============================================================================
   // [DODANO] Validacijska nit
@@ -373,16 +344,16 @@ namespace fsp
    */
   result<segment_result> xml_processor::process_segment(const worker_context& ctx, const xml_segment& seg)
   {
+    auto           t0 = std::chrono::steady_clock::now();
     segment_result res;
-    res.segment_id  = seg.id();
-    res.xpath_index = seg.subtree_type();
-    // const auto& logger = ctx.logger;
-    const auto& log = ctx.log;
+    res.segment_id        = seg.id();
+    res.xpath_index       = seg.subtree_type();
+    const auto& log       = ctx.log;
+    const bool  log_debug = log.active(fsp::lvl_enum::debug);
 
-    auto t0 = std::chrono::steady_clock::now();
     try
     {
-      if (log.active(fsp::lvl_enum::debug))
+      if (log_debug)
       {
         log.debug(fmt::format("segment started: {}", seg.dump()));
         log.trace(fmt::format("{}", seg.dump_all(ctx.xml_mmap.data(), 0)));
@@ -396,7 +367,7 @@ namespace fsp
       if (r)
       {
         // res.success = true;
-        if (log.active(fsp::lvl_enum::debug))
+        if (log_debug)
         {
           log.debug(fmt::format("Segment '{}' DOM processing finished '{}'µs (offset={}, len={})", //
                                 seg.id(),
@@ -437,16 +408,18 @@ namespace fsp
     UniqueXmlTextReader reader(xmlReaderForMemory(xml_buf.data(), static_cast<int>(xml_buf.size()), nullptr, nullptr, flags));
 
     int                      read_status;
-    auto                     depth = 0UL;
-    const char               pad   = '.';
-    const auto&              log   = ctx.log;
+    auto                     depth     = 0UL;
+    const char               pad       = '.';
+    const auto&              log       = ctx.log;
+    const bool               log_trace = log.active(fsp::lvl_enum::trace);
+    const bool               log_debug = log.active(fsp::lvl_enum::debug);
     std::stack<stack_struct> tree_stack;
     auto                     subtree_type = ctx.targets.targets[seg.subtree_type()].original_ndx(); // seg.subtree_type();
     const auto&              xpaths       = ctx.targets.xpaths.at(subtree_type);
-    if (log.active(fsp::lvl_enum::trace)) log.trace(fmt::format("subtree type: {}\n{}", subtree_type, xpaths.dump()));
+    if (log_trace) log.trace(fmt::format("subtree type: {}\n{}", subtree_type, xpaths.dump()));
     assert(xpaths.size() != 0);
     const auto& limits = xpath_limits(ctx.targets.xpaths.at(subtree_type));
-    if (log.active(fsp::lvl_enum::trace)) log.trace(limits.dump());
+    if (log_trace) log.trace(limits.dump());
     // ---------------------------------------------------------------------------------------------
     read_status = xmlTextReaderRead(reader.get());
     tree_stack.emplace(stack_struct{.node = xml_node{"top", "top_uri"}, .limits = fsp::p_limits(0, xpaths.size())});
@@ -463,14 +436,18 @@ namespace fsp
         auto x = process_and_prune_node(reader.get(), xpaths, tree_stack, limits, log, res);
         if (! x)
         { // FIXME too deep is critical error handle it properly
-          if (log.active(fsp::lvl_enum::trace)) log.trace(fmt::format("pruning: {} val:{}", x.error().err, tree_stack.top().node.tag()));
+          if (log_trace) log.trace(fmt::format("pruning: {} val:{}", x.error().err, tree_stack.top().node.tag()));
           read_status = x.error().status;
           continue;
         }
         value_ndx = x.value().status;
-        if (log.active(fsp::lvl_enum::debug))
+        if (log_debug)
+        {
+          thread_local std::string indent;
+          indent.assign(depth * 2, ' ');
           log.debug(
-            fmt::format("seg:{:5} {}{} value_ndx: {}", seg.id(), std::string(depth * 2, pad), tree_stack.top().node.tag(), value_ndx));
+            fmt::format("seg:{:5} {}{} value_ndx: {}", seg.id(), indent, tree_stack.top().node.tag(), value_ndx));
+        }
         break;
       }
       case XML_READER_TYPE_TEXT:
@@ -481,22 +458,34 @@ namespace fsp
           cstr_t      value_name = xpaths[value_ndx].name();
           res.values[value_name].emplace_back(value != nullptr ? value : "");
           value_ndx = -1; // again undefined
-          if (log.active(fsp::lvl_enum::debug))
+          if (log_debug)
+          {
+            thread_local std::string indent;
+            indent.assign(depth * 2, pad);
             log.debug(fmt::format("seg:{:5} {}name: {} tag:'{}' value: {}",
                                   seg.id(),
-                                  std::string(depth * 2, pad),
+                                  indent,
                                   value_name,
                                   tree_stack.top().node.tag(),
                                   value));
+            }
         }
-        else if (log.active(fsp::lvl_enum::debug))
-          log.debug(fmt::format("seg:{:5} {} tag: {} no value", seg.id(), std::string(depth * 2, pad), tree_stack.top().node.tag()));
+        else if (log_debug)
+        {
+          thread_local std::string indent;
+          indent.assign(depth * 2, pad);
+          log.debug(fmt::format("seg:{:5} {} tag: {} no value", seg.id(), indent, tree_stack.top().node.tag()));
+        }
         break;
       }
       case XML_READER_TYPE_END_ELEMENT:
       {
-        if (log.active(fsp::lvl_enum::debug)) // -2 to align with start element
-          log.debug(fmt::format("seg:{:5} {}/{}", seg.id(), std::string((tree_stack.size() - 2) * 2, pad), tree_stack.top().node.tag()));
+        if (log_debug) // -2 to align with start element
+        {
+          thread_local std::string indent;
+          indent.assign((tree_stack.size() - 2) * 2, pad);
+          log.debug(fmt::format("seg:{:5} {}/{}", seg.id(), indent, tree_stack.top().node.tag()));
+        }
         tree_stack.pop();
         break;
       }
@@ -535,12 +524,12 @@ namespace fsp
     int                                     worker_id,
     worker_context                          ctx)
   {
-    auto t0         = std::chrono::steady_clock::now();
-    log_thread_name = fmt::format("wrk{:03}", worker_id);
-    // const auto& logger = ctx.logger;
-    const auto& log = ctx.log;
+    auto t0               = std::chrono::steady_clock::now();
+    log_thread_name       = fmt::format("wrk{:03}", worker_id);
+    const auto& log       = ctx.log;
+    const bool  log_debug = log.active(fsp::lvl_enum::debug);
 
-    if (log.active(fsp::lvl_enum::debug)) log.debug(fmt::format("Worker thread '{}' started.", log_thread_name));
+    if (log_debug) log.debug(fmt::format("Worker thread '{}' started.", log_thread_name));
     ctx.worker_id                          = worker_id;
     thread_local std::size_t txn_processed = 0;
     while (! ctx.cancel_flag.load())
@@ -574,7 +563,7 @@ namespace fsp
         ctx.error_count++;
       }
     }
-    if (log.active(fsp::lvl_enum::debug))
+    if (log_debug)
     {
       auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count();
       log.debug(fmt::format("Worker thread '{}' finished in {} ms txn processed: {}.", log_thread_name, duration, txn_processed));
