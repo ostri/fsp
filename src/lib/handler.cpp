@@ -144,8 +144,8 @@ namespace fsp
       const std::string qname = x_str(attrs.getQName(i)).to_string();
       if (qname.starts_with("xmlns")) [[unlikely]]
         continue;
-      const auto escaped_str = escape_xml_attr(x_str(attrs.getValue(i)).to_string());
-      buf_.append(fmt::format(" {}=\"{}\"", qname, escaped_str));
+      const auto escaped_str = escape_xml_attr(x_str(attrs.getValue(i)).to_string_view());
+      buf_.append(fmt::format(R"( {}="{}")", qname, escaped_str));
     }
     buf_ += '>';
     return buf_;
