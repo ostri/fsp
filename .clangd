@@ -5,11 +5,14 @@ CompileFlags:
     - --driver-mode=g++
   Remove:
     - -freflection
+    - -fcontracts
+    - -fcontract-evaluation-semantic=observe
     - -std=c++2c
     - -D__cpp_impl_reflection=202603L
     - -D__glibcxx_reflection=202603L
 Diagnostics:
   Suppress:
+    - drv_unknown_argument
     - UnknownArgument
     - UnknownIdentifier
     - ExpectedExpression
@@ -18,4 +21,3 @@ Diagnostics:
     - UnusedIncludes
 Index:
   StandardLibrary: Yes
-  Background: Skip
