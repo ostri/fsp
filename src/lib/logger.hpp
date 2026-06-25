@@ -84,4 +84,7 @@ namespace fsp
     std::shared_ptr<spdlog::logger> logger_;
     uint8_t                         level_ = spdlog::level::off; // local cache for level
   };
+
+  /// true if level is right for logging
+  [[nodiscard]] inline bool fsp_logger::active(lvl_enum lvl) const noexcept { return static_cast<uint8_t>(lvl) >= level_; }
 } // namespace fsp

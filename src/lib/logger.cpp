@@ -73,9 +73,6 @@ namespace fsp
     if (active(lvl_enum::trace)) [[unlikely]]
       logger_->trace(msg);
   }
-  /// true if level is right for logging
-  [[nodiscard]] inline bool fsp_logger::active(lvl_enum lvl) const noexcept //
-  { return static_cast<uint8_t>(lvl) >= level_; }
 
   [[nodiscard]] lvl_enum fsp_logger::level() const noexcept { return static_cast<lvl_enum>(level_); }
 
