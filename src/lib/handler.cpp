@@ -130,22 +130,27 @@ namespace fsp
    * The method generates the start part of the opening tag, that is
    * prefixed to the rest of the xml segment that is sent to the worker
    */
-  inline std::string Handler::make_open_tag(const XMLCh* qname, const xercesc::Attributes& attrs)
+  inline std::string Handler::make_open_tag([[maybe_unused]] const XMLCh* qname, const xercesc::Attributes& attrs)
   {
+    const std::size_t buf_size = 4096;
     buf_.clear();
+    buf_.reserve(buf_size);
     buf_.append(R"(<?xml version="1.0" encoding="UTF-8"?><)");
-    buf_.append(x_str(qname).to_string());
+    buf_.append(x_str(qname).to_string_view());
+    // buf_.append("xxxxxx");
 
     if (! ns_stack_.empty()) buf_.append(ns_stack_.back().ns_decl_string); // namespaces
 
     // Atributs — xmlns:* skip, they were inserted in the previous loop
     for (XMLSize_t i = 0; i < attrs.getLength(); ++i)
     {
-      const std::string qname = x_str(attrs.getQName(i)).to_string();
-      if (qname.starts_with("xmlns")) [[unlikely]]
+      // const std::string qname = x_str(attrs.getQName(i)).to_string();
+      // const XMLCh* qnameCh = attrs.getQName(i);
+      const auto* qn = attrs.getQName(i);
+      if (xercesc::XMLString::startsWith(qn, u"xmlns")) [[unlikely]]
         continue;
       const auto escaped_str = escape_xml_attr(x_str(attrs.getValue(i)).to_string_view());
-      buf_.append(fmt::format(R"( {}="{}")", qname, escaped_str));
+      buf_.append(fmt::format(R"( {}="{}")", x_str(qn).to_string_view(), escaped_str));
     }
     buf_ += '>';
     return buf_;
@@ -194,10 +199,10 @@ namespace fsp
   }
 
   inline void Handler::check_xpath_matches( //
-    const XMLCh*               uri,
-    const XMLCh*               localname,
-    const XMLCh*               qname,
-    const xercesc::Attributes& attrs)
+    const XMLCh*                                uri,
+    const XMLCh*                                localname,
+    [[maybe_unused]] const XMLCh*               qname,
+    [[maybe_unused]] const xercesc::Attributes& attrs)
   {
     // Advance all candidates matching the current depth
     for (std::size_t i = 0; i < targets_.targets.size(); ++i)
@@ -224,8 +229,8 @@ namespace fsp
     {
       if (matched_[i] == static_cast<int>(targets_wide_[i].size()))
       { // start of the subtree
-        frag_depth_ = 0;
-        active_idx_ = static_cast<int>(i);
+        frag_depth_  = 0;
+        target_type_ = static_cast<int>(i);
 
         // Byte offset of the start of this element ;one character after opening tag '>'
         frag_start_offset_ = parser_->getSrcOffset(); //
@@ -250,7 +255,7 @@ namespace fsp
     if (log_debug_) [[unlikely]]
       log_.trace(
         fmt::format("startElement depth:{:2} local:'{:10}' uri:'{}'", doc_depth_, x_str(localname).to_string(), x_str(uri).to_string()));
-    if (! is_capturing() && doc_depth_ <= max_xpath_depth_) check_xpath_matches(uri, localname, qname, attrs);
+    if (! is_capturing() && (doc_depth_ <= max_xpath_depth_)) check_xpath_matches(uri, localname, qname, attrs);
     if (is_capturing()) [[likely]]
       frag_depth_++;
   }
@@ -271,7 +276,7 @@ namespace fsp
       { // fragment is finished. wrap it up and send it to the workers
         std::size_t end_offset = parser_->getSrcOffset();
         std::size_t length     = end_offset - frag_start_offset_;
-        auto        seg        = xml_segment(counter_, active_idx_, frag_start_offset_, length, prefix_);
+        auto        seg        = xml_segment(counter_, target_type_, frag_start_offset_, length, prefix_);
         if (log_debug_) [[unlikely]]
         {
           log_.debug(fmt::format("pushing to queue: {} {}", x_str(qname).to_string(), seg.dump()));
@@ -279,9 +284,8 @@ namespace fsp
         }
         queue_.push(std::move(seg));
         counter_++;
-        frag_depth_ = -1; // we are outside of capturing
-        // capturing_  = false;
-        active_idx_ = -1;
+        frag_depth_  = -1; // we are outside of capturing
+        target_type_ = -1;
       }
     }
     doc_depth_--;

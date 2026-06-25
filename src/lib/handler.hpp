@@ -113,7 +113,7 @@ namespace fsp
     int              doc_depth_ = 0; // depth in the document (1 = koreni elem.)
     // --- Fragment akumulacija ---
     int         frag_depth_        = -1; // depth inside the fragment
-    int         active_idx_        = -1; // which subtry type we are processing
+    int         target_type_       = -1; // which subtry type we are processing
     std::size_t frag_start_offset_ = 0;  // byte offset of start of the fragment
 
     // --- Output ---
