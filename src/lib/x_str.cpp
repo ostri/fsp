@@ -111,18 +111,17 @@ namespace fsp
   {
     if (empty()) return {};
 
-    if (cached_utf8_.empty() && data_ == nullptr)
+    if (cached_utf8_.empty() && data_ != nullptr)
     {
       char* utf8 = xercesc::XMLString::transcode(data_);
-      if (utf8 != nullptr)
+      if (utf8 == nullptr) [[unlikely]]
+        return "";
+      auto deleter = [](char* p)
       {
-        auto deleter = [](char* p)
-        {
-          if (p) xercesc::XMLString::release(&p);
-        };
-        std::unique_ptr<char, decltype(deleter)> guard(utf8, deleter);
-        cached_utf8_.assign(utf8);
-      }
+        if (p) xercesc::XMLString::release(&p);
+      };
+      std::unique_ptr<char, decltype(deleter)> guard(utf8, deleter);
+      cached_utf8_.assign(utf8);
     }
     return cached_utf8_;
   }
