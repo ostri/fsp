@@ -93,35 +93,23 @@ namespace fsp
   }
 
   [[nodiscard]] std::string x_str::to_string() const { return std::string(to_string_view()); }
-  // [[nodiscard]] std::string x_str::to_string() const
-  // {
-  //   if (empty()) return {};
-  //   char* utf8 = xercesc::XMLString::transcode(data_);
-  //   if (utf8 == nullptr) throw std::runtime_error("XMLString::transcode failed");
 
-  //   // RAII for Xerces char*
-  //   auto deleter = [](char* p)
-  //   {
-  //     if (p) xercesc::XMLString::release(&p);
-  //   };
-  //   std::unique_ptr<char, decltype(deleter)> guard(utf8, deleter);
-  //   return {utf8};
-  // }
   [[nodiscard]] std::string_view x_str::to_string_view() const
   {
     if (empty()) return {};
-
     if (cached_utf8_.empty() && data_ != nullptr)
     {
-      char* utf8 = xercesc::XMLString::transcode(data_);
-      if (utf8 == nullptr) [[unlikely]]
-        return "";
       auto deleter = [](char* p)
       {
         if (p) xercesc::XMLString::release(&p);
       };
-      std::unique_ptr<char, decltype(deleter)> guard(utf8, deleter);
+      using t_name = std::unique_ptr<char, decltype(deleter)>;
+      char*  utf8  = xercesc::XMLString::transcode(data_);
+      t_name guard(utf8, deleter);
+      if (utf8 == nullptr) [[unlikely]]
+        return "";
       cached_utf8_.assign(utf8);
+      assert(! cached_utf8_.empty());
     }
     return cached_utf8_;
   }
