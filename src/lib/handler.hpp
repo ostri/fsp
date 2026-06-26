@@ -25,8 +25,10 @@
 namespace fsp
 {
   using cstr_t       = std::string_view;
+  using str_t        = std::string;
   using cstr_XMLCh_t = std::basic_string_view<XMLCh>;
   using ns_def_t     = std::vector<std::pair<x_str, x_str>>;
+  using RuleMask     = uint64_t;
 
   class Handler : public xercesc::DefaultHandler
   {
@@ -51,16 +53,16 @@ namespace fsp
     void error(const xercesc::SAXParseException& e) override;
     void fatalError(const xercesc::SAXParseException& e) override;
 
-    [[nodiscard]] std::size_t      segments_found() const noexcept { return counter_; }
-    [[nodiscard]] std::string_view base_addr() const;
-
+    [[nodiscard]] std::size_t segments_found() const noexcept;
+    [[nodiscard]] cstr_t      base_addr() const;
     // [DODANO] Injicira shared_future iz xml_processor::process_from_buffer.
     // Handler ga polling preverja v startElement() in ob napaki vrže
     // SAXParseException, ki jo Xerces uporabi kot signal za prekinitev parsinga.
     // shared_future (ne future) ker get() ne sme biti destructive — handler ga
     // lahko preveri večkrat (polling), xml_processor pa pokliče get() na koncu.
-    void set_validation_future(std::shared_future<std::optional<error_info>> f) { val_future_ = std::move(f); }
-  private: // metohods
+    void set_validation_future(std::shared_future<std::optional<error_info>> f);
+  private: // methods
+    [[noreturn]] void logic_error(const char* msg) const;
     // --- helper methods ---------
     void check_validation_status();
     void check_xpath_matches( //
@@ -88,6 +90,10 @@ namespace fsp
     proc_data                 targets_;      // xpath rules
     std::vector<xpath_wide_t> targets_wide_; // xpath rules as XMLCh* strings
 
+    std::vector<RuleMask>    active_mask_stack_;  //< stack of active rules
+    std::vector<std::size_t> rule_lengths_;       //< length of the xpaths /rules
+    RuleMask                 all_rules_mask_ = 0; //< current rule mask
+
     // --- NS definicitons ---
     // stack of NS definitions. Whenever new set of ns definitions occur new push on stack
     // occurs. on endElement of the same tag this is removed.
@@ -108,9 +114,9 @@ namespace fsp
     // the ns_pending_structure is a temporary buffer that transfers information between
     // methods startPrefixMapping and startElement
     ns_def_t ns_pending_;
-    // --- Matching state ---
-    std::vector<int> matched_;
-    int              doc_depth_ = 0; // depth in the document (1 = koreni elem.)
+    // // --- Matching state ---
+    // std::vector<int> matched_;
+    int doc_depth_ = 0; // depth in the document (1 = koreni elem.)
     // --- Fragment akumulacija ---
     int         frag_depth_        = -1; // depth inside the fragment
     int         target_type_       = -1; // which subtry type we are processing
@@ -140,5 +146,9 @@ namespace fsp
     bool                                          log_crit_        = false;
     int                                           max_xpath_depth_ = 0;
   };
+
+  inline std::size_t Handler::segments_found() const noexcept { return counter_; }
+  inline cstr_t      Handler::base_addr() const { return base_addr_; }
+  inline void        Handler::set_validation_future(std::shared_future<std::optional<error_info>> f) { val_future_ = std::move(f); }
 
 } // namespace fsp

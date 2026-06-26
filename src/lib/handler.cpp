@@ -38,8 +38,18 @@ namespace fsp
       for (const auto& xp : el.xpath()) { tmp_vec.emplace_back(std::string(xp.ns), std::string(xp.tag)); }
       targets_wide_.push_back(tmp_vec);
     }
-    matched_.assign(targets_wide_.size(), 0);
-    // root level - alway present
+    const std::size_t num_rules = targets_wide_.size();
+    if ((sizeof(all_rules_mask_) * CHAR_BIT) < num_rules) logic_error("more xpaths than 64"); // FIXME ostri initial test
+    all_rules_mask_ = (1ULL << num_rules) - 1ULL;
+
+    rule_lengths_.reserve(num_rules);
+    for (const auto& xp : targets_wide_) rule_lengths_.push_back(xp.size());
+    const std::size_t expected_depth_of_the_search_tree = 32;
+    active_mask_stack_.reserve(expected_depth_of_the_search_tree); // expected max depth of the xml tree
+                                                                   // preallocate to avoid expansion of the vector during the processing
+    active_mask_stack_.emplace_back(all_rules_mask_);
+    // matched_.assign(targets_wide_.size(), 0);
+    //  root level - alway present
     ns_stack_.emplace_back(ns_level{.depth = -1, .ns_vec = {}, .ns_decl_string = {}});
     if (log_debug_) [[unlikely]]
       for (std::size_t i = 0; i < targets_.targets.size(); ++i) log_.debug(fmt::format("target[{}] = '{}'", i, targets_.targets[i].name()));
@@ -82,8 +92,8 @@ namespace fsp
     for (const auto& [prefix, uri] : current.ns_vec)
     {
       if (prefix.empty()) [[unlikely]]
-        fmt::format_to(std::back_inserter(current.ns_decl_string), " xmlns=\"{}\"", uri.to_string());
-      else fmt::format_to(std::back_inserter(current.ns_decl_string), " xmlns:{}=\"{}\"", prefix.to_string(), uri.to_string());
+        fmt::format_to(std::back_inserter(current.ns_decl_string), " xmlns=\"{}\"", uri.to_string_view());
+      else fmt::format_to(std::back_inserter(current.ns_decl_string), " xmlns:{}=\"{}\"", prefix.to_string_view(), uri.to_string_view());
     }
   }
   inline void Handler::close_ns_scope()
@@ -204,48 +214,94 @@ namespace fsp
     [[maybe_unused]] const XMLCh*               qname,
     [[maybe_unused]] const xercesc::Attributes& attrs)
   {
-    // Advance all candidates matching the current depth
-    for (std::size_t i = 0; i < targets_.targets.size(); ++i)
+    if (active_mask_stack_.empty()) [[unlikely]]
+      logic_error("active_mask_stack_ is empty");
+    RuleMask previous = active_mask_stack_.back();
+    if (previous == 0) return;
+
+    RuleMask current_match = 0; // <<< DODANO
+
+    for (std::size_t i = 0; i < targets_wide_.size(); ++i)
     {
-      // const auto& xpath      = targets_[i];
-      const xpath_wide_t& xpath_wide = targets_wide_[i];
-      int&                m          = matched_[i];
-
-      if (m >= static_cast<int>(xpath_wide.size())) continue;
-
-      // Next step must be at depth m+1 == doc_depth_
-      if (m + 1 != doc_depth_)
+      if ((previous & (1ULL << i)) == 0) continue;
+      const xpath_wide_t& xpath = targets_wide_[i];
+      // Uporabimo doc_depth_ kot indeks koraka (ker XPath začne od 1)
+      if (doc_depth_ > 0 && doc_depth_ <= static_cast<int>(rule_lengths_[i]))
       {
-        if (doc_depth_ <= m) m = 0;
-        continue;
+        const e_tag_wide& step = xpath[doc_depth_ - 1];
+        if (tag_matches(step, localname, uri)) current_match |= (1ULL << i);
       }
-
-      const e_tag_wide& step = xpath_wide[m];
-      if (tag_matches(step, localname, uri)) m++;
     }
 
-    // Check if any xpath is completed
-    for (auto i = 0U; i < targets_wide_.size(); ++i)
-    {
-      if (matched_[i] == static_cast<int>(targets_wide_[i].size()))
-      { // start of the subtree
-        frag_depth_  = 0;
-        target_type_ = static_cast<int>(i);
+    RuleMask new_active = previous & current_match;
+    active_mask_stack_.push_back(new_active);
 
-        // Byte offset of the start of this element ;one character after opening tag '>'
-        frag_start_offset_ = parser_->getSrcOffset(); //
+    // Preveri dokončanje XPath-a
+    for (std::size_t i = 0; i < targets_wide_.size(); ++i)
+    {
+      if (((new_active & (1ULL << i)) != 0U) && (doc_depth_ == static_cast<int>(rule_lengths_[i])))
+      {
+        frag_depth_        = 0;
+        target_type_       = static_cast<int>(i);
+        frag_start_offset_ = parser_->getSrcOffset();
         prefix_            = make_open_tag(qname, attrs);
 
         if (log_trace_) [[unlikely]]
         {
-          auto ln     = x_str(localname).to_string();
-          auto ns_uri = x_str(uri).to_string();
-          log_.trace(fmt::format("tag:'{}' ns:'{}' offset:{} prefix:'{}'", ln, ns_uri, frag_start_offset_, prefix_));
+          log_.trace(fmt::format("tag:'{}' ns:'{}' offset:{} prefix:'{}'",
+                                 x_str(localname).to_string_view(),
+                                 x_str(uri).to_string_view(),
+                                 frag_start_offset_,
+                                 prefix_));
         }
         break;
       }
     }
+    // // Advance all candidates matching the current depth
+    // for (std::size_t i = 0; i < targets_.targets.size(); ++i)
+    // {
+    //   // const auto& xpath      = targets_[i];
+    //   const xpath_wide_t& xpath_wide = targets_wide_[i];
+    //   int&                m          = matched_[i];
+
+    //   if (m >= static_cast<int>(xpath_wide.size())) continue;
+
+    //   // Next step must be at depth m+1 == doc_depth_
+    //   if (m + 1 != doc_depth_)
+    //   {
+    //     if (doc_depth_ <= m) m = 0;
+    //     continue;
+    //   }
+
+    //   const e_tag_wide& step = xpath_wide[m];
+    //   if (tag_matches(step, localname, uri)) m++;
+    // }
+
+    // // Check if any xpath is completed
+    // for (auto i = 0U; i < targets_wide_.size(); ++i)
+    // {
+    //   if (matched_[i] == static_cast<int>(targets_wide_[i].size()))
+    //   { // start of the subtree
+    //     frag_depth_  = 0;
+    //     target_type_ = static_cast<int>(i);
+
+    //     // Byte offset of the start of this element ;one character after opening tag '>'
+    //     frag_start_offset_ = parser_->getSrcOffset(); //
+    //     prefix_            = make_open_tag(qname, attrs);
+
+    //     if (log_trace_) [[unlikely]]
+    //     {
+    //       log_.trace(fmt::format("tag:'{}' ns:'{}' offset:{} prefix:'{}'",
+    //                              x_str(localname).to_string_view(),
+    //                              x_str(uri).to_string_view(),
+    //                              frag_start_offset_,
+    //                              prefix_));
+    //     }
+    //     break;
+    //   }
+    // }
   }
+  [[noreturn]] void Handler::logic_error(const char* msg) const { throw std::runtime_error(std::string("internal error: ") + msg); }
 
   void Handler::startElement(const XMLCh* uri, const XMLCh* localname, const XMLCh* qname, const xercesc::Attributes& attrs)
   {
@@ -253,8 +309,8 @@ namespace fsp
     open_ns_scope();
     doc_depth_++;
     if (log_debug_) [[unlikely]]
-      log_.trace(
-        fmt::format("startElement depth:{:2} local:'{:10}' uri:'{}'", doc_depth_, x_str(localname).to_string(), x_str(uri).to_string()));
+      log_.trace(fmt::format(
+        "startElement depth:{:2} local:'{:10}' uri:'{}'", doc_depth_, x_str(localname).to_string_view(), x_str(uri).to_string_view()));
     if (! is_capturing() && (doc_depth_ <= max_xpath_depth_)) check_xpath_matches(uri, localname, qname, attrs);
     if (is_capturing()) [[likely]]
       frag_depth_++;
@@ -286,14 +342,19 @@ namespace fsp
         counter_++;
         frag_depth_  = -1; // we are outside of capturing
         target_type_ = -1;
+        // restore old active xpath mask
+        if (! active_mask_stack_.empty()) active_mask_stack_.pop_back();
+        else logic_error("active_mask_stack_ empty in endElement");
       }
     }
     doc_depth_--;
     close_ns_scope();
-    // Resetiramo matched_ za pravila ki so globlje od trenutne globine
-    for (auto& m : matched_)
-      if (m > doc_depth_) [[unlikely]]
-        m = doc_depth_; // NOLINT(readability-use-std-min-max)
+
+
+    // // Resetiramo matched_ za pravila ki so globlje od trenutne globine
+    // for (auto& m : matched_)
+    //   if (m > doc_depth_) [[unlikely]]
+    //     m = doc_depth_; // NOLINT(readability-use-std-min-max)
   }
 
   // ============================================================================
@@ -318,6 +379,5 @@ namespace fsp
   {
     if (log_crit_) { log_.critical(prepare_msg(e)); }
   }
-  std::string_view Handler::base_addr() const { return base_addr_; }
 
 } // namespace fsp
