@@ -6,7 +6,7 @@ CompileFlags:
   Remove:
     - -freflection
     - -fcontracts
-    - -fcontract-evaluation-semantic=observe
+    - -fcontract-evaluation-semantic=*
     - -std=c++2c
     - -D__cpp_impl_reflection=202603L
     - -D__glibcxx_reflection=202603L
