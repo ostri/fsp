@@ -110,8 +110,6 @@ namespace
                                                           // also on current level
 
     result.node = fsp::xml_node{safe_uri, safe_tag};
-    // auto low         = limits.low_tag();
-    // auto high        = limits.high_tag();
     if (log_trace) //
       log.trace(fmt::format("current tag: {} {} limits: {}", safe_tag, safe_uri, limits.dump()));
     /// prune if we are:
@@ -120,18 +118,7 @@ namespace
     /// - the tag name is bigger than any available tag name in the list of xpaths we are searching for
     auto first = limits.first();
     auto last  = limits.last();
-    //
-    // std::string_view first_tag = xpaths[first].xpath()[depth].tag;
-    // std::string_view last_tag  = xpaths[last].xpath()[depth].tag;
-    // if ((safe_tag < first_tag))
-    //   return std::unexpected(err_result{.status = xmlTextReaderNext(reader), .err = "Pruning, smaller than first xpath searched"});
-    // if ((safe_tag > last_tag))
-    //   return std::unexpected(err_result{.status = xmlTextReaderNext(reader), .err = "Pruning, grather than last xpath searched"});
-    // bool at_least_one = false;
-    // std::size_t result_value_ndx = -1; // -1 no value, 0..n index of the result value
     if (log_trace) log.trace(fmt::format("{}", xpaths.dump()));
-    // bool at_least_once = false;
-    // for (auto cnt : std::views::iota(first, last + 1))
     for (auto cnt = first; cnt <= last; ++cnt)
     {                                          // compare with all possible options on xpath[depth]
       if (! limits.available()[cnt]) continue; // It has been removed in earlier iterations
@@ -228,7 +215,6 @@ namespace fsp
       return std::unexpected(err);
     }
   }
-
   // ============================================================================
   // [DODANO] Validacijska nit
   // ============================================================================
@@ -809,16 +795,6 @@ namespace fsp
         return std::unexpected(*val_result);
       }
     }
-    // auto       stat = get_stats();
-    // const auto kilo = 1000;
-    // logger_.info(fmt::format("Processing time: {:.3f}sec workers:{} segments:{} (ok:{} err:{}) size:{} byte(s)",
-    //                          stat.processing_time_ms / kilo, // converting from milisecond to seconds
-    //                          stat.active_workers,
-    //                          stat.total_segments,
-    //                          stat.successful_segments,
-    //                          stat.failed_segments,
-    //                          xml_mmap.size()));
-
     success_ = true;
     return {};
   }

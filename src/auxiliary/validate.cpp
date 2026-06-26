@@ -34,11 +34,11 @@ namespace fsp
   void                             EH::handleError(const char* type, const xercesc::SAXParseException& exc)
   {
     // Convert from UTF-16 to UTF-8 for console output
-    auto system_id = fsp::x_str(exc.getSystemId()).to_string();
-    auto message   = fsp::x_str(exc.getMessage()).to_string();
+    auto system_id = fsp::x_str(exc.getSystemId()).to_string_view();
+    auto message   = fsp::x_str(exc.getMessage()).to_string_view();
 
-    lastErrorLocation = fsp::x_str(system_id).to_string();
-    lastErrorMessage  = fsp::x_str(message).to_string();
+    lastErrorLocation = fsp::x_str(system_id).to_string_view();
+    lastErrorMessage  = fsp::x_str(message).to_string_view();
 
     if (! quietMode)
     {
@@ -80,7 +80,7 @@ namespace fsp
     }
     catch (const xercesc::XMLException& e)
     {
-      auto msg = fsp::x_str(e.getMessage()).to_string();
+      auto msg = fsp::x_str(e.getMessage()).to_string_view();
       if (! quietMode) std::cerr << "Failed to load grammar: '" << msg << "\n";
       return false;
     }
@@ -95,14 +95,14 @@ namespace fsp
     }
     catch (const xercesc::XMLException& e)
     {
-      auto msg = fsp::x_str(e.getMessage()).to_string();
+      auto msg = fsp::x_str(e.getMessage()).to_string_view();
       if (! quietMode) { std::cerr << "XML Exception: '" << msg << "'\n"; }
       return false;
     }
     catch (const xercesc::SAXParseException& e)
     {
-      auto msg       = fsp::x_str(e.getMessage()).to_string();
-      auto system_id = fsp::x_str(e.getSystemId()).to_string();
+      auto msg       = fsp::x_str(e.getMessage()).to_string_view();
+      auto system_id = fsp::x_str(e.getSystemId()).to_string_view();
       if (! quietMode)
       {
         std::cerr << "Parse error in '" << system_id << "' line: " << e.getLineNumber() << " column: " << e.getColumnNumber() << "-> '"
@@ -112,7 +112,7 @@ namespace fsp
     }
     catch (const xercesc::SAXException& e)
     {
-      auto msg = fsp::x_str(e.getMessage()).to_string();
+      auto msg = fsp::x_str(e.getMessage()).to_string_view();
       if (! quietMode) { std::cerr << "SAX Exception: '" << msg << "'\n"; }
       return false;
     }

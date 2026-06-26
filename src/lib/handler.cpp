@@ -273,7 +273,7 @@ namespace fsp
         auto        seg        = xml_segment(counter_, target_type_, frag_start_offset_, length, prefix_);
         if (log_debug_) [[unlikely]]
         {
-          log_.debug(fmt::format("pushing to queue: {} {}", x_str(qname).to_string(), seg.dump()));
+          log_.debug(fmt::format("pushing to queue: {} {}", x_str(qname).to_string_view(), seg.dump()));
           log_.trace(fmt::format("{}", seg.dump_all(base_addr_)));
         }
         queue_.push(std::move(seg));
@@ -296,7 +296,7 @@ namespace fsp
   {
     auto col = e.getColumnNumber();
     auto row = e.getLineNumber();
-    auto msg = x_str(e.getMessage()).to_string();
+    auto msg = x_str(e.getMessage()).to_string_view();
     return fmt::format("sax parser '{}' row: {} col: {}", msg, row, col);
   }
   void Handler::warning(const xercesc::SAXParseException& e)
