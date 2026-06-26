@@ -77,7 +77,7 @@ namespace fsp
     current.ns_decl_string.clear();
     current.ns_decl_string.reserve(buf_size);
 
-    // copy ns tring from previous level
+    // copy ns string from previous level
     if (ns_stack_.size() >= 2)
     {
       const auto& previous   = ns_stack_[ns_stack_.size() - 2];
@@ -99,14 +99,9 @@ namespace fsp
 
   inline x_str Handler::resolve_ns(const x_str& prefix) const noexcept
   {
-    // Iščemo od vrha navzdol — globji nivo ima prednost
-    for (const auto& it : std::views::reverse(ns_stack_))
-    {
+    for (const auto& it : std::views::reverse(ns_stack_)) // from top to bottom
       for (const auto& el : it.ns_vec)
-      {
-        if (el.first == prefix) return el.second; // faster than hash for short vectors
-      }
-    }
+        if (el.first == prefix) return el.second;
     return {};
   }
   // ============================================================================
@@ -114,11 +109,8 @@ namespace fsp
   // ============================================================================
   inline bool Handler::tag_matches(const e_tag_wide& tag, const XMLCh* local_name, const XMLCh* ns_uri) const noexcept
   {
-    // Local name se mora vedno ujemati
-    if (tag.tag() != local_name) return false;
-
-    // Brez NS v pravilu — ujema se z vsem
-    if (tag.ns().empty()) return true;
+    if (tag.tag() != local_name) return false;                // localname must match or false
+    if (tag.ns().empty() && (ns_uri == nullptr)) return true; // equal localname and no ns
 
     // Z NS — razrešimo prefix in primerjamo URI
     const XMLCh* expected_uri = resolve_ns(tag.ns()).data();
