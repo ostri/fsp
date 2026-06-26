@@ -27,6 +27,7 @@ namespace fsp
     void                           assign(cstr_t other);
     void                           reset() noexcept;
     void                           reset(XMLCh* ptr) noexcept;
+    void                           reset(XMLCh* ptr, XMLSize_t size) noexcept;
     [[nodiscard]] std::string      to_string() const;
     [[nodiscard]] std::u16string   to_u16string() const;
     [[nodiscard]] std::string_view to_string_view() const;
@@ -47,6 +48,7 @@ namespace fsp
     [[nodiscard]] std::size_t      length() const noexcept;
   private:
     XMLCh*              data_ = nullptr;
+    XMLSize_t           size_ = 0;
     mutable std::string cached_utf8_; //< utf8 equivalent of data_
   };
 } // namespace fsp

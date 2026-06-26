@@ -6,6 +6,7 @@ namespace fsp
 {
   fsp::x_str::x_str(XMLCh* ptr) noexcept
   : data_(xercesc::XMLString::replicate(ptr))
+  , size_(xercesc::XMLString::stringLen(data_))
   {
   }
 
@@ -85,10 +86,12 @@ namespace fsp
     cached_utf8_.clear();
   }
 
-  void x_str::reset(XMLCh* ptr) noexcept
+  void x_str::reset(XMLCh* ptr) noexcept { reset(ptr, xercesc::XMLString::stringLen(ptr)); }
+  void x_str::reset(XMLCh* ptr, XMLSize_t size) noexcept
   {
     if (data_ != nullptr) xercesc::XMLString::release(&data_);
     data_ = ptr;
+    size_ = size;
     cached_utf8_.clear();
   }
 
