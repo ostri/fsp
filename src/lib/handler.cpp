@@ -8,11 +8,9 @@
 #include <xercesc/util/XMLString.hpp>
 namespace fsp
 {
-
   // ============================================================================
   // Konstrukcija
   // ============================================================================
-
   Handler::Handler(proc_data&                    targets,
                    segment_queue&                queue,
                    const fsp_logger&             log,
@@ -38,17 +36,17 @@ namespace fsp
       for (const auto& xp : el.xpath()) { tmp_vec.emplace_back(std::string(xp.ns), std::string(xp.tag)); }
       targets_wide_.push_back(tmp_vec);
     }
-    const std::size_t num_rules = targets_wide_.size();
-    if ((sizeof(all_rules_mask_) * CHAR_BIT) < num_rules) logic_error("more xpaths than 64"); // FIXME ostri initial test
-    all_rules_mask_ = (1ULL << num_rules) - 1ULL;
+    auto              all_rules_mask = 0ULL;
+    const std::size_t num_rules      = targets_wide_.size();
+    if ((sizeof(all_rules_mask) * CHAR_BIT) < num_rules) logic_error("more xpaths than 64"); // FIXME ostri initial test
+    all_rules_mask = (1ULL << num_rules) - 1ULL;
 
     rule_lengths_.reserve(num_rules);
     for (const auto& xp : targets_wide_) rule_lengths_.push_back(xp.size());
     const std::size_t expected_depth_of_the_search_tree = 32;
     active_mask_stack_.reserve(expected_depth_of_the_search_tree); // expected max depth of the xml tree
                                                                    // preallocate to avoid expansion of the vector during the processing
-    active_mask_stack_.emplace_back(all_rules_mask_);
-    // matched_.assign(targets_wide_.size(), 0);
+    active_mask_stack_.emplace_back(all_rules_mask);
     //  root level - alway present
     ns_stack_.emplace_back(ns_level{.depth = -1, .ns_vec = {}, .ns_decl_string = {}});
     if (log_debug_) [[unlikely]]
@@ -56,11 +54,9 @@ namespace fsp
     constexpr const std::size_t max_space_for_make_open_tag = 1024;
     buf_.reserve(max_space_for_make_open_tag);
   }
-
   // ============================================================================
   // NS context stack
   // ============================================================================
-
   inline void Handler::push_ns_mapping(const XMLCh* prefix, const XMLCh* uri) { ns_pending_.emplace_back(x_str(prefix), x_str(uri)); }
 
   inline void Handler::open_ns_scope()
@@ -113,11 +109,9 @@ namespace fsp
     }
     return {};
   }
-
   // ============================================================================
   // Tag matching
   // ============================================================================
-
   inline bool Handler::tag_matches(const e_tag_wide& tag, const XMLCh* local_name, const XMLCh* ns_uri) const noexcept
   {
     // Local name se mora vedno ujemati
@@ -135,7 +129,6 @@ namespace fsp
     }
     return xercesc::XMLString::equals(expected_uri, ns_uri);
   }
-
   /*!
    * The method generates the start part of the opening tag, that is
    * prefixed to the rest of the xml segment that is sent to the worker
@@ -165,14 +158,10 @@ namespace fsp
     buf_ += '>';
     return buf_;
   }
-
   // ============================================================================
-  // SAX2 prefix mapping (pride PRED startElement)
+  // SAX2 prefix mapping (it starts before startElement)
   // ============================================================================
-
   inline void Handler::startPrefixMapping(const XMLCh* prefix, const XMLCh* uri) { push_ns_mapping(prefix, uri); }
-  // void Handler::endPrefixMapping() { }
-
   // ============================================================================
   // startElement
   // ============================================================================
@@ -257,49 +246,6 @@ namespace fsp
         break;
       }
     }
-    // // Advance all candidates matching the current depth
-    // for (std::size_t i = 0; i < targets_.targets.size(); ++i)
-    // {
-    //   // const auto& xpath      = targets_[i];
-    //   const xpath_wide_t& xpath_wide = targets_wide_[i];
-    //   int&                m          = matched_[i];
-
-    //   if (m >= static_cast<int>(xpath_wide.size())) continue;
-
-    //   // Next step must be at depth m+1 == doc_depth_
-    //   if (m + 1 != doc_depth_)
-    //   {
-    //     if (doc_depth_ <= m) m = 0;
-    //     continue;
-    //   }
-
-    //   const e_tag_wide& step = xpath_wide[m];
-    //   if (tag_matches(step, localname, uri)) m++;
-    // }
-
-    // // Check if any xpath is completed
-    // for (auto i = 0U; i < targets_wide_.size(); ++i)
-    // {
-    //   if (matched_[i] == static_cast<int>(targets_wide_[i].size()))
-    //   { // start of the subtree
-    //     frag_depth_  = 0;
-    //     target_type_ = static_cast<int>(i);
-
-    //     // Byte offset of the start of this element ;one character after opening tag '>'
-    //     frag_start_offset_ = parser_->getSrcOffset(); //
-    //     prefix_            = make_open_tag(qname, attrs);
-
-    //     if (log_trace_) [[unlikely]]
-    //     {
-    //       log_.trace(fmt::format("tag:'{}' ns:'{}' offset:{} prefix:'{}'",
-    //                              x_str(localname).to_string_view(),
-    //                              x_str(uri).to_string_view(),
-    //                              frag_start_offset_,
-    //                              prefix_));
-    //     }
-    //     break;
-    //   }
-    // }
   }
   [[noreturn]] void Handler::logic_error(const char* msg) const { throw std::runtime_error(std::string("internal error: ") + msg); }
 
@@ -349,12 +295,6 @@ namespace fsp
     }
     doc_depth_--;
     close_ns_scope();
-
-
-    // // Resetiramo matched_ za pravila ki so globlje od trenutne globine
-    // for (auto& m : matched_)
-    //   if (m > doc_depth_) [[unlikely]]
-    //     m = doc_depth_; // NOLINT(readability-use-std-min-max)
   }
 
   // ============================================================================

@@ -1,11 +1,8 @@
 #pragma once
 
-// #include <spdlog/logger.h>
 #include <string>
 #include <vector>
 #include <string_view>
-
-// [DODANO] future/optional za sprejem validacijske napake iz validacijske niti
 #include <future>
 #include <optional>
 
@@ -41,7 +38,6 @@ namespace fsp
 
     // --- SAX2 ContentHandler ---
     void startPrefixMapping(const XMLCh* prefix, const XMLCh* uri) override;
-    // void endPrefixMapping() override;
     void startElement(const XMLCh* uri, const XMLCh* localname, const XMLCh* qname, const xercesc::Attributes& attrs) override;
     void endElement( //
       [[maybe_unused]] const XMLCh* uri,
@@ -90,9 +86,8 @@ namespace fsp
     proc_data                 targets_;      // xpath rules
     std::vector<xpath_wide_t> targets_wide_; // xpath rules as XMLCh* strings
 
-    std::vector<RuleMask>    active_mask_stack_;  //< stack of active rules
-    std::vector<std::size_t> rule_lengths_;       //< length of the xpaths /rules
-    RuleMask                 all_rules_mask_ = 0; //< current rule mask
+    std::vector<RuleMask>    active_mask_stack_; //< stack of active rules
+    std::vector<std::size_t> rule_lengths_;      //< length of the xpaths /rules
 
     // --- NS definicitons ---
     // stack of NS definitions. Whenever new set of ns definitions occur new push on stack
