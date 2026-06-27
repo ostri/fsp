@@ -2,11 +2,13 @@
 
 #include <string>
 #include <string_view>
+#include <xercesc/util/PlatformUtils.hpp>
 
 namespace fsp
 {
-
-  using cstr_t = std::string_view;
+  using cstr_XMLCh_t = std::basic_string_view<XMLCh>;
+  using str_XMLCh_t  = std::basic_string<XMLCh>;
+  using cstr_t       = std::string_view;
   // Whitespace characters to trim
   constexpr cstr_t WHITESPACE = " \t\n\r";
 
@@ -20,6 +22,7 @@ namespace fsp
   [[nodiscard]] constexpr cstr_t trim(cstr_t str, cstr_t ws = WHITESPACE) noexcept;
 
   std::string escape_xml_attr(std::string_view s);
+  str_XMLCh_t escape_xml_attr_xmlch(cstr_XMLCh_t s);
 
   constexpr cstr_t ltrim(cstr_t str, cstr_t ws) noexcept
   {
