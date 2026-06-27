@@ -80,6 +80,8 @@ function(add_fsp_target TARGET_NAME TYPE)
     # Compile options based on build type
     if(CMAKE_BUILD_TYPE STREQUAL "Release")
         target_compile_options(${TARGET_NAME} PRIVATE ${COMMON_RELEASE_FLAGS})
+    # Enable Link Time Optimization (LTO) specifically for Release targets
+        set_target_properties(${TARGET_NAME} PROPERTIES INTERPROCEDURAL_OPTIMIZATION TRUE)
     elseif(CMAKE_BUILD_TYPE STREQUAL "Profile")
         target_compile_options(${TARGET_NAME} PRIVATE ${COMMON_PROFILE_FLAGS})
         if(NOT TYPE STREQUAL "STATIC")
@@ -216,3 +218,7 @@ add_fsp_target(${b_target} EXECUTABLE ${${b_target}_SOURCES})
 # --- 6. (Optional) Display built targets ---
 message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
 message(STATUS "fsp sources: ${${b_target}_SOURCES}")
+# Add a custom target that runs during every build to print the build type
+add_custom_target(print_build_type ALL
+    COMMAND ${CMAKE_COMMAND} -E echo "Building project in ${CMAKE_BUILD_TYPE} mode."
+)
