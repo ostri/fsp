@@ -62,16 +62,20 @@ namespace fsp
       logger_->info(msg);
   }
 
-  void fsp_logger::debug(std::string_view msg) const
+  void fsp_logger::debug([[maybe_unused]] std::string_view msg) const
   {
+#ifndef NDEBUG
     if (active(lvl_enum::debug)) [[unlikely]]
       logger_->debug(msg);
+#endif
   }
 
-  void fsp_logger::trace(std::string_view msg) const
+  void fsp_logger::trace([[maybe_unused]] std::string_view msg) const
   {
+#ifndef NDEBUG
     if (active(lvl_enum::trace)) [[unlikely]]
       logger_->trace(msg);
+#endif
   }
 
   [[nodiscard]] lvl_enum fsp_logger::level() const noexcept { return static_cast<lvl_enum>(level_); }
@@ -82,7 +86,7 @@ namespace fsp
     logger_->set_level(static_cast<spdlog::level::level_enum>(level_));
   }
 
-  // Pomožna funkcija: zgradi spdlog::pattern_formatter z '%*' flagom za ime niti.
+  // auxiliary function: it builds spdlog::pattern_formatter with '%*' flag for the thread is.
   std::unique_ptr<spdlog::pattern_formatter> fsp_logger::make_formatter(std::string_view pattern)
   {
     std::unordered_map<char, std::unique_ptr<spdlog::custom_flag_formatter>> flags;

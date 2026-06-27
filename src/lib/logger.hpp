@@ -86,5 +86,12 @@ namespace fsp
   };
 
   /// true if level is right for logging
-  [[nodiscard]] inline bool fsp_logger::active(lvl_enum lvl) const noexcept { return static_cast<uint8_t>(lvl) >= level_; }
+  [[nodiscard]] inline bool fsp_logger::active(lvl_enum lvl) const noexcept
+  {
+#ifdef NDEBUG
+    // trace and debug are disabled in release version of the program
+    if (lvl == lvl_enum::trace || lvl == lvl_enum::debug) return false;
+#endif
+    return static_cast<uint8_t>(lvl) >= level_;
+  }
 } // namespace fsp
