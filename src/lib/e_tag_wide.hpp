@@ -1,10 +1,11 @@
 #pragma once
 
+#include "common.hpp"
 #include "x_str.hpp"
 
 namespace fsp
 {
-  using cstr_XMLCh_t = std::basic_string_view<XMLCh>;
+
 
   class e_tag_wide
   {
