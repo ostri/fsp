@@ -359,19 +359,19 @@ namespace fsp
       auto tmp_view = seg.subtree_str(view);
       auto r        = extract_xml_values(tmp_view, seg, ctx);
 
-      auto us = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - t0).count();
-
       if (r)
       {
+        auto us = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - t0).count();
         // res.success = true;
+        // assert(r->values["currency"].front() == "EUR");
         if (log_debug)
         {
-          log.debug(fmt::format("Segment '{}' DOM processing finished '{}'µs (offset={}, len={})", //
+          log.debug(fmt::format("***Segment '{}' DOM processing finished '{}'µs (offset={}, len={})", //
                                 seg.id(),
                                 us,
                                 seg.offset(),
                                 seg.length()));
-          log.debug(fmt::format("{}", r->dump()));
+          log.trace(fmt::format("{}", r->dump()));
         }
         return res;
       }
@@ -510,6 +510,7 @@ namespace fsp
     }
     return res;
   }
+  ///////////////////////////////////////////////////////////////////////////////////////
   /**
    * @brief execution of worker thread
    *
