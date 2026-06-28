@@ -59,11 +59,11 @@ int main(int argc, const char* argv[])
     });
     // --- attributes in header -------------------------------------------------
     static constexpr auto xpath_hdr = std::to_array<fsp::raw_attr>({
-      {.name="msg_id",         .path="x:GrpHdr/MsgId"},
-      {.name="amount_sum",     .path="GrpHdr/TtlIntrBkSttlmAmt"},
-      {.name="amount_sum_cur", .path="GrpHdr/TtlIntrBkSttlmAmt/@Ccy", .is_opt=true},
-      {.name="msg_ts",         .path="x:GrpHdr/CreDtTm",              .is_opt=true},
-      {.name="value_date",     .path="GrpHdr/IntrBkSttlmDt",     .is_opt=true},
+      {.name="msg_id",     .path="x:GrpHdr/MsgId"},
+      {.name="amount_sum", .path="GrpHdr/TtlIntrBkSttlmAmt"},
+      {.name="currency",   .path="GrpHdr/TtlIntrBkSttlmAmt/@Ccy", .is_opt=true},
+      {.name="msg_ts",     .path="x:GrpHdr/CreDtTm",              .is_opt=true},
+      {.name="value_date", .path="GrpHdr/IntrBkSttlmDt",          .is_opt=true},
     });
     // --- attributes in transaction --------------------------------------------
     static constexpr auto xpath_txn = std::to_array<fsp::raw_attr>({
@@ -98,7 +98,7 @@ int main(int argc, const char* argv[])
     fsp::logger_config log_cfg{.enable_console = true,
                                .enable_file    = true,
                                .log_file_path  = "xml_processor.log",
-                               .log_level      = spdlog::level::info, // spdlog::level::info;
+                               .log_level      = spdlog::level::trace, // spdlog::level::info;
                                .logger_name    = "fsp"};
     const auto         no_of_workers = 4U;
     auto               result        = fsp::process_xml_file( //
