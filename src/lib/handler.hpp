@@ -77,7 +77,9 @@ namespace fsp
     [[nodiscard]] x_str resolve_ns(const x_str& prefix) const noexcept;
     // Razreši NS URI za e_tag (enkrat, ko je NS context zgrajen).
     [[nodiscard]] bool tag_matches(const e_tag_wide& tag, const XMLCh* local_name, const XMLCh* ns_uri) const noexcept;
-    std::string        make_open_tag(const XMLCh* qname, const xercesc::Attributes& attrs);
+    // std::vector<std::pair<x_str, x_str>>
+    str_XMLCh_t make_open_tag_new(const XMLCh* qname, const xercesc::Attributes& attrs);
+    std::string make_open_tag(const XMLCh* qname, const xercesc::Attributes& attrs);
     /// prepare message to report exception
     std::string prepare_msg(const xercesc::SAXParseException& e);
     void        rebuild_ns_decl_for_current_level();
@@ -94,9 +96,10 @@ namespace fsp
     // occurs. on endElement of the same tag this is removed.
     struct ns_level
     {
-      int         depth;          // depth in the tree where these ns are valid
-      ns_def_t    ns_vec;         // list of ns that are defined at this level
-      std::string ns_decl_string; //< namespaces as string
+      int      depth;      //< depth in the tree where these ns are valid
+      ns_def_t ns_vec;     //< list of ns that are defined at this level
+                           //      str_t    ns_decl_string; //< namespaces as string
+      str_XMLCh_t ns_decl; //< namespaces as XMLCh
       // public:
       //   ns_level(int d = -1, ns_def_t v = {}, std::string s = {})
       //   : depth(d)
@@ -124,7 +127,8 @@ namespace fsp
     const xercesc::SAX2XMLReader* parser_;    // reference to parser; for getSrcOffs
     const fsp_logger&             log_;       // logger NOLINT(cppcoreguidelines-avoid-const-or-ref-data-members)
     std::string_view              base_addr_; // address of the start of the document
-    std::string                   prefix_;    // opening tag with inherited ns, ns and attributes
+    //    std::string                   prefix_;    // opening tag with inherited ns, ns and attributes
+    str_XMLCh_t prefix_; // opening tag with inherited ns, ns and attributes
 
     // [DODANO] Shared future na katerega validacijska nit postavi napako (ali nullopt).
     // Handler ga polling preverja v startElement() brez blokiranja.
@@ -133,12 +137,13 @@ namespace fsp
     std::shared_future<std::optional<error_info>> val_future_;
     std::size_t                                   element_counter_ = 0; // pooling counter check also "every"
     std::string                                   buf_;                 // space for "make_open_tag"
-    bool                                          log_trace_       = false;
-    bool                                          log_debug_       = false;
-    bool                                          log_info_        = false;
-    bool                                          log_warn_        = false;
-    bool                                          log_err_         = false;
-    bool                                          log_crit_        = false;
+    str_XMLCh_t                                   buf1_;                // space for "make_open_tag" as XMLCh
+    const bool                                    log_trace_       = false;
+    const bool                                    log_debug_       = false;
+    const bool                                    log_info_        = false;
+    const bool                                    log_warn_        = false;
+    const bool                                    log_err_         = false;
+    const bool                                    log_crit_        = false;
     int                                           max_xpath_depth_ = 0;
   };
 
