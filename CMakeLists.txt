@@ -196,9 +196,9 @@ set(FSP_TARGET_${b_target}_INCLUDES ${CMAKE_SOURCE_DIR}/src/auxiliary)
 #     XercesC::XercesC
 #)
 add_fsp_target(${b_target} EXECUTABLE ${${b_target}_SOURCES})
-#
+# -----------------------------------------------------------------------------
 # --- target: test_pars
-#
+# -----------------------------------------------------------------------------
 set(b_target test_pars) # name of the target
 set(${b_target}_SOURCES
     ${CMAKE_SOURCE_DIR}/src/test/test_pars.cpp
@@ -214,7 +214,25 @@ set(FSP_TARGET_${b_target}_LIBS
     magic_enum::magic_enum
 )
 add_fsp_target(${b_target} EXECUTABLE ${${b_target}_SOURCES})
-
+# -----------------------------------------------------------------------------
+# --- target: t_refl
+# -----------------------------------------------------------------------------
+set(b_target t_refl) # name of the target
+set(${b_target}_SOURCES
+    ${CMAKE_SOURCE_DIR}/src/test/t_refl.cpp
+    ${CMAKE_SOURCE_DIR}/src/lib/parsing_util.cpp
+)
+set(FSP_TARGET_${b_target}_INCLUDES
+  ${CMAKE_SOURCE_DIR}/src/lib
+  ${CMAKE_SOURCE_DIR}/src/test
+  )
+set(FSP_TARGET_${b_target}_LIBS
+    fmt::fmt
+    spdlog::spdlog
+    magic_enum::magic_enum
+)
+add_fsp_target(${b_target} EXECUTABLE ${${b_target}_SOURCES})
+#-------------------------------------------------------------------------------
 # --- 6. (Optional) Display built targets ---
 message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
 message(STATUS "fsp sources: ${${b_target}_SOURCES}")
