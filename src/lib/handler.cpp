@@ -49,7 +49,7 @@ namespace fsp
     active_mask_stack_.reserve(expected_depth_of_the_search_tree); // expected max depth of the xml tree
                                                                    // preallocate to avoid expansion of the vector during the processing
     active_mask_stack_.emplace_back(all_rules_mask);
-    //  root level - alway present
+    //  root level - always present
     ns_stack_.emplace_back(ns_level{.depth = -1, .ns_vec = {}, .ns_decl = {}});
     if (log_debug_) [[unlikely]]
       for (std::size_t i = 0; i < targets_.targets.size(); ++i) log_.debug(fmt::format("target[{}] = '{}'", i, targets_.targets[i].name()));
@@ -167,44 +167,6 @@ namespace fsp
     buf_.push_back(u'>');
     return buf_;
   }
-  // /**
-  //  * @brief prepare data for top level segment tag
-  //  *
-  //  * @param qname qualified name (prefix:tag)
-  //  * @param attrs  array of attributes as provided by xercesc
-  //  * @return str_XMLCh_t
-  //  */
-  // str_XMLCh_t Handler::make_open_tag_new(const XMLCh* qname, const xercesc::Attributes& attrs)
-  // {
-  //   const std::size_t buf_size = 4096;
-  //   buf_.clear();
-  //   buf_.reserve(buf_size);
-  //   buf_.append(uR"(<?xml version="1.0" encoding="UTF-8"?><)");
-  //   buf_.append(qname);
-  //   if (! ns_stack_.empty())
-  //   {
-  //     auto ns_list = ns_stack_.back().ns_decl;
-  //     if (log_trace_) log_.trace(fmt::format("namespaces: '{}'", x_str(ns_list).to_string_view()));
-  //     buf_.append(ns_list); // namespaces
-  //   }
-
-  //   // Atributs — xmlns:* skip, they were inserted in the previous loop
-  //   for (XMLSize_t i = 0; i < attrs.getLength(); ++i)
-  //   {
-  //     const auto* qn = attrs.getQName(i);
-  //     if (xercesc::XMLString::startsWith(qn, u"xmlns")) [[unlikely]]
-  //       continue;
-  //     const auto escaped_str = escape_xml_attr_xmlch(attrs.getValue(i));
-  //     buf_.push_back(u' ');
-  //     buf_.append(qn);
-  //     buf_.append(u"=\"");
-  //     buf_.append(escaped_str);
-  //     buf_.append(u"\"");
-  //     ;
-  //   }
-  //   buf_.push_back(u'>');
-  //   return buf_;
-  // }
   // ============================================================================
   // SAX2 prefix mapping (it starts before startElement)
   // ============================================================================
@@ -310,11 +272,9 @@ namespace fsp
     if (is_capturing()) [[likely]]
       frag_depth_++;
   }
-
   // ============================================================================
   // endElement
   // ============================================================================
-
   void Handler::endElement( //
     [[maybe_unused]] const XMLCh* uri,
     [[maybe_unused]] const XMLCh* localname,
@@ -333,8 +293,7 @@ namespace fsp
           frag_start_offset_,
           length,
           ns_,
-          attr_ //,
-        );
+          attr_);
         if (log_debug_) [[unlikely]]
         {
           log_.debug(fmt::format("pushing to queue: {} {}", x_str(qname).to_string_view(), seg.dump()));
