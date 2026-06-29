@@ -73,7 +73,7 @@ namespace fsp
     void               push_ns_mapping(const XMLCh* prefix, const XMLCh* uri);
     [[nodiscard]] bool is_capturing() const { return frag_depth_ != -1; }
     // Translate prefix to uri. Empty string if prefix is not defined
-    [[nodiscard]] x_str resolve_ns(const x_str& prefix) const noexcept;
+    //    [[nodiscard]] x_str resolve_ns(const x_str& prefix) const noexcept;
     // Razreši NS URI za e_tag (enkrat, ko je NS context zgrajen).
     [[nodiscard]] bool tag_matches(const e_tag_wide& tag, const XMLCh* local_name, const XMLCh* ns_uri) const noexcept;
     // str_XMLCh_t        make_open_tag_new(const XMLCh* qname, const xercesc::Attributes& attrs);

@@ -29,7 +29,7 @@ namespace fsp
   , log_crit_(log_.active(lvl_enum::crit))
   , max_xpath_depth_(static_cast<int>(targets_.targets.max_xpath_size()))
   {
-    // targets are converted to wide characters
+    // targets are converted to wide characters to make all matching in XMLCh
     if (targets_wide_.capacity() < targets.targets.size()) targets_wide_.reserve(targets.targets.size());
     for (const auto& el : targets_.targets)
     {
@@ -67,23 +67,22 @@ namespace fsp
     { // new push only if new ns definitions
       ns_stack_.emplace_back(doc_depth_, std::move(ns_pending_));
       ns_pending_.clear(); // clear the buffer, since the contents is on the stack already
-      rebuild_ns_decl_for_current_level();
+      // rebuild_ns_decl_for_current_level() is called only when we have the first full match
     }
   }
   inline void Handler::rebuild_ns_decl_for_current_level()
   {
-    static const int buf_size = 512;
+    static const int buf_size = 4096;
     if (ns_stack_.empty()) return;
 
     auto& current = ns_stack_.back();
-    current.ns_decl.clear();
+    if (! current.ns_decl.empty()) return; // last ns_decl is empty; it was already generated
+
+    // current.ns_decl is empty, there is no need to clear it
     current.ns_decl.reserve(buf_size);
 
     if (ns_stack_.size() >= 2) // copy ns string from previous level if exists
-    {
-      const auto& previous = ns_stack_[ns_stack_.size() - 2];
-      current.ns_decl      = previous.ns_decl;
-    }
+      current.ns_decl = ns_stack_[ns_stack_.size() - 2].ns_decl;
 
     thread_local str_XMLCh_t tmp_str;
     tmp_str.clear();
@@ -104,7 +103,7 @@ namespace fsp
     }
     if (current.ns_decl.capacity() < current.ns_decl.size() + tmp_str.size()) // allocate upfront if necessary
       current.ns_decl.resize(current.ns_decl.size() * 2);
-    current.ns_decl.append(tmp_str.substr(0, tmp_str.size() - 1)); // remove the trailing space
+    current.ns_decl.append(tmp_str.data(), tmp_str.size() - 1); // remove the trailing space
     if (log_trace_)
     {
       log_.trace(fmt::format("append ns:    '{}'", x_str(tmp_str).to_string_view()));
@@ -116,24 +115,30 @@ namespace fsp
     if (ns_stack_.back().depth == doc_depth_) ns_stack_.pop_back();
   }
 
-  inline x_str Handler::resolve_ns(const x_str& prefix) const noexcept
-  {
-    for (const auto& it : std::views::reverse(ns_stack_)) // from top to bottom
-      for (const auto& el : it.ns_vec)
-        if (el.first == prefix) return el.second;
-    return {};
-  }
+  // inline x_str Handler::resolve_ns(const x_str& prefix) const noexcept
+  // {
+  //   for (const auto& it : std::views::reverse(ns_stack_)) // from top to bottom
+  //     for (const auto& el : it.ns_vec)
+  //       if (el.first == prefix) return el.second;
+  //   return {};
+  // }
   // ============================================================================
   // Tag matching
   // ============================================================================
+  /**
+   * @brief compare current tag (local_name + ns_uri) with tag from xpath
+   *
+   * @param tag tag from the xpath (ns is already uri)
+   * @param local_name parser tag local name
+   * @param ns_uri parser tag uri
+   * @return true xpath node and current node are the same
+   * @return false xpath node and current node are different
+   */
   inline bool Handler::tag_matches(const e_tag_wide& tag, const XMLCh* local_name, const XMLCh* ns_uri) const noexcept
   {
-    //    if (tag.tag() != local_name) return false;                // localname must match or false
     if (! xercesc::XMLString::equals(tag.tag().data(), local_name)) return false; // localname must match or false
     if (tag.ns().empty() && (ns_uri == nullptr)) return true;                     // equal localname and no ns
-    const XMLCh* expected_uri = resolve_ns(tag.ns()).data();                      // find uri from prefix
-    if (nullptr == expected_uri) return tag.ns() == ns_uri;                       // unknown prefix; maybe prefix is uri
-    return xercesc::XMLString::equals(expected_uri, ns_uri);
+    return xercesc::XMLString::equals(tag.ns().data(), ns_uri); // tag.ns() is already uri. it was converted during the compile time
   }
   /**
    * @brief extract attribute values from attrs structure
@@ -153,7 +158,7 @@ namespace fsp
     for (XMLSize_t i = 0; i < attrs.getLength(); ++i)
     {
       const auto* qn = attrs.getQName(i);
-      // Atributs — xmlns:* skip, they were inserted in the previous loop
+      // Attributes — xmlns:* skip, they were inserted in the previous loop
       if (xercesc::XMLString::startsWith(qn, u"xmlns")) [[unlikely]] // skip NS definitions
         continue;
       const auto escaped_str = escape_xml_attr_xmlch(attrs.getValue(i));
@@ -237,6 +242,7 @@ namespace fsp
     { // rule/xpath is still active and current path is full
       if (((new_active & (1ULL << i)) != 0U) && (doc_depth_ == static_cast<int>(rule_lengths_[i])))
       {
+        rebuild_ns_decl_for_current_level(); // we have first hit. we should recalculate the the ns string
         frag_depth_        = 0;
         seg_type_          = static_cast<int>(i);
         frag_start_offset_ = parser_->getSrcOffset();
