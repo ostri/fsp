@@ -202,7 +202,7 @@ namespace fsp
       parser_->setFeature(xercesc::XMLUni::fgSAX2CoreValidation, false);   // must be false
       parser_->setFeature(xercesc::XMLUni::fgXercesCalculateSrcOfs, true); // we need offset
       parser_->setFeature(xercesc::XMLUni::fgSAX2CoreNameSpaces, true);    // we need namespaces
-      parser_->setFeature(xercesc::XMLUni::fgSAX2CoreNameSpacePrefixes, true);
+      parser_->setFeature(xercesc::XMLUni::fgSAX2CoreNameSpacePrefixes, false);
       // NOLINTEND(hicpp-no-array-decay)
 
       logger_.debug("Parser (no-validation) setup ok");
