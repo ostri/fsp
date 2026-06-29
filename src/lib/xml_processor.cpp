@@ -73,7 +73,7 @@ namespace
       if (xp.is_attr()) // attribute xpath
       {
         auto value = process_attribute(reader, xp);
-        seg_result.values[xp.name()].emplace_back(value);
+        seg_result.values()[xp.name()].emplace_back(value);
         if (log_debug) log.debug(fmt::format("attribute name: '{}' tag: {} value: '{}'", xp.name(), xp.attr_name(), value));
         return -1;
       }
@@ -118,7 +118,7 @@ namespace
     /// - the tag name is bigger than any available tag name in the list of xpaths we are searching for
     auto first = limits.first();
     auto last  = limits.last();
-    if (log_trace) log.trace(fmt::format("{}", xpaths.dump()));
+    // if (log_trace) log.trace(fmt::format("{}", xpaths.dump()));
     for (auto cnt = first; cnt <= last; ++cnt)
     {                                          // compare with all possible options on xpath[depth]
       if (! limits.available()[cnt]) continue; // It has been removed in earlier iterations
@@ -341,10 +341,10 @@ namespace fsp
    */
   result<segment_result> xml_processor::process_segment(const worker_context& ctx, const xml_segment& seg)
   {
-    auto           t0 = std::chrono::steady_clock::now();
-    segment_result res;
-    res.segment_id        = seg.id();
-    res.xpath_index       = seg.subtree_type();
+    auto t0 = std::chrono::steady_clock::now();
+    // segment_result res;
+    // res.seg_id_           = seg.id();
+    // res.seg_type_         = seg.subtree_type();
     const auto& log       = ctx.log;
     const bool  log_debug = log.active(fsp::lvl_enum::debug);
 
@@ -366,13 +366,14 @@ namespace fsp
         // assert(r->values["currency"].front() == "EUR");
         if (log_debug)
         {
-          log.debug(fmt::format("***Segment '{}' DOM processing finished '{}'µs (offset={}, len={})", //
+          log.debug(fmt::format("Segment '{}' DOM processing finished '{}'µs (offset={}, len={})", //
                                 seg.id(),
                                 us,
                                 seg.offset(),
                                 seg.length()));
           log.trace(fmt::format("{}", r->dump()));
         }
+        segment_result res(seg.id(), seg.subtree_type(), r.value().values());
         return res;
       }
 
@@ -384,21 +385,21 @@ namespace fsp
         0UL);
       if (log.active(fsp::lvl_enum::warn))
         log.warn(fmt::format("Segment {}: {} :: {}", seg.id(), r.error().message(), seg.dump_all(ctx.xml_mmap.data())));
-      return res;
+      return std::unexpected(err);
     }
     catch (const std::exception& e)
     {
       // res.success       = false;
       auto error_message = fmt::format("Exception in segment {}: '{}'", seg.id(), e.what());
-      if (log.active(fsp::lvl_enum::err)) log.error(fmt::format("{}", error_message));
-      return res;
+      log.error(fmt::format("{}", error_message));
+      throw;
     }
   }
 
   // NOLINTNEXTLINE(readability-function-cognitive-complexity)
   result<segment_result> xml_processor::extract_xml_values(cstr_t xml_buf, const xml_segment& seg, const worker_context& ctx)
   {
-    segment_result res;
+    segment_result res(seg.id(), seg.subtree_type());
     // NOLINTNEXTLINE(hicpp-signed-bitwise)
     auto flags = (XML_PARSE_NOCDATA | XML_PARSE_NOERROR | XML_PARSE_NOWARNING | XML_PARSE_NOBLANKS | XML_PARSE_NONET);
 
@@ -435,7 +436,7 @@ namespace fsp
       switch (enum_type)
       {
       case XML_READER_TYPE_ELEMENT:
-      {
+      { // open tag
         auto x = process_and_prune_node(reader.get(), xpaths, tree_stack, limits, log, res);
         if (! x)
         { // FIXME too deep is critical error handle it properly
@@ -446,8 +447,9 @@ namespace fsp
         value_ndx = x.value().status;
         if (log_debug)
         {
-          if (indent.size() < depth * 2) indent.assign(depth * 2 * 2, pad);
-          log.debug(fmt::format("seg:{:5} {}{} value_ndx: {}", seg.id(), indent.substr(depth * 2), tree_stack.top().node.tag(), value_ndx));
+          // if (indent.size() < depth * 2) indent.assign(depth * 2 * 2, pad);
+          log.debug(
+            fmt::format("**seg:{:5} {}{} value_ndx: {}", seg.id(), indent.substr(0, depth * 2), tree_stack.top().node.tag(), value_ndx));
         }
         break;
       }
@@ -457,14 +459,14 @@ namespace fsp
         { // we have value that we need to remember
           const auto* value      = reinterpret_cast<const char*>(xmlTextReaderConstValue(reader.get()));
           cstr_t      value_name = xpaths[value_ndx].name();
-          res.values[value_name].emplace_back(value != nullptr ? value : "");
+          res.values()[value_name].emplace_back(value != nullptr ? value : "");
           value_ndx = -1; // again undefined
           if (log_debug)
           {
             if (indent.size() < depth * 2) indent.assign(depth * 2 * 2, pad);
-            log.debug(fmt::format("seg:{:5} {}name: {} tag:'{}' value: {}",
+            log.debug(fmt::format("++seg:{:5} {}name: {} tag:'{}' value: {}",
                                   seg.id(),
-                                  indent.substr(depth * 2),
+                                  indent.substr(0, (depth * 2) + 2),
                                   value_name,
                                   tree_stack.top().node.tag(),
                                   value));
@@ -472,17 +474,17 @@ namespace fsp
         }
         else if (log_debug)
         {
-          if (indent.size() < depth * 2) indent.assign(depth * 2 * 2, pad);
-          log.debug(fmt::format("seg:{:5} {} tag: {} no value", seg.id(), indent.substr(depth * 2), tree_stack.top().node.tag()));
+          // if (indent.size() < depth * 2) indent.assign(depth * 2 * 2, pad);
+          log.debug(fmt::format("--seg:{:5} {} tag: {} no value", seg.id(), indent.substr(0, depth * 2), tree_stack.top().node.tag()));
         }
         break;
       }
       case XML_READER_TYPE_END_ELEMENT:
-      {
+      {                // close tag
         if (log_debug) // -2 to align with start element
         {
-          if (indent.size() < depth * 2) indent.assign(depth * 2 * 2, pad);
-          log.debug(fmt::format("seg:{:5} {}/{}", seg.id(), indent.substr(depth * 2), tree_stack.top().node.tag()));
+          // if (indent.size() < depth * 2) indent.assign(depth * 2 * 2, pad);
+          log.debug(fmt::format("seg:{:5} {}/{}", seg.id(), indent.substr(0, depth * 2), tree_stack.top().node.tag()));
         }
         tree_stack.pop();
         break;
@@ -554,9 +556,9 @@ namespace fsp
       }
       else
       {
-        segment_result err_res;
-        err_res.segment_id  = seg.id();
-        err_res.xpath_index = seg.subtree_type();
+        segment_result err_res(seg.id(), seg.subtree_type());
+        // err_res.seg_id_   = seg.id();
+        // err_res.seg_type_ = seg.subtree_type();
         std::lock_guard lock(ctx.errors_mutex);
         ctx.errors.push_back(std::move(err_res));
         ctx.error_count++;

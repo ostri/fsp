@@ -19,8 +19,8 @@ namespace fsp
   : targets_(targets) //
   , queue_(queue)     //
   , parser_(parser)
-  , log_(log)             //
-  , base_addr_(base_addr) //
+  , log_(log)       //
+  , doc_(base_addr) //
   , log_trace_(log_.active(lvl_enum::trace))
   , log_debug_(log_.active(lvl_enum::debug))
   , log_info_(log_.active(lvl_enum::info))
@@ -30,9 +30,11 @@ namespace fsp
   , max_xpath_depth_(static_cast<int>(targets_.targets.max_xpath_size()))
   {
     // targets are converted to wide characters
+    if (targets_wide_.capacity() < targets.targets.size()) targets_wide_.reserve(targets.targets.size());
     for (const auto& el : targets_.targets)
     {
       xpath_wide_t tmp_vec;
+      if (tmp_vec.capacity() < el.path().size()) tmp_vec.reserve(el.xpath().size());
       for (const auto& xp : el.xpath()) { tmp_vec.emplace_back(std::string(xp.ns), std::string(xp.tag)); }
       targets_wide_.push_back(tmp_vec);
     }
@@ -77,19 +79,36 @@ namespace fsp
     current.ns_decl.clear();
     current.ns_decl.reserve(buf_size);
 
-    // copy ns string from previous level
-    if (ns_stack_.size() >= 2)
+    if (ns_stack_.size() >= 2) // copy ns string from previous level if exists
     {
       const auto& previous = ns_stack_[ns_stack_.size() - 2];
       current.ns_decl      = previous.ns_decl;
     }
 
+    thread_local str_XMLCh_t tmp_str;
+    tmp_str.clear();
+    const std::size_t buf_siz_min = 1024;
+    if (tmp_str.capacity() < buf_siz_min) tmp_str.reserve(buf_siz_min);
     // add only declarations of the current level
     for (const auto& [prefix, uri] : current.ns_vec)
     {
-      if (prefix.empty()) [[unlikely]]
-        fmt::format_to(std::back_inserter(current.ns_decl), " xmlns=\"{}\"", uri.to_string_view());
-      else fmt::format_to(std::back_inserter(current.ns_decl), " xmlns:{}=\"{}\"", prefix.to_string_view(), uri.to_string_view());
+      if (prefix.empty()) [[unlikely]] { tmp_str.append(u"xmlns=\""); }
+      else
+      {
+        tmp_str.append(u"xmlns:");
+        tmp_str.append(prefix.data());
+        tmp_str.append(u"=\"");
+      }
+      tmp_str.append(uri.data());
+      tmp_str.append(u"\" ");
+    }
+    if (current.ns_decl.capacity() < current.ns_decl.size() + tmp_str.size()) // allocate upfront if necessary
+      current.ns_decl.resize(current.ns_decl.size() * 2);
+    current.ns_decl.append(tmp_str.substr(0, tmp_str.size() - 1)); // remove the trailing space
+    if (log_trace_)
+    {
+      log_.trace(fmt::format("append ns:    '{}'", x_str(tmp_str).to_string_view()));
+      log_.trace(fmt::format("whole ns str: '{}'", x_str(current.ns_decl).to_string_view()));
     }
   }
   inline void Handler::close_ns_scope()
@@ -109,75 +128,81 @@ namespace fsp
   // ============================================================================
   inline bool Handler::tag_matches(const e_tag_wide& tag, const XMLCh* local_name, const XMLCh* ns_uri) const noexcept
   {
-    if (tag.tag() != local_name) return false;                // localname must match or false
-    if (tag.ns().empty() && (ns_uri == nullptr)) return true; // equal localname and no ns
-    const XMLCh* expected_uri = resolve_ns(tag.ns()).data();  // find uri from prefix
-    if (nullptr == expected_uri) return tag.ns() == ns_uri;   // unknown prefix; maybe prefix is uri
+    //    if (tag.tag() != local_name) return false;                // localname must match or false
+    if (! xercesc::XMLString::equals(tag.tag().data(), local_name)) return false; // localname must match or false
+    if (tag.ns().empty() && (ns_uri == nullptr)) return true;                     // equal localname and no ns
+    const XMLCh* expected_uri = resolve_ns(tag.ns()).data();                      // find uri from prefix
+    if (nullptr == expected_uri) return tag.ns() == ns_uri;                       // unknown prefix; maybe prefix is uri
     return xercesc::XMLString::equals(expected_uri, ns_uri);
   }
-  str_XMLCh_t Handler::make_open_tag_new(const XMLCh* qname, const xercesc::Attributes& attrs)
+  /**
+   * @brief extract attribute values from attrs structure
+   * The method stores the definition and values of the provided attributes in the result string.
+   * warning:
+   * - this method is on critical path it must be as fast as possible
+   *   - hence push_back & append instead of fmt::format
+   *   - string is XMLCh to postpone the utf16->utf8 conversion
+   * @param attrs structure as provided by xercesc
+   * @return str_XMLCh_t tag attribute string ready to be inserted into the tag definition
+   */
+  str_XMLCh_t Handler::attr_values_str(const xercesc::Attributes& attrs)
   {
     const std::size_t buf_size = 4096;
-    buf1_.clear();
-    buf1_.reserve(buf_size);
-    buf1_.append(uR"(<?xml version="1.0" encoding="UTF-8"?><)");
-    buf1_.append(qname);
-    // buf_.append("xxxxxx");
-
-    if (! ns_stack_.empty())
-    {
-      auto ns_list = ns_stack_.back().ns_decl;
-      if (log_trace_) log_.trace(fmt::format("namespaces: '{}'", x_str(ns_list).to_string_view()));
-      buf1_.append(ns_list); // namespaces
-    }
-
-    // Atributs — xmlns:* skip, they were inserted in the previous loop
+    buf_.clear();
+    if (buf_.capacity() < buf_size) buf_.reserve(buf_size);
     for (XMLSize_t i = 0; i < attrs.getLength(); ++i)
     {
-      // const std::string qname = x_str(attrs.getQName(i)).to_string();
-      // const XMLCh* qnameCh = attrs.getQName(i);
       const auto* qn = attrs.getQName(i);
-      if (xercesc::XMLString::startsWith(qn, u"xmlns")) [[unlikely]]
+      // Atributs — xmlns:* skip, they were inserted in the previous loop
+      if (xercesc::XMLString::startsWith(qn, u"xmlns")) [[unlikely]] // skip NS definitions
         continue;
       const auto escaped_str = escape_xml_attr_xmlch(attrs.getValue(i));
-      // buf1_.append(fmt::format(uR"( {}="{}")", qn, escaped_str));
-      buf1_ += ' ';
-      buf1_.append(qn);
-      buf1_.append(u"=\"");
-      buf1_.append(escaped_str);
-      buf1_.append(u"\"");
+      buf_.push_back(u' ');
+      buf_.append(qn);
+      buf_.append(u"=\"");
+      buf_.append(escaped_str);
+      buf_.append(u"\"");
       ;
     }
-    buf1_ += u'>';
-    return buf1_;
+    buf_.push_back(u'>');
+    return buf_;
   }
-  /*!
-   * The method generates the start part of the opening tag, that is
-   * prefixed to the rest of the xml segment that is sent to the worker
-   */
-  // inline std::string Handler::make_open_tag([[maybe_unused]] const XMLCh* qname, const xercesc::Attributes& attrs)
+  // /**
+  //  * @brief prepare data for top level segment tag
+  //  *
+  //  * @param qname qualified name (prefix:tag)
+  //  * @param attrs  array of attributes as provided by xercesc
+  //  * @return str_XMLCh_t
+  //  */
+  // str_XMLCh_t Handler::make_open_tag_new(const XMLCh* qname, const xercesc::Attributes& attrs)
   // {
   //   const std::size_t buf_size = 4096;
   //   buf_.clear();
   //   buf_.reserve(buf_size);
-  //   buf_.append(R"(<?xml version="1.0" encoding="UTF-8"?><)");
-  //   buf_.append(x_str(qname).to_string_view());
-  //   // buf_.append("xxxxxx");
-
-  //   if (! ns_stack_.empty()) buf_.append(ns_stack_.back().ns_decl_string); // namespaces
+  //   buf_.append(uR"(<?xml version="1.0" encoding="UTF-8"?><)");
+  //   buf_.append(qname);
+  //   if (! ns_stack_.empty())
+  //   {
+  //     auto ns_list = ns_stack_.back().ns_decl;
+  //     if (log_trace_) log_.trace(fmt::format("namespaces: '{}'", x_str(ns_list).to_string_view()));
+  //     buf_.append(ns_list); // namespaces
+  //   }
 
   //   // Atributs — xmlns:* skip, they were inserted in the previous loop
   //   for (XMLSize_t i = 0; i < attrs.getLength(); ++i)
   //   {
-  //     // const std::string qname = x_str(attrs.getQName(i)).to_string();
-  //     // const XMLCh* qnameCh = attrs.getQName(i);
   //     const auto* qn = attrs.getQName(i);
   //     if (xercesc::XMLString::startsWith(qn, u"xmlns")) [[unlikely]]
   //       continue;
-  //     const auto escaped_str = escape_xml_attr(x_str(attrs.getValue(i)).to_string_view());
-  //     buf_.append(fmt::format(R"( {}="{}")", x_str(qn).to_string_view(), escaped_str));
+  //     const auto escaped_str = escape_xml_attr_xmlch(attrs.getValue(i));
+  //     buf_.push_back(u' ');
+  //     buf_.append(qn);
+  //     buf_.append(u"=\"");
+  //     buf_.append(escaped_str);
+  //     buf_.append(u"\"");
+  //     ;
   //   }
-  //   buf_ += '>';
+  //   buf_.push_back(u'>');
   //   return buf_;
   // }
   // ============================================================================
@@ -190,7 +215,6 @@ namespace fsp
   // ============================================================================
   // Helper inline methods (add declarations to handler.hpp)
   // ============================================================================
-
   inline void Handler::check_validation_status()
   {
     // [DODANO] Polling preverjanje validacijske napake iz vzporedne niti.
@@ -220,10 +244,10 @@ namespace fsp
   }
 
   inline void Handler::check_xpath_matches( //
-    const XMLCh*                                uri,
-    const XMLCh*                                localname,
-    [[maybe_unused]] const XMLCh*               qname,
-    [[maybe_unused]] const xercesc::Attributes& attrs)
+    const XMLCh*                  uri,
+    const XMLCh*                  localname,
+    [[maybe_unused]] const XMLCh* qname,
+    const xercesc::Attributes&    attrs)
   {
     if (active_mask_stack_.empty()) [[unlikely]]
       logic_error("active_mask_stack_ is empty");
@@ -254,18 +278,19 @@ namespace fsp
       if (((new_active & (1ULL << i)) != 0U) && (doc_depth_ == static_cast<int>(rule_lengths_[i])))
       {
         frag_depth_        = 0;
-        target_type_       = static_cast<int>(i);
+        seg_type_          = static_cast<int>(i);
         frag_start_offset_ = parser_->getSrcOffset();
-        //        prefix_            = make_open_tag(qname, attrs);
-        prefix_ = make_open_tag_new(qname, attrs);
+        if (! ns_stack_.empty()) ns_ = ns_stack_.back().ns_decl;
+        if (attrs.getLength() > 0) attr_ = attr_values_str(attrs);
 
         if (log_trace_) [[unlikely]]
         {
-          log_.trace(fmt::format("tag:'{}' ns:'{}' offset:{} prefix:'{}'",
+          log_.trace(fmt::format("tag:'{}' ns:'{}' offset:{} ns list:'{}' attr list: '{}'",
                                  x_str(localname).to_string_view(),
                                  x_str(uri).to_string_view(),
                                  frag_start_offset_,
-                                 x_str(prefix_).to_string_view()));
+                                 x_str(ns_).to_string_view(),
+                                 x_str(attr_).to_string_view()));
         }
         break; // there can be only one xpath fullfiled at once (we don't cut over attributes)
       }
@@ -304,22 +329,21 @@ namespace fsp
         std::size_t length     = end_offset - frag_start_offset_;
         auto        seg        = xml_segment( //
           counter_,
-          target_type_,
+          seg_type_,
           frag_start_offset_,
           length,
-          x_str(prefix_),
-          x_str(ns_stack_.back().ns_decl),
-          x_str(localname),
-          x_str(uri));
+          ns_,
+          attr_ //,
+        );
         if (log_debug_) [[unlikely]]
         {
           log_.debug(fmt::format("pushing to queue: {} {}", x_str(qname).to_string_view(), seg.dump()));
-          log_.trace(fmt::format("{}", seg.dump_all(base_addr_)));
+          log_.trace(fmt::format("{}", seg.dump_all(doc_)));
         }
         queue_.push(std::move(seg));
         counter_++;
-        frag_depth_  = -1; // we are outside of capturing
-        target_type_ = -1;
+        frag_depth_ = -1; // we are outside of capturing
+        seg_type_   = -1; // undefined segment type
         // restore old active xpath mask
         if (! active_mask_stack_.empty()) active_mask_stack_.pop_back();
         else [[unlikely]] logic_error("active_mask_stack_ empty in endElement");
@@ -328,7 +352,6 @@ namespace fsp
     doc_depth_--;
     close_ns_scope();
   }
-
   // ============================================================================
   // Error handler
   // ============================================================================
@@ -351,5 +374,4 @@ namespace fsp
   {
     if (log_crit_) { log_.critical(prepare_msg(e)); }
   }
-
 } // namespace fsp

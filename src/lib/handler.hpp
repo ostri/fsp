@@ -50,7 +50,7 @@ namespace fsp
     void fatalError(const xercesc::SAXParseException& e) override;
 
     [[nodiscard]] std::size_t segments_found() const noexcept;
-    [[nodiscard]] cstr_t      base_addr() const;
+    [[nodiscard]] cstr_t      doc() const;
     // [DODANO] Injicira shared_future iz xml_processor::process_from_buffer.
     // Handler ga polling preverja v startElement() in ob napaki vrže
     // SAXParseException, ki jo Xerces uporabi kot signal za prekinitev parsinga.
@@ -61,11 +61,10 @@ namespace fsp
     [[noreturn]] void logic_error(const char* msg) const;
     // --- helper methods ---------
     void check_validation_status();
-    void check_xpath_matches( //
-      const XMLCh*               uri,
-      const XMLCh*               localname,
-      const XMLCh*               qname,
-      const xercesc::Attributes& attrs);
+    void check_xpath_matches(const XMLCh*               uri,
+                             const XMLCh*               localname,
+                             const XMLCh*               qname, // it is not used to make it faster
+                             const xercesc::Attributes& attrs);
     // --- NS context stack ---
     // Vsak nivo je map prefix→uri za en XML element scope.
     // open_ns_scope() potisne nov nivo, close_ns_scope() ga odstrani.
@@ -77,9 +76,9 @@ namespace fsp
     [[nodiscard]] x_str resolve_ns(const x_str& prefix) const noexcept;
     // Razreši NS URI za e_tag (enkrat, ko je NS context zgrajen).
     [[nodiscard]] bool tag_matches(const e_tag_wide& tag, const XMLCh* local_name, const XMLCh* ns_uri) const noexcept;
-    // std::vector<std::pair<x_str, x_str>>
-    str_XMLCh_t make_open_tag_new(const XMLCh* qname, const xercesc::Attributes& attrs);
+    // str_XMLCh_t        make_open_tag_new(const XMLCh* qname, const xercesc::Attributes& attrs);
     std::string make_open_tag(const XMLCh* qname, const xercesc::Attributes& attrs);
+    str_XMLCh_t attr_values_str(const xercesc::Attributes& attrs);
     /// prepare message to report exception
     std::string prepare_msg(const xercesc::SAXParseException& e);
     void        rebuild_ns_decl_for_current_level();
@@ -100,55 +99,49 @@ namespace fsp
       ns_def_t ns_vec;     //< list of ns that are defined at this level
                            //      str_t    ns_decl_string; //< namespaces as string
       str_XMLCh_t ns_decl; //< namespaces as XMLCh
-      // public:
-      //   ns_level(int d = -1, ns_def_t v = {}, std::string s = {})
-      //   : depth(d)
-      //   , ns_vec(std::move(v))
-      //   , ns_decl_string(std::move(s))
-      //   {
-      //   }
     };
-    std::vector<ns_level> ns_stack_;
-    // the ns_pending_structure is a temporary buffer that transfers information between
-    // methods startPrefixMapping and startElement
-    ns_def_t ns_pending_;
-    // // --- Matching state ---
-    // std::vector<int> matched_;
-    int doc_depth_ = 0; // depth in the document (1 = koreni elem.)
+    std::vector<ns_level> ns_stack_; // stack of namespaces associated with xml tags
+                                     // It is pushed on startElement tag where ns are provided
+                                     // It is popped on endElement tag
+
+    ns_def_t ns_pending_; // the ns_pending_structure is a temporary buffer that transfers information between
+                          // methods startPrefixMapping and startElement. It is cleared after startElement
+    int doc_depth_ = 0;   // depth in the document (1 = root elem.)
     // --- Fragment akumulacija ---
     int         frag_depth_        = -1; // depth inside the fragment
-    int         target_type_       = -1; // which subtry type we are processing
+    int         seg_type_          = -1; // type/structure of the segment. document is split into segments.
     std::size_t frag_start_offset_ = 0;  // byte offset of start of the fragment
 
     // --- Output ---
-    [[maybe_unused]] segment_queue& queue_; // NOLINT(cppcoreguidelines-avoid-const-or-ref-data-members)
-    std::size_t                     counter_ = 0;
+    // queue of segments that is filled by handler and emptied by workers
+    segment_queue& queue_;       // NOLINT(cppcoreguidelines-avoid-const-or-ref-data-members)
+    std::size_t    counter_ = 0; // counter to obtain unique segment id within the file
 
-    const xercesc::SAX2XMLReader* parser_;    // reference to parser; for getSrcOffs
-    const fsp_logger&             log_;       // logger NOLINT(cppcoreguidelines-avoid-const-or-ref-data-members)
-    std::string_view              base_addr_; // address of the start of the document
-    //    std::string                   prefix_;    // opening tag with inherited ns, ns and attributes
-    str_XMLCh_t prefix_; // opening tag with inherited ns, ns and attributes
+    const xercesc::SAX2XMLReader* parser_; // reference to parser; for getSrcOffs
+    const fsp_logger&             log_;    // logger NOLINT(cppcoreguidelines-avoid-const-or-ref-data-members)
+    cstr_t                        doc_;    // xml document mapped as string view over mmap file
+    str_XMLCh_t                   ns_;     // current and inherited namespaces as string (for current segmetn)
+    str_XMLCh_t                   attr_;   // current tag attributes as a string (for current segment)
 
     // [DODANO] Shared future na katerega validacijska nit postavi napako (ali nullopt).
     // Handler ga polling preverja v startElement() brez blokiranja.
     // Inicializiran kot neveljaven (valid() == false) — brez validacije se ne
     // preveri nikoli in ne povzroča overhead-a.
-    std::shared_future<std::optional<error_info>> val_future_;
-    std::size_t                                   element_counter_ = 0; // pooling counter check also "every"
-    std::string                                   buf_;                 // space for "make_open_tag"
-    str_XMLCh_t                                   buf1_;                // space for "make_open_tag" as XMLCh
-    const bool                                    log_trace_       = false;
-    const bool                                    log_debug_       = false;
-    const bool                                    log_info_        = false;
-    const bool                                    log_warn_        = false;
-    const bool                                    log_err_         = false;
-    const bool                                    log_crit_        = false;
-    int                                           max_xpath_depth_ = 0;
+    using valid_future = std::shared_future<std::optional<error_info>>; // validation future
+    valid_future val_future_;
+    std::size_t  element_counter_ = 0; // pooling counter check also "every"
+    str_XMLCh_t  buf_;                 // space for "make_open_tag" as XMLCh
+    const bool   log_trace_       = false;
+    const bool   log_debug_       = false;
+    const bool   log_info_        = false;
+    const bool   log_warn_        = false;
+    const bool   log_err_         = false;
+    const bool   log_crit_        = false;
+    int          max_xpath_depth_ = 0;
   };
 
   inline std::size_t Handler::segments_found() const noexcept { return counter_; }
-  inline cstr_t      Handler::base_addr() const { return base_addr_; }
+  inline cstr_t      Handler::doc() const { return doc_; }
   inline void        Handler::set_validation_future(std::shared_future<std::optional<error_info>> f) { val_future_ = std::move(f); }
 
 } // namespace fsp

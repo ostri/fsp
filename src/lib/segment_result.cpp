@@ -1,21 +1,30 @@
 #include "segment_result.hpp"
-
-std::string fsp::segment_result::dump(int offs)
+namespace fsp
 {
-  std::string msg = fmt::format(R"({}seg: {} xpath ndx: {}
-values:
-)",
-                                std::string(offs, ' '),
-                                segment_id,
-                                xpath_index);
-  for (const auto& [key, el] : values)
+
+  std::size_t segment_result::seg_id() const { return seg_id_; }
+
+  int segment_result::seg_type() const { return seg_type_; }
+
+  const xpath_result& segment_result::values() const { return values_; }
+  xpath_result&       segment_result::values() { return values_; }
+
+  std::string fsp::segment_result::dump(int offs)
   {
-    std::string m;
-    for (auto e : el) m += fmt::format("{}, ", e);
-    msg += fmt::format(R"([{}] = {}
+    std::string msg = fmt::format(R"({}seg: {} seg type: {} values:
 )",
-                       key,
-                       m.substr(0, m.size() - 2));
+                                  std::string(offs, ' '),
+                                  seg_id_,
+                                  seg_type_);
+    for (const auto& [key, el] : values_)
+    {
+      std::string m;
+      for (auto e : el) m += fmt::format("'{}', ", e); // set of values
+      msg += fmt::format(R"(  [{}] = [{}]
+)",
+                         key,
+                         m.substr(0, m.size() - 2));
+    }
+    return msg.substr(0, msg.size() - 1); // remove trailing nl
   }
-  return msg;
-}
+} // namespace fsp
