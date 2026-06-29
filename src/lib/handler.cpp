@@ -206,10 +206,10 @@ namespace fsp
   }
 
   inline void Handler::check_xpath_matches( //
-    const XMLCh*                  uri,
-    const XMLCh*                  localname,
-    [[maybe_unused]] const XMLCh* qname,
-    const xercesc::Attributes&    attrs)
+    const XMLCh* uri,
+    const XMLCh* localname,
+    //    [[maybe_unused]] const XMLCh* qname,
+    const xercesc::Attributes& attrs)
   {
     if (active_mask_stack_.empty()) [[unlikely]]
       logic_error("active_mask_stack_ is empty");
@@ -218,17 +218,15 @@ namespace fsp
 
     RuleMask current_match = 0;
     if (doc_depth_ <= 0) [[unlikely]]
-      logic_error("doc_depth_ is <= 0: should be greter than that");
+      logic_error("doc_depth_ is <= 0: should be greter than 0");
     for (std::size_t i = 0; i < targets_wide_.size(); ++i)
     {
-      if ((previous & (1ULL << i)) == 0) continue; // skip if already eliminated in previous step
+      if ((previous & (1ULL << i)) == 0) continue;                   // skip if already eliminated in previous step
+      if (doc_depth_ > static_cast<int>(rule_lengths_[i])) continue; // too deep; skip to next
       const xpath_wide_t& xpath = targets_wide_[i];
-      // doc_depth_ as index of xpath step (ker XPath starts with 1)
-      if (doc_depth_ <= static_cast<int>(rule_lengths_[i])) // we are within the current xpath
-      {
-        const e_tag_wide& step = xpath[doc_depth_ - 1];
-        if (tag_matches(step, localname, uri)) current_match |= (1ULL << i);
-      }
+      // doc_depth_ as index of xpath step
+      const e_tag_wide& step = xpath[doc_depth_ - 1];
+      if (tag_matches(step, localname, uri)) current_match |= (1ULL << i);
     }
 
     RuleMask new_active = previous & current_match;
@@ -260,7 +258,10 @@ namespace fsp
   }
   [[noreturn]] void Handler::logic_error(const char* msg) const { throw std::runtime_error(std::string("internal error: ") + msg); }
 
-  void Handler::startElement(const XMLCh* uri, const XMLCh* localname, const XMLCh* qname, const xercesc::Attributes& attrs)
+  void Handler::startElement(const XMLCh*                  uri,
+                             const XMLCh*                  localname,
+                             [[maybe_unused]] const XMLCh* qname,
+                             const xercesc::Attributes&    attrs)
   {
     check_validation_status();
     open_ns_scope();
@@ -268,7 +269,7 @@ namespace fsp
     if (log_debug_) [[unlikely]]
       log_.trace(fmt::format(
         "startElement depth:{:2} local:'{:10}' uri:'{}'", doc_depth_, x_str(localname).to_string_view(), x_str(uri).to_string_view()));
-    if (! is_capturing() && (doc_depth_ <= max_xpath_depth_)) check_xpath_matches(uri, localname, qname, attrs);
+    if (! is_capturing() && (doc_depth_ <= max_xpath_depth_)) check_xpath_matches(uri, localname, attrs);
     if (is_capturing()) [[likely]]
       frag_depth_++;
   }
