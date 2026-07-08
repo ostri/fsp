@@ -22,7 +22,7 @@ namespace fsp
   [[nodiscard]] constexpr cstr_t trim(cstr_t str, cstr_t ws = WHITESPACE) noexcept;
 
   std::string escape_xml_attr(std::string_view s);
-  str_XMLCh_t escape_xml_attr_xmlch(cstr_XMLCh_t s);
+  void        escape_xml_attr_xmlch(cstr_XMLCh_t s, str_XMLCh_t& out);
 
   constexpr cstr_t ltrim(cstr_t str, cstr_t ws) noexcept
   {

@@ -161,11 +161,11 @@ namespace fsp
       // Attributes — xmlns:* skip, they were inserted in the previous loop
       if (xercesc::XMLString::startsWith(qn, u"xmlns")) [[unlikely]] // skip NS definitions
         continue;
-      const auto escaped_str = escape_xml_attr_xmlch(attrs.getValue(i));
+      // const auto escaped_str = escape_xml_attr_xmlch(attrs.getValue(i));
       buf_.push_back(u' ');
       buf_.append(qn);
       buf_.append(u"=\"");
-      buf_.append(escaped_str);
+      escape_xml_attr_xmlch(attrs.getValue(i), buf_);
       buf_.append(u"\"");
       ;
     }
@@ -299,8 +299,8 @@ namespace fsp
           seg_type_,
           frag_start_offset_,
           length,
-          ns_,
-          attr_);
+          std::move(ns_),
+          std::move(attr_));
         if (log_debug_) [[unlikely]]
         {
           log_.debug(fmt::format("pushing to queue: {} {}", x_str(qname).to_string_view(), seg.dump()));
