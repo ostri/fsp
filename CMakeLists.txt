@@ -25,29 +25,37 @@ if(MSVC)
     set(COMMON_DEBUG_FLAGS   "/W4" "/Zi" "/Od")
     set(COMMON_LINK_FLAGS    "")
 else()
+    set(COMMON_FLAGS
+        "-Wall" "-Wextra" "-Wpedantic" "-Werror" "-Wnarrowing" "-Wswitch-enum" "-march=native"
+    )
     set(COMMON_RELEASE_FLAGS
-        "-Wall" "-Wextra" "-Wpedantic" "-Werror"
-        "-Wnarrowing" "-Wswitch-enum" "-O3"  "-march=native" "-DNDEBUG" "-freflection" "-fcontracts"
-        "-fcontract-evaluation-semantic=ignore"
+        ${COMMON_FLAGS}
+        "-O3" "-DNDEBUG"
+        "-freflection"
+        # "-fcontracts"
+        # "-fcontract-evaluation-semantic=ignore"
     )
     set(COMMON_DEBUG_FLAGS
-        "-Wall" "-Wextra" "-Wpedantic" "-Werror"
-        "-Wnarrowing" "-Wswitch-enum" "-g" "-O0" "-gdwarf-4"
+        ${COMMON_FLAGS}
+        "-g" "-O0" "-gdwarf-4"
         "-fsanitize=address,undefined,leak"
-        "-fno-omit-frame-pointer" "-freflection" "-fcontracts"
-        "-fcontract-evaluation-semantic=observe"
+        "-fno-omit-frame-pointer"
+        "-freflection"
+        # "-fcontracts"
+        # "-fcontract-evaluation-semantic=observe"
     )
     set(COMMON_PROFILE_FLAGS
-        "-Wall" "-Wextra" "-Wpedantic"
-        "-Wnarrowing" "-Wswitch-enum" "-O3" "-march=native" "-DNDEBUG"
+        ${COMMON_FLAGS}
+        "-O3" "-DNDEBUG"
         "-g" "-gdwarf-4"
         "-fno-omit-frame-pointer"
-        "-pg" "-freflection"
-        "-fcontracts"
-        "-fcontract-evaluation-semantic=observe"
+        "-fno-optimize-sibling-calls"
+        "-freflection"
+        # "-fcontracts"
+        # "-fcontract-evaluation-semantic=ignore"
     )
     set(COMMON_LINK_FLAGS "-fsanitize=address,undefined,leak")
-    set(COMMON_PROFILE_LINK_FLAGS "-pg")
+    set(COMMON_PROFILE_LINK_FLAGS "")
 endif()
 
 # --- 3. Find required packages ---
@@ -84,6 +92,7 @@ function(add_fsp_target TARGET_NAME TYPE)
         set_target_properties(${TARGET_NAME} PROPERTIES INTERPROCEDURAL_OPTIMIZATION TRUE)
     elseif(CMAKE_BUILD_TYPE STREQUAL "Profile")
         target_compile_options(${TARGET_NAME} PRIVATE ${COMMON_PROFILE_FLAGS})
+        set_target_properties(${TARGET_NAME} PROPERTIES INTERPROCEDURAL_OPTIMIZATION TRUE)
         if(NOT TYPE STREQUAL "STATIC")
             target_link_options(${TARGET_NAME} PRIVATE ${COMMON_PROFILE_LINK_FLAGS})
         endif()

@@ -16,6 +16,12 @@ Fast SEPA xml file parser
   cmake -S . -B build/release -DCMAKE_BUILD_TYPE=Release
 ```
 
+### profile configration
+
+```bash
+  cmake -S . -B build/release -DCMAKE_BUILD_TYPE=Profile
+```
+
 ### build
 
 ```bash
@@ -32,10 +38,10 @@ Fast SEPA xml file parser
 ### profiling
 
 ```bash
-    cmake -B build-profile -DCMAKE_BUILD_TYPE=Profile ..
+    cmake -B build-profile -DCMAKE_BUILD_TYPE=Profile
     cmake --build build-profile --target fsp
-    cd build-profile/
-    ./fsp ../../xml-data/pacs8-1M.xml ../../xsd/pacs.008.xsd
-    gprof fsp gmon.out > profile_report.txt
-    gprof fsp gmon.out |head -50
+    cd build-profile
+    perf record -F 999 -g -- ../fsp ../../xml-data/pacs8-1M.xml
+    perf report > report.txt
+    perf report
 ```
