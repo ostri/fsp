@@ -2,14 +2,14 @@
 #include <iostream>
 #include <meta>
 #include <string_view>
-// #include <array>
-// #include <algorithm>
-// #include <iostream>
-#include "parsing_util.hpp"
-
+#include <array>
 #include <string>
 #include <utility>
+// parsing_util.hpp je IZKLJUČEN – povzroča napako pri prevajanju in
+// ni potreben za delovanje refleksije.
+
 using str_t = std::string;
+
 namespace fsp
 {
   using str_t  = std::string;
@@ -22,6 +22,11 @@ namespace fsp
     array
   };
 
+  struct ns
+  {
+    const char* prefix;
+    const char* uri;
+  };
   class xpath
   {
   public:
@@ -30,17 +35,15 @@ namespace fsp
     : xpath(path, node_type::normal, false) { };
     consteval explicit xpath(cstr_t path, bool is_opt)
     : xpath(path, node_type::normal, is_opt) { };
-    consteval xpath( //
-      [[maybe_unused]] cstr_t    path,
-      [[maybe_unused]] node_type type,
-      [[maybe_unused]] bool      is_opt)
+    consteval xpath([[maybe_unused]] cstr_t path, [[maybe_unused]] node_type type, [[maybe_unused]] bool is_opt)
     : path_val(path.data()) { };
-  public:                 //< members
+  public:
     const char* path_val; // NOLINT(misc-non-private-member-variables-in-classes)
   };
+
   struct grammar
-  {              // NOLINTNEXTLINE(misc-non-private-member-variables-in-classes)
-    str_t path_; //< name of the grammar
+  {
+    str_t path_;
     grammar() = default;
     explicit grammar(str_t path)
     : path_(std::move(path))
@@ -48,89 +51,91 @@ namespace fsp
     }
   };
 
-  namespace meta = std::meta;
+  //  namespace meta = std::meta;
 
   void indent(int n)
   {
     for (int i = 0; i != n; ++i) { std::cout << ' '; }
   }
 
-  template <meta::info Item>
+  template <std::meta::info Item>
   static void print_xpath_annotations(int level)
   {
     (void)level;
-
-    template for (constexpr meta::info Ann : std::define_static_array(meta::annotations_of(Item)))
+    // POPRAVEK: "template for" → navadni "for" (range-based)
+    for (constexpr std::meta::info Ann : std::define_static_array(std::meta::annotations_of(Item)))
     {
       indent(level);
-      std::cout << meta::display_string_of(Ann) << "\n";
+      std::cout << std::meta::display_string_of(Ann) << "\n";
     }
   }
 
-  template <meta::info Class>
+  template <std::meta::info Class>
   void print_class(int level)
   {
     indent(level);
-    std::cout << "class " << meta::identifier_of(Class);
-
-    // indent(level + 2);
+    std::cout << "class " << std::meta::identifier_of(Class);
     print_xpath_annotations<Class>(level + 4);
 
-    template for (constexpr meta::info Field :
-                  std::define_static_array(meta::nonstatic_data_members_of(Class, meta::access_context::unchecked())))
+    // POPRAVEK: "template for" → navadni "for" (range-based)
+    for (constexpr std::meta::info Field :
+         std::define_static_array(std::meta::nonstatic_data_members_of(Class, std::meta::access_context::unchecked())))
     {
       indent(level + 2);
-      std::cout << meta::display_string_of(meta::type_of(Field)) << ' ' << meta::identifier_of(Field);
-
-      // indent(level + 4);
+      std::cout << std::meta::display_string_of(std::meta::type_of(Field)) << ' ' << std::meta::identifier_of(Field);
       print_xpath_annotations<Field>(level + 6);
     }
   }
 
-  template <meta::info Namespace>
+  template <std::meta::info Namespace>
   void print_namespace(int level = 0)
   {
     indent(level);
-    std::cout << "namespace " << meta::display_string_of(Namespace) << '\n';
+    std::cout << "namespace " << std::meta::display_string_of(Namespace) << '\n';
     print_xpath_annotations<Namespace>(level + 2);
 
-    template for (constexpr meta::info Member : std::define_static_array(meta::members_of(Namespace, meta::access_context::unchecked())))
+    // POPRAVEK: "template for" → navadni "for" (range-based)
+    for (constexpr std::meta::info Member :
+         std::define_static_array(std::meta::members_of(Namespace, std::meta::access_context::unchecked())))
     {
-      if constexpr (meta::is_type(Member)) { print_class<Member>(level + 2); }
+      if constexpr (std::meta::is_type(Member)) { print_class<Member>(level + 2); }
       else
       {
         indent(level + 2);
-        if constexpr (meta::has_identifier(Member)) { std::cout << meta::identifier_of(Member); }
+        if constexpr (std::meta::has_identifier(Member)) { std::cout << std::meta::identifier_of(Member); }
         else
         {
-          std::cout << meta::display_string_of(Member);
+          std::cout << std::meta::display_string_of(Member);
         }
         std::cout << '\n';
         print_xpath_annotations<Member>(level + 4);
       }
     }
   }
-  template <meta::info Namespace>
+
+  template <std::meta::info Namespace>
   class reflex
   {
   public:
     consteval reflex() = default;
-    // : ns_(meta::display_string_of(Namespace))
-    // , ns_annotation_(load_annotations<Namespace>())
-    // { load_annotations<Namespace>(); }
-    template <meta::info Item>
+
+    template <std::meta::info Item>
     static consteval auto build_ns_annotations()
     {
       constexpr auto anns = std::meta::annotations_of(Namespace);
-
-      std::array<std::string_view, std::meta::size_of(anns)> out{};
-      template for (std::size_t i = 0; i < std::meta::size_of(anns); ++i) out[i] = std::meta::display_string_of(anns[i]);
-
+      // POPRAVEK 1: anns.size() namesto std::std::meta::size_of(anns)
+      //   size_of(info) pričakuje info, ne vector<info>
+      std::array<std::string_view, anns.size()> out{};
+      // POPRAVEK 2: navadna for zanka z indeksom namesto "template for" s C-style obliko
+      //   "template for" podpira SAMO range-based obliko, ne C-style (init; cond; incr)
+      for (std::size_t i = 0; i < anns.size(); ++i) out[i] = std::meta::display_string_of(anns[i]);
       return out;
     }
+
     [[nodiscard]] consteval std::string_view ns() const { return ns_; }
   private:
-    static constexpr auto ns_            = cstr_t(meta::display_string_of(Namespace));
+    static constexpr auto ns_            = cstr_t(std::meta::display_string_of(Namespace));
     static constexpr auto ns_annotation_ = build_ns_annotations<Namespace>();
   };
+
 }; // namespace fsp
