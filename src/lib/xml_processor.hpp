@@ -32,7 +32,9 @@
 
 namespace fsp
 {
-  using cstr_t = std::string_view;
+  using cstr_t            = std::string_view;
+  using processing_result = std::expected<std::pair<std::vector<segment_result>, std::vector<segment_result>>, error_info>;
+
   // Worker context — vse kar worker potrebuje
   // NOLINTBEGIN(cppcoreguidelines-avoid-const-or-ref-data-members)
   struct worker_context
@@ -76,9 +78,14 @@ namespace fsp
       std::size_t active_workers      = 0;
       double      processing_time_ms  = 0.0;
     };
-    [[nodiscard]] stats get_stats() const;
-    [[nodiscard]] bool  is_successful() const { return success_.load(); }
-    void                cancel();
+    [[nodiscard]] stats      get_stats() const;
+    [[nodiscard]] bool       is_successful() const { return success_.load(); }
+    void                     cancel();
+    static processing_result process_xml_file(const std::string&   xml_path,
+                                              const std::string&   xsd_path,
+                                              const proc_data&     proc_data,
+                                              std::size_t          num_workers = 0,
+                                              const logger_config& log_cfg     = logger_config{});
   private: /// methods
     void_result setup_parser_no_validation();
     void_result start_workers();
@@ -123,13 +130,6 @@ namespace fsp
     const fsp::mmap_file*                   active_mmap_ = nullptr; // reference to mmap file (needed by workers)
   };
 
-  using processing_result = std::expected<std::pair<std::vector<segment_result>, std::vector<segment_result>>, error_info>;
-
-  processing_result process_xml_file(const std::string&   xml_path,
-                                     const std::string&   xsd_path,
-                                     const proc_data&     proc_data,
-                                     std::size_t          num_workers = 0,
-                                     const logger_config& log_cfg     = logger_config{});
 
 } // namespace fsp
 

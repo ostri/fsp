@@ -828,18 +828,16 @@ namespace fsp
   // ============================================================================
   // Convenience function
   // ============================================================================
-  processing_result process_xml_file(const std::string&   xml_path,
-                                     const std::string&   xsd_path,
-                                     const proc_data&     proc_data,
-                                     std::size_t          num_workers,
-                                     const logger_config& log_cfg)
+  processing_result xml_processor::process_xml_file(const std::string&   xml_path,
+                                                    const std::string&   xsd_path,
+                                                    const proc_data&     proc_data,
+                                                    std::size_t          num_workers,
+                                                    const logger_config& log_cfg)
   {
-    processor_config cfg;
-    cfg.targets              = proc_data;
-    cfg.num_workers          = num_workers;
-    cfg.validate_against_xsd = ! xsd_path.empty();
-    cfg.log_config           = log_cfg;
-    xml_processor proc(cfg);
+    xml_processor proc({.targets              = proc_data, //
+                        .num_workers          = num_workers,
+                        .validate_against_xsd = ! xsd_path.empty(),
+                        .log_config           = log_cfg});
     auto          res = proc.process_file(xml_path, xsd_path);
     if (! res) return std::unexpected(res.error());
     return std::make_pair(proc.get_results(), proc.get_errors());
