@@ -21,11 +21,13 @@
 
 namespace fsp
 {
-  using cstr_t       = std::string_view;
-  using str_t        = std::string;
-  using cstr_XMLCh_t = std::basic_string_view<XMLCh>;
-  using ns_def_t     = std::vector<std::pair<x_str, x_str>>;
-  using RuleMask     = uint64_t;
+  using cstr_t        = std::string_view;
+  using str_t         = std::string;
+  using cstr_XMLCh_t  = std::basic_string_view<XMLCh>;
+  using ns_def_t      = std::vector<std::pair<x_str, x_str>>;
+  using RuleMask      = uint64_t;
+  using segment_queue = lock_queue<xml_segment>;
+
 
   class Handler : public xercesc::DefaultHandler
   {

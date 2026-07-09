@@ -9,28 +9,86 @@
 
 namespace fsp
 {
-  class segment_queue
+  template <class T>
+  class lock_queue
   {
   public:
-    void push(xml_segment&& s);
-
-    // Blokira dokler ni elementa ali finished.
-    // Vrne false ko je finished in vrsta prazna.
-    bool pop(xml_segment& s);
-
-    void set_finished();
-
-    [[nodiscard]] bool is_finished() const noexcept { return finished.load(); }
-    [[nodiscard]] std::size_t size() const
-    {
-      std::lock_guard lock(mtx);
-      return queue.size();
-    }
-
+    void                      push(xml_segment&& s);        //< add new element ot be processed to the queue
+    bool                      pop(xml_segment& s);          //< block till available element or finished
+    void                      set_finished();               //< we finished processing
+    [[nodiscard]] bool        is_finished() const noexcept; //< are we finished processing?
+    [[nodiscard]] std::size_t size() const;                 //< size of the waiting queue
   private:
-    std::queue<xml_segment> queue;
-    mutable std::mutex      mtx;
-    std::condition_variable cv;
-    std::atomic<bool>       finished{false};
+    std::queue<T>           queue_;
+    mutable std::mutex      mtx_;
+    std::condition_variable cv_;
+    std::atomic<bool>       finished_{false};
   };
+  /// --- implementation ---
+
+  /**
+   * @brief are we finisehd?
+   *
+   * @tparam T element
+   * @return true - yes we finished, no more elements in the queue to be processed
+   * @return false - no we still have elements in the queue to be processed
+   */
+  template <class T>
+  inline bool lock_queue<T>::is_finished() const noexcept
+  { return finished_.load(); }
+  /**
+   * @brief how many elements we have in the queue
+   *
+   * @tparam T element
+   * @return std::size_t number of the elements in the queue
+   */
+  template <class T>
+  inline std::size_t lock_queue<T>::size() const
+  {
+    std::lock_guard lock(mtx_);
+    return queue_.size();
+  }
+  /**
+   * @brief push new element to the queue
+   *
+   * @tparam T element
+   * @param s element to be pushed
+   */
+  template <class T>
+  void lock_queue<T>::push(xml_segment&& s)
+  {
+    {
+      std::lock_guard lock(mtx_);
+      queue_.push(std::move(s));
+    }
+    cv_.notify_one();
+  }
+  /**
+   * @brief block until element or finished
+   *
+   * @param s element to be returned
+   * @return true - there is an element to be processed
+   * @return false - end of work
+   */
+  template <class T>
+  bool lock_queue<T>::pop(xml_segment& s)
+  {
+    std::unique_lock lock(mtx_);
+    cv_.wait(lock, [this] { return ! queue_.empty() || finished_; });
+    if (queue_.empty() && finished_) return false;
+    s = std::move(queue_.front());
+    queue_.pop();
+    return true;
+  }
+  /**
+   * @brief mark processing to be finished
+   *
+   * @tparam T element
+   */
+  template <class T>
+  void lock_queue<T>::set_finished()
+  {
+    finished_ = true;
+    cv_.notify_all();
+  }
 } // namespace fsp

@@ -34,8 +34,9 @@ namespace fsp
 {
   using cstr_t            = std::string_view;
   using processing_result = std::expected<std::pair<std::vector<segment_result>, std::vector<segment_result>>, error_info>;
+  using segment_queue     = lock_queue<xml_segment>;
 
-  // Worker context — vse kar worker potrebuje
+  // Worker context - all data that is needed by the worker
   // NOLINTBEGIN(cppcoreguidelines-avoid-const-or-ref-data-members)
   struct worker_context
   {
