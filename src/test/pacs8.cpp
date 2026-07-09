@@ -6,43 +6,43 @@
 #include <spdlog/common.h>
 #include <string>
 #include <vector>
-int main(int argc, const char* argv[])
+namespace
 {
-  std::vector<std::string> args(argv, argv + argc); // NOLINT (cppcoreguidelines-pro-bounds-pointer-arithmetic)
-  if (argc != 3 && argc != 2)
+  static constexpr auto fetch_ns()
   {
-    static constexpr auto* msg = "Usage: {0} <xml_file> [<xsd_file>] \n"
-                                 "Example: {0} data.xml schema.xsd \n";
-    std::cerr << fmt::format(msg, args[0]);
-    return 1;
-  }
-
-  try
-  {
-    const std::string xml_file(argv[1]);                  // NOLINT
-    const std::string xsd_file(argc == 3 ? argv[2] : ""); // NOLINT
-
     // clang-format off
-    static constexpr auto ns = std::to_array<fsp::ns>({
-      {.prefix = "",   .uri = "urn:iso:std:iso:20022:tech:xsd:pacs.008.001.08"}, // default namespace
-      {.prefix = "x",  .uri = "urn:iso:std:iso:20022:tech:xsd:pacs.008.001.08"}, // default namespace
-      {.prefix = "xy", .uri = "krneki"},      // explicitly defined namespace and prefix
-    });
-    // --- targets --------------------------------------------------------------
-    static constexpr auto targets_raw = std::to_array<fsp::raw_attr>({
-      {.name="header",      .path="/x:Document/FIToFICstmrCdtTrf/x:GrpHdr"},
-      {.name="transaction", .path="/Document/x:FIToFICstmrCdtTrf/x:CdtTrfTxInf"},
-    });
-    // --- attributes in header -------------------------------------------------
-    static constexpr auto xpath_hdr = std::to_array<fsp::raw_attr>({
+  return std::to_array<fsp::ns>({
+    {.prefix = "",   .uri = "urn:iso:std:iso:20022:tech:xsd:pacs.008.001.08"}, // default namespace
+    {.prefix = "x",  .uri = "urn:iso:std:iso:20022:tech:xsd:pacs.008.001.08"}, // default namespace
+    {.prefix = "xy", .uri = "krneki"},      // explicitly defined namespace and prefix
+  });
+    // clang-format on
+  }
+  static constexpr auto fetch_targets()
+  {
+    // clang-format off
+  return std::to_array<fsp::raw_attr>({
+    {.name="header",      .path="/x:Document/FIToFICstmrCdtTrf/x:GrpHdr"},
+    {.name="transaction", .path="/Document/x:FIToFICstmrCdtTrf/x:CdtTrfTxInf"},
+  });
+    // clang-format on
+  }
+  static constexpr auto fetch_hdr()
+  {
+    // clang-format off
+    return std::to_array<fsp::raw_attr>({
       {.name="msg_id",     .path="x:GrpHdr/MsgId"},
       {.name="amount_sum", .path="GrpHdr/TtlIntrBkSttlmAmt"},
       {.name="currency",   .path="GrpHdr/TtlIntrBkSttlmAmt/@Ccy", .is_opt=true},
       {.name="msg_ts",     .path="x:GrpHdr/CreDtTm",              .is_opt=true},
       {.name="value_date", .path="GrpHdr/IntrBkSttlmDt",          .is_opt=true},
     });
-    // --- attributes in transaction --------------------------------------------
-    static constexpr auto xpath_txn = std::to_array<fsp::raw_attr>({
+    // clang-format on
+  }
+  static constexpr auto fetch_txn()
+  {
+    // clang-format off
+    return std::to_array<fsp::raw_attr>({
       {.name="txn_id",        .path="CdtTrfTxInf/PmtId/TxId"},
       {.name="debtor.iban",   .path="CdtTrfTxInf/DbtrAcct/Id/IBAN"},
       {.name="debtor.bic",    .path="CdtTrfTxInf/DbtrAgt/FinInstnId/BICFI"},
@@ -53,22 +53,47 @@ int main(int argc, const char* argv[])
       {.name="instr.agent",   .path="CdtTrfTxInf/InstgAgt/FinInstnId/*BICFI", .is_opt=true},
     });
     // clang-format on
-    static constexpr auto targets = fsp::build(targets_raw, ns);
-    static_assert(targets.size() == targets_raw.size(), "split xpaths are not ok.");
-    static_assert(targets.min(0) == "Document", "Should be document");
-    static_assert(targets.max(0) == "Document", "Should be document");
-    static_assert(targets.min(1) == "FIToFICstmrCdtTrf", "Should be FIToFICstmrCdtTrf");
-    static_assert(targets.max(1) == "FIToFICstmrCdtTrf", "Should be FIToFICstmrCdtTrf");
-    static_assert(targets.min(2) == "CdtTrfTxInf", "Should be CdtTrfTxInf");
-    static_assert(targets.max(2) == "GrpHdr", "Should be GrpHdr");
-    static constexpr auto hdr = fsp::build(xpath_hdr, ns);
-    static constexpr auto txn = fsp::build(xpath_txn, ns);
-    static_assert(txn.size() == xpath_txn.size(), "split xpaths are not ok.");
-    static_assert(txn.min(0) == "CdtTrfTxInf", "Should be CdtTrfTxInf");
-    static_assert(txn.max(0) == "CdtTrfTxInf", "Should be CdtTrfTxInf");
-    static_assert(txn.min(2) == "FinInstnId", "Should be FinInstnId");
-    static_assert(txn.max(2) == "TxId", "Should be TxId");
-    static const auto all = fsp::proc_data{.targets = targets, .xpaths = {hdr, txn}};
+  }
+  int help(const char* prog_name)
+  {
+    static constexpr auto* msg = "Usage: {0} <xml_file>* [<xsd_file>] \n"
+                                 "Example: {0} data.xml schema.xsd \n";
+    std::cerr << fmt::format(msg, prog_name);
+    return 1;
+  }
+}; // namespace
+int main(int argc, const char* argv[])
+{
+  if (argc == 1) return help(*argv);
+  std::vector<std::string> args(argv, argv + argc); // NOLINT (cppcoreguidelines-pro-bounds-pointer-arithmetic)
+
+  try
+  {
+    const std::string xml_file(argv[1]);                  // NOLINT
+    const std::string xsd_file(argc == 3 ? argv[2] : ""); // NOLINT
+
+    constexpr auto        ns          = fetch_ns();
+    constexpr auto        targets_raw = fetch_targets();
+    constexpr auto        xpath_hdr   = fetch_hdr();
+    constexpr auto        xpath_txn   = fetch_txn();
+    static constexpr auto targets     = fsp::build(targets_raw, ns);
+    static constexpr auto hdr         = fsp::build(xpath_hdr, ns);
+    static constexpr auto txn         = fsp::build(xpath_txn, ns);
+    static const auto     all         = fsp::proc_data{.targets = targets, .xpaths = {hdr, txn}};
+    {
+      static_assert(targets.size() == targets_raw.size(), "split xpaths are not ok.");
+      static_assert(targets.min(0) == "Document", "Should be document");
+      static_assert(targets.max(0) == "Document", "Should be document");
+      static_assert(targets.min(1) == "FIToFICstmrCdtTrf", "Should be FIToFICstmrCdtTrf");
+      static_assert(targets.max(1) == "FIToFICstmrCdtTrf", "Should be FIToFICstmrCdtTrf");
+      static_assert(targets.min(2) == "CdtTrfTxInf", "Should be CdtTrfTxInf");
+      static_assert(targets.max(2) == "GrpHdr", "Should be GrpHdr");
+      static_assert(txn.size() == xpath_txn.size(), "split xpaths are not ok.");
+      static_assert(txn.min(0) == "CdtTrfTxInf", "Should be CdtTrfTxInf");
+      static_assert(txn.max(0) == "CdtTrfTxInf", "Should be CdtTrfTxInf");
+      static_assert(txn.min(2) == "FinInstnId", "Should be FinInstnId");
+      static_assert(txn.max(2) == "TxId", "Should be TxId");
+    }
     assert(all.targets.size() == all.xpaths.size());
     //  Configure logging
     fsp::logger_config log_cfg{.enable_console = true,
@@ -104,3 +129,4 @@ int main(int argc, const char* argv[])
   }
   return 0;
 }
+/// ---
