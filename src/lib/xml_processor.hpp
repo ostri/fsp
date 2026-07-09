@@ -4,7 +4,6 @@
 #include <expected>
 #include <memory>
 #include <spdlog/pattern_formatter.h>
-#include <stop_token>
 #include <string>
 #include <vector>
 #include <future>
@@ -36,38 +35,36 @@ namespace fsp
   using processing_result = std::expected<std::pair<std::vector<segment_result>, std::vector<segment_result>>, error_info>;
   using segment_queue     = lock_queue<xml_segment>;
 
-  // Worker context - all data that is needed by the worker
-  // NOLINTBEGIN(cppcoreguidelines-avoid-const-or-ref-data-members)
-  struct worker_context
-  {
-    int                          worker_id;       // unique id of the worker
-    segment_queue&               seg_queue;       // input queue
-    const fsp::mmap_file&        xml_mmap;        // mmap mapping for buffer segment
-    std::vector<segment_result>& results;         // output queue for valid transactions
-    std::vector<segment_result>& errors;          // output queue for transactions with errors
-    std::mutex&                  results_mutex;   // results queue mutex
-    std::mutex&                  errors_mutex;    // errors queue mitex
-    std::atomic<std::size_t>&    processed_count; // number of processed segments
-    std::atomic<std::size_t>&    error_count;     // number of detected errors
-    std::atomic<bool>&           cancel_flag;     // is the operation cancelled?
-    const fsp_logger&            log;             // logger wrapper
-    const proc_data&             targets;         // how to partition the xml buffer and which
-                                                  // tags to extract from each partition type
-  };
-  // NOLINTEND(cppcoreguidelines-avoid-const-or-ref-data-members)
+  // // Worker context - all data that is needed by the worker
+  // // NOLINTBEGIN(cppcoreguidelines-avoid-const-or-ref-data-members)
+  // struct worker_context
+  // {
+  //   int                          worker_id;       // unique id of the worker
+  //   segment_queue&               seg_queue;       // input queue
+  //   const fsp::mmap_file&        xml_mmap;        // mmap mapping for buffer segment
+  //   std::vector<segment_result>& results;         // output queue for valid transactions
+  //   std::vector<segment_result>& errors;          // output queue for transactions with errors
+  //   std::mutex&                  results_mutex;   // results queue mutex
+  //   std::mutex&                  errors_mutex;    // errors queue mitex
+  //   std::atomic<std::size_t>&    processed_count; // number of processed segments
+  //   std::atomic<std::size_t>&    error_count;     // number of detected errors
+  //   std::atomic<bool>&           cancel_flag;     // is the operation cancelled?
+  //   const fsp_logger&            log;             // logger wrapper
+  //   const proc_data&             targets;         // how to partition the xml buffer and which
+  //                                                 // tags to extract from each partition type
+  // };
+  // // NOLINTEND(cppcoreguidelines-avoid-const-or-ref-data-members)
   class xml_processor
   {
   public:
     explicit xml_processor(processor_config cfg);
     ~xml_processor();
 
-    xml_processor(const xml_processor&)            = delete;
-    xml_processor& operator=(const xml_processor&) = delete;
-    xml_processor(xml_processor&&)                 = delete;
-    xml_processor& operator=(xml_processor&&)      = delete;
-    // Procesiranje iz datoteke (mmap)
-    void_result process_file(const std::string& xml_path, const std::string& xsd_path = "");
-    // Procesiranje iz že mmap-ane datoteke
+    xml_processor(const xml_processor&)                                  = delete;
+    xml_processor& operator=(const xml_processor&)                       = delete;
+    xml_processor(xml_processor&&)                                       = delete;
+    xml_processor&                            operator=(xml_processor&&) = delete;
+    void_result                               process_file(const std::string& xml_path, const std::string& xsd_path = "");
     void_result                               process_from_buffer(fsp::mmap_file& xml_mmap, fsp::mmap_file* xsd_mmap = nullptr);
     [[nodiscard]] std::vector<segment_result> get_results();
     [[nodiscard]] std::vector<segment_result> get_errors();
@@ -102,12 +99,6 @@ namespace fsp
                                                                            std::size_t xsd_size,
                                                                            std::string xsd_path);
 
-    static void                   worker_function( //
-      [[maybe_unused]] const std::stop_token& st,
-      int                                     worker_id,
-      worker_context                          ctx);
-    static result<segment_result> process_segment(const worker_context& ctx, const xml_segment& seg);
-    static result<segment_result> extract_xml_values(cstr_t xml_buf, const xml_segment& seg, const worker_context& ctx);
     using s_clock = std::chrono::time_point<std::chrono::steady_clock>;
   private: /// members
     const s_clock                           start_ = std::chrono::steady_clock::now();
@@ -130,8 +121,6 @@ namespace fsp
     std::unique_ptr<mem_buf_holder>         xsd_holder_;
     const fsp::mmap_file*                   active_mmap_ = nullptr; // reference to mmap file (needed by workers)
   };
-
-
 } // namespace fsp
 
 namespace magic_enum::customize

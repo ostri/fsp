@@ -151,6 +151,7 @@ set(${b_target}_SOURCES
     ${CMAKE_SOURCE_DIR}/src/lib/segment_result.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/logger.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/root_cb.cpp
+    ${CMAKE_SOURCE_DIR}/src/lib/xml_worker.cpp
 )
 # Specify additional libraries for fsp_lib (if needed)
 set(FSP_TARGET_${b_target}_LIBS
