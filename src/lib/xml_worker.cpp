@@ -12,144 +12,11 @@
 
 namespace
 {
-  struct stack_struct
-  {
-    fsp::xml_node node;
-    fsp::p_limits limits;
-  };
-  struct err_result
-  {
-    int         status{}; // status of last libxml2 operation
-    std::string err;      // description of what is wrong
-  };
-  struct pp_result
-  {
-    fsp::p_limits limits;     // altered limits
-    fsp::xml_node node;       // tree node just dealt with
-    int           status{-1}; // status of the last libxml2 library operation
-  };
-  std::optional<std::string> get_attribute_value_ns(xmlTextReaderPtr   reader,
-                                                    const std::string& local_name,
-                                                    const std::string& namespace_uri)
-  {
-    xmlChar* value = xmlTextReaderGetAttributeNs( //
-      reader,
-      BAD_CAST local_name.c_str(),
-      ! namespace_uri.empty() ? BAD_CAST namespace_uri.c_str() : nullptr);
-    if (value == nullptr) return std::nullopt;
-    std::string result(reinterpret_cast<char*>(value));
-    xmlFree(value); // pointer must be released
-    return result;
-  }
-  static std::string process_attribute(xmlTextReaderPtr reader, const auto& xp)
-  {
-    auto local_name = std::string(xp.attr_name());
-    auto uri        = std::string(xp.attr_uri());
-    auto value      = get_attribute_value_ns(reader, local_name, uri);
-    if (value.has_value()) return value.value(); // non null value
-    throw std::runtime_error(fmt::format("attribute '{}:{}' has no value.", local_name, uri));
-  }
-  static int process_positive_xpath_element( //
-    xmlTextReaderPtr       reader,
-    const fsp::xml_attr&   xp,
-    std::size_t            ndx,
-    std::size_t            depth,
-    const fsp::fsp_logger& log,
-    fsp::segment_result&   seg_result)
-  {
-    const bool log_debug = log.active(fsp::lvl_enum::debug);
-    if (xp.is_last(depth)) // are we reached the end of the current xpath?
-    {
-      if (xp.is_attr()) // attribute xpath
-      {
-        auto value = process_attribute(reader, xp);
-        seg_result.values()[xp.name()].emplace_back(value);
-        if (log_debug) log.debug(fmt::format("attribute name: '{}' tag: {} value: '{}'", xp.name(), xp.attr_name(), value));
-        return -1;
-      }
-      return static_cast<int>(ndx);
-    }
-    return -1;
-  }
-  struct XmlTextReaderDeleter
-  {
-    void operator()(xmlTextReaderPtr reader) const
-    {
-      if (reader != nullptr) xmlFreeTextReader(reader);
-    }
-  };
-  static std::expected<pp_result, err_result> process_and_prune_node( //
-    xmlTextReaderPtr              reader,
-    const fsp::xpath_node_struct& xpaths,
-    std::stack<stack_struct>&     stack,
-    const fsp::xpath_limits&      limits_vec,
-    const fsp::fsp_logger&        log,
-    fsp::segment_result&          seg_result)
-  {
-    int         read_status = 0;
-    const char* uri         = reinterpret_cast<const char*>(xmlTextReaderConstNamespaceUri(reader));
-    const char* tag         = reinterpret_cast<const char*>(xmlTextReaderConstLocalName(reader));
-    const bool  log_trace   = log.active(fsp::lvl_enum::trace);
 
-    // Safely handle potential null pointers from libxml2
-    std::string_view safe_uri = uri != nullptr ? uri : "";
-    std::string_view safe_tag = tag != nullptr ? tag : "";
-    auto             depth    = stack.size() - 1; // first available on stack
-    pp_result        result;
-    if (depth >= stack.size()) // guard to not go too deep
-    {
-      if (log_trace) log.trace(fmt::format("pruning subtree: '{}' too deep: '{}' max allowed: '{}'", safe_tag, depth, stack.size()));
-      read_status = xmlTextReaderNext(reader); // Skip all children, move to sibling or the end of parent tag
-      return std::unexpected(err_result{.status = read_status, .err = "Pruning, since it is too deep."});
-    }
-    auto limits = limits_vec[depth] & stack.top().limits; // xpaths excluded in previous level are excluded
-                                                          // also on current level
-
-    result.node = fsp::xml_node{safe_uri, safe_tag};
-    if (log_trace) //
-      log.trace(fmt::format("current tag: {} {} limits: {}", safe_tag, safe_uri, limits.dump()));
-    /// prune if we are:
-    /// - deeper than any xpath we are searching for (excluded before)
-    /// - the tag name is smaller than any available tag name in the list of xpaths we are searching for
-    /// - the tag name is bigger than any available tag name in the list of xpaths we are searching for
-    auto first = limits.first();
-    auto last  = limits.last();
-    // if (log_trace) log.trace(fmt::format("{}", xpaths.dump()));
-    for (auto cnt = first; cnt <= last; ++cnt)
-    {                                          // compare with all possible options on xpath[depth]
-      if (! limits.available()[cnt]) continue; // It has been removed in earlier iterations
-      const auto& xp = xpaths[cnt];
-      if (depth >= xp.xpath().size())
-      { // if there is shorter xpath then exclude current path and move to next xpath
-        if (log_trace) log.trace(fmt::format("shorter xpath: tag:{} depth:{} cnt: {} xpath-id:{}", safe_tag, depth, cnt, xp.name()));
-        limits.available().reset(cnt);
-        continue;
-      }
-      std::string_view xp_tag = xp.xpath()[depth].tag;
-      std::string_view xp_uri = xp.xpath()[depth].ns;
-      if (log_trace) log.trace(fmt::format("tag:{} xp tag:{} depth:{} cnt: {}", safe_tag, xp_tag, depth, cnt));
-      if ((safe_tag == xp_tag) && (safe_uri == xp_uri)) // remember the tag value index, attribute is handled inside
-        result.status = std::max(process_positive_xpath_element(reader, xp, cnt, depth, log, seg_result), result.status);
-      else // current xpath tag does not match any tag on current level in xpaths searched
-        limits.reset(cnt);
-    } // for
-    if (log_trace) log.trace(fmt::format("limits: {}", limits.dump()));
-    if (limits.available().none())      // this subtree is an dead end. prune it
-      return std::unexpected(err_result{//
-                                        .status = xmlTextReaderNext(reader),
-                                        .err    = fmt::format("Pruning, in the middle '{}'", safe_tag)});
-    if (result.status != -1 && ! xpaths[result.status].is_array())
-      limits.reset(result.status); // we have this value and not searching in the future
-    result.limits = limits;
-    stack.emplace(result.node, result.limits);
-    return result; // Indicates normal execution flow, no pruning happened
-  }
 } // namespace
 
 namespace fsp
 {
-  using UniqueXmlTextReader = std::unique_ptr<std::remove_pointer_t<xmlTextReaderPtr>, XmlTextReaderDeleter>;
-
   xml_worker::xml_worker(segment_queue&               seg_queue,
                          const mmap_file&             xml_mmap,
                          std::vector<segment_result>& results,
@@ -175,7 +42,7 @@ namespace fsp
   {
   }
 
-  void xml_worker::operator()(const std::stop_token& /*st*/, int worker_id)
+  void xml_worker::operator()([[maybe_unused]] const std::stop_token& st, int worker_id)
   {
     auto t0              = std::chrono::steady_clock::now();
     log_thread_name      = fmt::format("wrk{:03}", worker_id);
@@ -183,7 +50,7 @@ namespace fsp
 
     if (log_debug) log_.debug(fmt::format("Worker thread '{}' started.", log_thread_name));
 
-    thread_local std::size_t txn_processed = 0;
+    thread_local std::size_t txn_processed = 0; // number of segments proessed in this thread
 
     while (! cancel_flag_.load())
     {
@@ -214,23 +81,16 @@ namespace fsp
     }
   }
 
-  // === Nekdanje statične funkcije zdaj kot metode ===
-
   result<segment_result> xml_worker::process_segment(const xml_segment& seg)
   {
-    auto t0 = std::chrono::steady_clock::now();
-    // segment_result res;
-    // res.seg_id_           = seg.id();
-    // res.seg_type_         = seg.subtree_type();
-    const auto& log       = log_;
-    const bool  log_debug = log.active(fsp::lvl_enum::debug);
-
+    auto       t0        = std::chrono::steady_clock::now();
+    const bool log_debug = log_.active(fsp::lvl_enum::debug);
     try
     {
       if (log_debug)
       {
-        log.debug(fmt::format("segment started: {}", seg.dump()));
-        log.trace(fmt::format("{}", seg.dump_all(xml_mmap_.data(), 0)));
+        log_.debug(fmt::format("segment started: {}", seg.dump()));
+        log_.trace(fmt::format("{}", seg.dump_all(xml_mmap_.data(), 0)));
       }
       auto view     = seg.view(xml_mmap_.data());
       auto tmp_view = seg.subtree_str(view);
@@ -239,36 +99,33 @@ namespace fsp
       if (r)
       {
         auto us = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - t0).count();
-        // res.success = true;
-        // assert(r->values["currency"].front() == "EUR");
         if (log_debug)
         {
-          log.debug(fmt::format("Segment '{}' DOM processing finished '{}'µs (offset={}, len={})", //
-                                seg.id(),
-                                us,
-                                seg.offset(),
-                                seg.length()));
-          log.trace(fmt::format("{}", r->dump()));
+          log_.debug(fmt::format("Segment '{}' DOM processing finished '{}'µs (offset={}, len={})", //
+                                 seg.id(),
+                                 us,
+                                 seg.offset(),
+                                 seg.length()));
+          log_.trace(fmt::format("{}", r->dump()));
         }
         segment_result res(seg.id(), seg.subtree_type(), r.value().values());
         return res;
       }
 
-      // res.success       = false;
       error_info err( //
         processor_error::error_extracting_xpath_values,
         fmt::format("Error extracting xpath values: {}", r.error().message()),
         "",
         0UL);
-      if (log.active(fsp::lvl_enum::warn))
-        log.warn(fmt::format("Segment {}: {} :: {}", seg.id(), r.error().message(), seg.dump_all(xml_mmap_.data())));
+      if (log_.active(fsp::lvl_enum::warn))
+        log_.warn(fmt::format("Segment {}: {} :: {}", seg.id(), r.error().message(), seg.dump_all(xml_mmap_.data())));
       return std::unexpected(err);
     }
     catch (const std::exception& e)
     {
       // res.success       = false;
       auto error_message = fmt::format("Exception in segment {}: '{}'", seg.id(), e.what());
-      log.error(fmt::format("{}", error_message));
+      log_.error(fmt::format("{}", error_message));
       throw;
     }
   }
@@ -279,7 +136,8 @@ namespace fsp
     // NOLINTNEXTLINE(hicpp-signed-bitwise)
     auto flags = (XML_PARSE_NOCDATA | XML_PARSE_NOERROR | XML_PARSE_NOWARNING | XML_PARSE_NOBLANKS | XML_PARSE_NONET);
 
-    UniqueXmlTextReader reader(xmlReaderForMemory(xml_buf.data(), static_cast<int>(xml_buf.size()), nullptr, nullptr, flags));
+    //    UniqueXmlTextReader reader(xmlReaderForMemory(xml_buf.data(), static_cast<int>(xml_buf.size()), nullptr, nullptr, flags));
+    reader_ = UniqueXmlTextReader(xmlReaderForMemory(xml_buf.data(), static_cast<int>(xml_buf.size()), nullptr, nullptr, flags));
 
     int                      read_status;
     auto                     depth     = 0UL;
@@ -299,21 +157,21 @@ namespace fsp
       log.trace(limits.dump());
     }
     // ---------------------------------------------------------------------------------------------
-    read_status = xmlTextReaderRead(reader.get());
+    read_status = xmlTextReaderRead(reader_.get());
     tree_stack.emplace(stack_struct{.node = xml_node{"top", "top_uri"}, .limits = fsp::p_limits(0, xpaths.size())});
     int                      value_ndx          = -1; // xpath index of the value
     const std::size_t        initial_tree_depth = 50;
     thread_local std::string indent(initial_tree_depth * 2, pad);
     while (read_status == 1)
     {
-      int  type      = xmlTextReaderNodeType(reader.get());
+      int  type      = xmlTextReaderNodeType(reader_.get());
       auto enum_type = static_cast<xmlReaderTypes>(type);
       depth          = tree_stack.size() - 1;
       switch (enum_type)
       {
       case XML_READER_TYPE_ELEMENT:
       { // open tag
-        auto x = process_and_prune_node(reader.get(), xpaths, tree_stack, limits, log, res);
+        auto x = process_and_prune_node(xpaths, tree_stack, limits, res);
         if (! x)
         { // FIXME too deep is critical error handle it properly
           if (log_trace) log.trace(fmt::format("pruning: {} val:{}", x.error().err, tree_stack.top().node.tag()));
@@ -333,7 +191,7 @@ namespace fsp
       { // obtain values
         if (value_ndx != -1)
         { // we have value that we need to remember
-          const auto* value      = reinterpret_cast<const char*>(xmlTextReaderConstValue(reader.get()));
+          const auto* value      = reinterpret_cast<const char*>(xmlTextReaderConstValue(reader_.get()));
           cstr_t      value_name = xpaths[value_ndx].name();
           res.values()[value_name].emplace_back(value != nullptr ? value : "");
           value_ndx = -1; // again undefined
@@ -384,9 +242,111 @@ namespace fsp
         auto type_name = magic_enum::enum_name(enum_type);
         if (log_crit) log.critical(fmt::format("nonsupported: {} {}", type_name, type));
       }
-      read_status = xmlTextReaderRead(reader.get());
+      read_status = xmlTextReaderRead(reader_.get());
     }
     return res;
   }
+  std::expected<pp_result, err_result> xml_worker::process_and_prune_node( //
+    const fsp::xpath_node_struct& xpaths,
+    std::stack<stack_struct>&     stack,
+    const fsp::xpath_limits&      limits_vec,
+    fsp::segment_result&          seg_result)
+  {
+    int         read_status = 0;
+    const char* uri         = reinterpret_cast<const char*>(xmlTextReaderConstNamespaceUri(reader_.get()));
+    const char* tag         = reinterpret_cast<const char*>(xmlTextReaderConstLocalName(reader_.get()));
+    const bool  log_trace   = log_.active(fsp::lvl_enum::trace);
 
+    // Safely handle potential null pointers from libxml2
+    std::string_view safe_uri = uri != nullptr ? uri : "";
+    std::string_view safe_tag = tag != nullptr ? tag : "";
+    auto             depth    = stack.size() - 1; // first available on stack
+    pp_result        result;
+    if (depth >= stack.size()) // guard to not go too deep
+    {
+      if (log_trace) log_.trace(fmt::format("pruning subtree: '{}' too deep: '{}' max allowed: '{}'", safe_tag, depth, stack.size()));
+      read_status = xmlTextReaderNext(reader_.get()); // Skip all children, move to sibling or the end of parent tag
+      return std::unexpected(err_result{.status = read_status, .err = "Pruning, since it is too deep."});
+    }
+    auto limits = limits_vec[depth] & stack.top().limits; // xpaths excluded in previous level are excluded
+                                                          // also on current level
+
+    result.node = fsp::xml_node{safe_uri, safe_tag};
+    if (log_trace) //
+      log_.trace(fmt::format("current tag: {} {} limits: {}", safe_tag, safe_uri, limits.dump()));
+    /// prune if we are:
+    /// - deeper than any xpath we are searching for (excluded before)
+    /// - the tag name is smaller than any available tag name in the list of xpaths we are searching for
+    /// - the tag name is bigger than any available tag name in the list of xpaths we are searching for
+    auto first = limits.first();
+    auto last  = limits.last();
+    // if (log_trace) log.trace(fmt::format("{}", xpaths.dump()));
+    for (auto cnt = first; cnt <= last; ++cnt)
+    {                                          // compare with all possible options on xpath[depth]
+      if (! limits.available()[cnt]) continue; // It has been removed in earlier iterations
+      const auto& xp = xpaths[cnt];
+      if (depth >= xp.xpath().size())
+      { // if there is shorter xpath then exclude current path and move to next xpath
+        if (log_trace) log_.trace(fmt::format("shorter xpath: tag:{} depth:{} cnt: {} xpath-id:{}", safe_tag, depth, cnt, xp.name()));
+        limits.available().reset(cnt);
+        continue;
+      }
+      std::string_view xp_tag = xp.xpath()[depth].tag;
+      std::string_view xp_uri = xp.xpath()[depth].ns;
+      if (log_trace) log_.trace(fmt::format("tag:{} xp tag:{} depth:{} cnt: {}", safe_tag, xp_tag, depth, cnt));
+      if ((safe_tag == xp_tag) && (safe_uri == xp_uri)) // remember the tag value index, attribute is handled inside
+        result.status = std::max(process_positive_xpath_element(xp, cnt, depth, seg_result), result.status);
+      else // current xpath tag does not match any tag on current level in xpaths searched
+        limits.reset(cnt);
+    } // for
+    if (log_trace) log_.trace(fmt::format("limits: {}", limits.dump()));
+    if (limits.available().none())      // this subtree is an dead end. prune it
+      return std::unexpected(err_result{//
+                                        .status = xmlTextReaderNext(reader_.get()),
+                                        .err    = fmt::format("Pruning, in the middle '{}'", safe_tag)});
+    if (result.status != -1 && ! xpaths[result.status].is_array())
+      limits.reset(result.status); // we have this value and not searching in the future
+    result.limits = limits;
+    stack.emplace(result.node, result.limits);
+    return result; // Indicates normal execution flow, no pruning happened
+  }
+  int xml_worker::process_positive_xpath_element( //
+    const fsp::xml_attr& xp,
+    std::size_t          ndx,
+    std::size_t          depth,
+    fsp::segment_result& seg_result)
+  {
+    const bool log_debug = log_.active(fsp::lvl_enum::debug);
+    if (xp.is_last(depth)) // are we reached the end of the current xpath?
+    {
+      if (xp.is_attr()) // attribute xpath
+      {
+        auto value = process_attribute(xp);
+        seg_result.values()[xp.name()].emplace_back(value);
+        if (log_debug) log_.debug(fmt::format("attribute name: '{}' tag: {} value: '{}'", xp.name(), xp.attr_name(), value));
+        return -1;
+      }
+      return static_cast<int>(ndx);
+    }
+    return -1;
+  }
+  std::optional<std::string> xml_worker::get_attribute_value_ns(const str_t& local_name, const str_t& namespace_uri)
+  {
+    xmlChar* value = xmlTextReaderGetAttributeNs( //
+      reader_.get(),
+      BAD_CAST local_name.c_str(),
+      ! namespace_uri.empty() ? BAD_CAST namespace_uri.c_str() : nullptr);
+    if (value == nullptr) return std::nullopt;
+    std::string result(reinterpret_cast<char*>(value));
+    xmlFree(value); // pointer must be released
+    return result;
+  }
+  std::string xml_worker::process_attribute(const auto& xp)
+  {
+    auto local_name = std::string(xp.attr_name());
+    auto uri        = std::string(xp.attr_uri());
+    auto value      = get_attribute_value_ns(local_name, uri);
+    if (value.has_value()) return value.value(); // non null value
+    throw std::runtime_error(fmt::format("attribute '{}:{}' has no value.", local_name, uri));
+  }
 } // namespace fsp
