@@ -124,22 +124,6 @@ endfunction()
 set(b_target fsp_lib) # name of the target
 # 5.1 fsp_lib (static library)
 set(${b_target}_SOURCES
-    ${CMAKE_SOURCE_DIR}/src/lib/x_str.cpp
-    ${CMAKE_SOURCE_DIR}/src/lib/handler.cpp
-    ${CMAKE_SOURCE_DIR}/src/lib/lock_queue.cpp
-    ${CMAKE_SOURCE_DIR}/src/lib/xml_segment.cpp
-)
-# Specify additional libraries for fsp_lib (if needed)
-set(FSP_TARGET_${b_target}_LIBS
-    XercesC::XercesC
-    LibXml2::LibXml2
-)
-add_fsp_target(fsp_lib STATIC ${fsp_lib_SOURCES})
-#
-# target: fsp
-#
-set(b_target fsp) # name of the target
-set(${b_target}_SOURCES
     ${CMAKE_SOURCE_DIR}/src/main.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/x_str.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/xerces_mgr.cpp
@@ -168,8 +152,22 @@ set(${b_target}_SOURCES
     ${CMAKE_SOURCE_DIR}/src/lib/logger.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/root_cb.cpp
 )
+# Specify additional libraries for fsp_lib (if needed)
+set(FSP_TARGET_${b_target}_LIBS
+    XercesC::XercesC
+    LibXml2::LibXml2
+)
+add_fsp_target(fsp_lib STATIC ${fsp_lib_SOURCES})
+#
+# target: fsp
+#
+set(b_target fsp) # name of the target
+set(${b_target}_SOURCES
+    ${CMAKE_SOURCE_DIR}/src/main.cpp
+)
 # Additional libraries for main program
 set(FSP_TARGET_${PROJECT_NAME}_LIBS
+    fsp_lib
     fmt::fmt
     spdlog::spdlog
     magic_enum::magic_enum
@@ -202,9 +200,10 @@ set(${b_target}_SOURCES
     ${CMAKE_SOURCE_DIR}/src/auxiliary/gen.cpp
 )
 set(FSP_TARGET_${b_target}_INCLUDES ${CMAKE_SOURCE_DIR}/src/auxiliary)
-# set(FSP_TARGET_${b_target}_LIBS
-#     XercesC::XercesC
-#)
+set(FSP_TARGET_${b_target}_LIBS
+    fsp_lib
+    XercesC::XercesC
+)
 add_fsp_target(${b_target} EXECUTABLE ${${b_target}_SOURCES})
 # -----------------------------------------------------------------------------
 # --- target: test_pars
@@ -237,6 +236,24 @@ set(FSP_TARGET_${b_target}_INCLUDES
   ${CMAKE_SOURCE_DIR}/src/test
   )
 set(FSP_TARGET_${b_target}_LIBS
+    fmt::fmt
+    spdlog::spdlog
+    magic_enum::magic_enum
+)
+add_fsp_target(${b_target} EXECUTABLE ${${b_target}_SOURCES})
+# -----------------------------------------------------------------------------
+# --- target: pacs8
+# -----------------------------------------------------------------------------
+set(b_target pacs8) # name of the target
+set(${b_target}_SOURCES
+    ${CMAKE_SOURCE_DIR}/src/test/pacs8.cpp
+)
+set(FSP_TARGET_${b_target}_INCLUDES
+  ${CMAKE_SOURCE_DIR}/src/lib
+  ${CMAKE_SOURCE_DIR}/src/test
+  )
+set(FSP_TARGET_${b_target}_LIBS
+    fsp_lib
     fmt::fmt
     spdlog::spdlog
     magic_enum::magic_enum
