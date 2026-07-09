@@ -238,98 +238,84 @@ namespace fsp
     std::string xsd_path)
   {
     const auto& logger = logger_; // the thread has its own copy of logger
+    // feature is converted to shared feature (see .share at the end), so that we can (get())
+    // read (get()) it more than one time
+    return std::async( //
+             std::launch::async,
+             [xml_data, xml_size, xsd_data, xsd_size, xsd_path = std::move(xsd_path), &logger]() -> std::optional<error_info>
+             {
+               log_thread_name   = "valid>";
+               auto        start = std::chrono::steady_clock::now();
+               const auto& log   = logger;
+               if (log.active(info)) log.info(fmt::format("Validation started. file: xsd:{}", xsd_path));
+               try
+               {
+                 // we need to create own parser, since it is not reentrant
+                 std::unique_ptr<xercesc::SAX2XMLReader> vparser(xercesc::XMLReaderFactory::createXMLReader());
+                 // NOLINTBEGIN(hicpp-no-array-decay)
+                 vparser->setFeature(xercesc::XMLUni::fgSAX2CoreValidation, true);
+                 vparser->setFeature(xercesc::XMLUni::fgXercesSchema, true);
+                 vparser->setFeature(xercesc::XMLUni::fgXercesValidationErrorAsFatal, true);
+                 vparser->setFeature(xercesc::XMLUni::fgXercesUseCachedGrammarInParse, true);
+                 vparser->setFeature(xercesc::XMLUni::fgSAX2CoreNameSpaces, true);
+                 vparser->setFeature(xercesc::XMLUni::fgXercesSchemaFullChecking, false);
+                 vparser->setFeature(xercesc::XMLUni::fgSAX2CoreNameSpacePrefixes, false);
+                 vparser->setFeature(xercesc::XMLUni::fgXercesCalculateSrcOfs, false);
+                 // NOLINTEND(hicpp-no-array-decay)
+                 // load xsd schema to the parser
+                 mem_buf_holder xsd_holder(xsd_data, xsd_size, xsd_path, log);
+                 if (xsd_holder.source() != nullptr) //
+                   vparser->loadGrammar(*xsd_holder.source(), xercesc::Grammar::SchemaGrammarType, true);
+                 struct ThrowingErrorHandler : public xercesc::DefaultHandler // Handler that throws on error no matter what
+                 {                                                            // NOLINTBEGIN(hicpp-exception-baseclass)
+                   void error(const xercesc::SAXParseException& e) override { throw e; }
+                   void fatalError(const xercesc::SAXParseException& e) override { throw e; }
+                   // NOLINTEND(hicpp-exception-baseclass)
+                 } err_handler;
+                 vparser->setErrorHandler(&err_handler);
 
-    // std::async vrne future; .share() ga pretvori v shared_future ki ga
-    // lahko get() pokličemo večkrat brez uničenja vrednosti
-    return std::async(std::launch::async,
-                      [xml_data, xml_size, xsd_data, xsd_size, xsd_path = std::move(xsd_path), &logger]() -> std::optional<error_info>
-                      {
-                        log_thread_name   = "valid>";
-                        auto        start = std::chrono::steady_clock::now();
-                        const auto& log   = logger;
-                        if (log.active(info)) log.info(fmt::format("Validation started. file: xsd:{}", xsd_path));
-
-                        try
-                        {
-                          // we need to create own parser, since it is not reentrant
-                          std::unique_ptr<xercesc::SAX2XMLReader> vparser(xercesc::XMLReaderFactory::createXMLReader());
-
-                          // NOLINTBEGIN(hicpp-no-array-decay)
-                          vparser->setFeature(xercesc::XMLUni::fgSAX2CoreValidation, true);
-                          vparser->setFeature(xercesc::XMLUni::fgXercesSchema, true);
-                          vparser->setFeature(xercesc::XMLUni::fgXercesValidationErrorAsFatal, true);
-                          vparser->setFeature(xercesc::XMLUni::fgXercesUseCachedGrammarInParse, true);
-                          vparser->setFeature(xercesc::XMLUni::fgSAX2CoreNameSpaces, true);
-                          vparser->setFeature(xercesc::XMLUni::fgXercesSchemaFullChecking, false);
-                          vparser->setFeature(xercesc::XMLUni::fgSAX2CoreNameSpacePrefixes, false);
-                          //                          vparser->setFeature(xercesc::XMLUni::fgXercesCalculateSrcOfs, false);
-                          // NOLINTEND(hicpp-no-array-decay)
-
-                          // Naloži XSD shemo v lasten parser
-                          mem_buf_holder xsd_holder(xsd_data, xsd_size, xsd_path, log);
-                          if (xsd_holder.source() != nullptr)
-                            vparser->loadGrammar(*xsd_holder.source(), xercesc::Grammar::SchemaGrammarType, true);
-
-                          // DefaultHandler ki ob napaki takoj vrže — brez tega bi Xerces
-                          // nadaljeval parsing kljub validacijski napaki
-                          struct ThrowingErrorHandler : public xercesc::DefaultHandler
-                          { // NOLINTBEGIN(cert-err60-cpp, hicpp-exception-baseclass)
-                            void error(const xercesc::SAXParseException& e) override { throw e; }
-                            void fatalError(const xercesc::SAXParseException& e) override { throw e; }
-                            // NOLINTEND(cert-err60-cpp, hicpp-exception-baseclass)
-                          } err_handler;
-                          vparser->setErrorHandler(&err_handler);
-
-                          xercesc::MemBufInputSource src(
-                            // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
-                            reinterpret_cast<const XMLByte*>(xml_data),
-                            static_cast<XMLSize_t>(xml_size),
-                            "xml_validation",
-                            false);
-
-                          vparser->parse(src);
-
-                          if (log.active(fsp::lvl_enum::info))
-                          {
-                            auto end      = std::chrono::steady_clock::now();
-                            auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
-                            log.info(fmt::format("Validation finished in {} ms {} bytes.", duration.count(), xml_size));
-                          }
-                          return std::nullopt; // brez napak
-                        }
-                        catch (const xercesc::SAXParseException& e)
-                        {
-                          // ThrowingErrorHandler je vrgel ob prvi validacijski napaki.
-                          // Ustavimo parsing (izjema je že prekinila vparser->parse())
-                          // in sporočimo napako klicatelju.
-                          auto err = error_info{processor_error::xsd_validation_failed,
-                                                fmt::format("SAX parser error: {} (row:{} col:{})",
-                                                            x_str(e.getMessage()).to_string(),
-                                                            e.getLineNumber(),
-                                                            e.getColumnNumber()),
-                                                "",
-                                                static_cast<std::size_t>(e.getLineNumber())};
-                          if (log.active(lvl_enum::err)) log.error(err.to_string());
-                          return err;
-                        }
-                        catch (const xercesc::XMLException& e)
-                        {
-                          auto err = error_info{
-                            processor_error::xsd_validation_failed, fmt::format("XML error: {}", x_str(e.getMessage()).to_string()), "", 0};
-                          if (log.active(lvl_enum::err)) log.error(err.to_string());
-                          return err;
-                        }
-                        catch (...)
-                        {
-                          // Neznana izjema — ne smemo pustiti future v broken stanju
-                          auto err = error_info{processor_error::internal_error, "Validation: unknown error", "", 0};
-                          if (log.active(lvl_enum::err)) log.error(err.to_string());
-                          return err;
-                        }
-                      })
+                 xercesc::MemBufInputSource src(
+                   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
+                   reinterpret_cast<const XMLByte*>(xml_data),
+                   static_cast<XMLSize_t>(xml_size),
+                   "xml_validation",
+                   false);
+                 vparser->parse(src);
+                 if (log.active(fsp::lvl_enum::info))
+                 {
+                   auto end      = std::chrono::steady_clock::now();
+                   auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+                   log.info(fmt::format("Validation finished in {} ms {} bytes.", duration.count(), xml_size));
+                 }
+                 return std::nullopt; // no errors
+               }
+               catch (const xercesc::SAXParseException& e)
+               { // there was a validaton error detected. signal & exit
+                 auto err = error_info{
+                   processor_error::xsd_validation_failed,
+                   fmt::format(
+                     "SAX validation error: {} (row:{} col:{})", x_str(e.getMessage()).to_string(), e.getLineNumber(), e.getColumnNumber()),
+                   "",
+                   static_cast<std::size_t>(e.getLineNumber())};
+                 if (log.active(lvl_enum::err)) log.error(err.to_string());
+                 return err;
+               }
+               catch (const xercesc::XMLException& e)
+               { // there was xml syntax error: signal & exit
+                 auto err = error_info{
+                   processor_error::xsd_validation_failed, fmt::format("XML error: {}", x_str(e.getMessage()).to_string()), "", 0};
+                 if (log.active(lvl_enum::err)) log.error(err.to_string());
+                 return err;
+               }
+               catch (...)
+               { // unknown error - we should not leave the feature in broken state
+                 auto err = error_info{processor_error::internal_error, "Validation: unknown error", "", 0};
+                 if (log.active(lvl_enum::err)) log.error(err.to_string());
+                 return err;
+               }
+             })
       .share(); // .share() → shared_future
   }
-
   // ============================================================================
   // Worker
   // ============================================================================
