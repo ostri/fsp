@@ -1,11 +1,12 @@
 #pragma once
 
+#include "lock_queue.hpp"
+#include "segment_result.hpp"
 #include "xml_node.hpp"
-#include "xml_processor.hpp" // za tipove kot segment_result, proc_data itd.
-// #include "lock_queue.hpp"
 #include "logger.hpp"
 #include "xml_segment.hpp"
 #include "mmap_file.hpp"
+#include "xpath_helpers.hpp"
 #include "xpath_limits.hpp"
 #include <libxml/xmlreader.h>
 #include <stack>
@@ -16,7 +17,8 @@
 
 namespace fsp
 {
-  using str_t = std::string;
+  using str_t         = std::string;
+  using segment_queue = lock_queue<xml_segment>;
   struct XmlTextReaderDeleter
   {
     void operator()(xmlTextReaderPtr reader) const;
@@ -62,17 +64,23 @@ namespace fsp
     result<segment_result>               process_segment(const xml_segment& seg);
     result<segment_result>               extract_xml_values(cstr_t xml_buf, const xml_segment& seg);
     std::expected<pp_result, err_result> process_and_prune_node( //
-      const fsp::xpath_node_struct& xpaths,
-      std::stack<stack_struct>&     stack,
-      const fsp::xpath_limits&      limits_vec,
-      fsp::segment_result&          seg_result);
+      const xpath_node_struct&  xpaths,
+      std::stack<stack_struct>& stack,
+      const xpath_limits&       limits_vec,
+      segment_result&           seg_result) const;
     int                                  process_positive_xpath_element( //
-      const fsp::xml_attr& xp,
-      std::size_t          ndx,
-      std::size_t          depth,
-      fsp::segment_result& seg_result);
-    str_t                                process_attribute(const auto& xp);
-    std::optional<std::string>           get_attribute_value_ns(const str_t& local_name, const str_t& namespace_uri);
+      const xml_attr& xp,
+      std::size_t     ndx,
+      std::size_t     depth,
+      segment_result& seg_result) const;
+    [[nodiscard]] str_t                  process_attribute(const xml_attr& xp) const;
+    [[nodiscard]] std::optional<str_t>   get_attribute_value_ns(const str_t& local_name, const str_t& namespace_uri) const;
+    segment_result                       loop(const xml_segment& seg, const fsp::xpath_node_struct& xpaths, const xpath_limits& limits);
+    bool                 open_tag(int& read_status, const xml_segment& seg, const auto& xpaths, const auto& limits, auto& res);
+    [[nodiscard]] cstr_t indent() const;
+    void                 close_tag(const xml_segment& seg);
+    void                 prepare_tree_stack(const auto& xpaths);
+    void                 obtain_value(const xml_segment& seg, const auto& xpaths, auto& res);
   private:
     // --- worker context ---
     // NOLINTBEGIN(cppcoreguidelines-avoid-const-or-ref-data-members)
@@ -88,12 +96,30 @@ namespace fsp
     std::atomic<bool>&           cancel_flag_;     //< are we interupted?
     const proc_data&             targets_;         //< targets to be processed
     UniqueXmlTextReader          reader_;          //< libxml2 reader
+    const bool                   log_trace_ = log_.active(fsp::lvl_enum::trace);
+    const bool                   log_debug_ = log_.active(fsp::lvl_enum::debug);
+    const bool                   log_info_  = log_.active(fsp::lvl_enum::info);
+    const bool                   log_warn_  = log_.active(fsp::lvl_enum::warn);
+    const bool                   log_error_ = log_.active(fsp::lvl_enum::err);
+    const bool                   log_crit_  = log_.active(fsp::lvl_enum::crit);
+    std::size_t                  depth_     = 0UL; // depth within the tree/xpath
+    std::stack<stack_struct>     tree_stack_;      // node and limits on specific depth
+    int                          value_ndx_ = -1;  // index of the xpath value; -1 -> no value found
+                                                   //    const char                   pad_       = '.';
     // NOLINTEND(cppcoreguidelines-avoid-const-or-ref-data-members)
   };
 
   inline void XmlTextReaderDeleter::operator()(xmlTextReaderPtr reader) const
   {
     if (reader != nullptr) xmlFreeTextReader(reader);
+  }
+
+  inline cstr_t xml_worker::indent() const
+  {
+    thread_local str_t indent_str(50, '.'); // NOLINT(readability-magic-numbers)
+    auto               len = depth_ * 2;
+    if (len > indent_str.size()) indent_str += indent_str;
+    return cstr_t{indent_str.data(), len};
   }
 
 } // namespace fsp

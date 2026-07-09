@@ -1,4 +1,5 @@
 #include "xml_worker.hpp"
+#include "segment_result.hpp"
 #include "x_str.hpp"
 #include "xpath_helpers.hpp"
 #include "xml_node.hpp"
@@ -129,98 +130,93 @@ namespace fsp
       throw;
     }
   }
-  // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-  result<segment_result> xml_worker::extract_xml_values(cstr_t xml_buf, const xml_segment& seg)
+  //////////////////////////////////////////////////////////////////////
+  void xml_worker::close_tag(const xml_segment& seg)
+  {
+    if (log_debug_) // -2 to align with start element
+    {
+      // if (indent.size() < depth * 2) indent.assign(depth * 2 * 2, pad);
+      log_.debug(fmt::format("seg:{:5} {}/{}", seg.id(), indent(), tree_stack_.top().node.tag()));
+    }
+    tree_stack_.pop();
+  }
+  void xml_worker::prepare_tree_stack(const auto& xpaths_depth)
+  {
+    if (tree_stack_.size() > 1)
+    {
+      while (! tree_stack_.empty())
+      {
+        auto el = tree_stack_.top();
+        log_.critical(fmt::format("tag: '{}'\n", el.node.tag()));
+        tree_stack_.pop();
+      }
+      throw std::runtime_error(fmt::format("stack is not empty size: {}", tree_stack_.size()));
+    }
+    if (tree_stack_.size() == 0)
+      tree_stack_.emplace(stack_struct{.node = xml_node{"top", "top_uri"}, .limits = fsp::p_limits(0, xpaths_depth)});
+  }
+  void xml_worker::obtain_value(const xml_segment& seg, const auto& xpaths, auto& res)
+  {
+    if (value_ndx_ != -1)
+    { // we have value that we need to remember
+      const auto* value      = reinterpret_cast<const char*>(xmlTextReaderConstValue(reader_.get()));
+      cstr_t      value_name = xpaths[value_ndx_].name();
+      res.values()[value_name].emplace_back(value != nullptr ? value : "");
+      value_ndx_ = -1; // again undefined
+      if (log_debug_)
+      {
+        log_.debug(
+          fmt::format("++seg:{:5} {}name: {} tag:'{}' value: {}", seg.id(), indent(), value_name, tree_stack_.top().node.tag(), value));
+      }
+    }
+    else if (log_debug_)
+    {
+      // if (indent.size() < depth * 2) indent.assign(depth * 2 * 2, pad);
+      log_.debug(fmt::format("--seg:{:5} {} tag: {} no value", seg.id(), indent(), tree_stack_.top().node.tag()));
+    }
+  }
+  bool xml_worker::open_tag(int& read_status, const xml_segment& seg, const auto& xpaths, const auto& limits, auto& res)
+  {
+    auto x = process_and_prune_node(xpaths, tree_stack_, limits, res);
+    if (! x)
+    { // FIXME too deep is critical error handle it properly
+      if (log_trace_) log_.trace(fmt::format("pruning: {} val:{}", x.error().err, tree_stack_.top().node.tag()));
+      read_status = x.error().status;
+      return false;
+    }
+    value_ndx_ = x.value().status;
+    if (log_debug_)
+    {
+      log_.debug(fmt::format("**seg:{:5} {}{} value_ndx: {}", seg.id(), indent(), tree_stack_.top().node.tag(), value_ndx_));
+    }
+    return true;
+  }
+  segment_result xml_worker::loop(const xml_segment& seg, const fsp::xpath_node_struct& xpaths, const xpath_limits& limits)
   {
     segment_result res(seg.id(), seg.subtree_type());
-    // NOLINTNEXTLINE(hicpp-signed-bitwise)
-    auto flags = (XML_PARSE_NOCDATA | XML_PARSE_NOERROR | XML_PARSE_NOWARNING | XML_PARSE_NOBLANKS | XML_PARSE_NONET);
-
-    //    UniqueXmlTextReader reader(xmlReaderForMemory(xml_buf.data(), static_cast<int>(xml_buf.size()), nullptr, nullptr, flags));
-    reader_ = UniqueXmlTextReader(xmlReaderForMemory(xml_buf.data(), static_cast<int>(xml_buf.size()), nullptr, nullptr, flags));
-
-    int                      read_status;
-    auto                     depth     = 0UL;
-    const char               pad       = '.';
-    const auto&              log       = log_;
-    const bool               log_trace = log.active(fsp::lvl_enum::trace);
-    const bool               log_debug = log.active(fsp::lvl_enum::debug);
-    const bool               log_crit  = log.active(fsp::lvl_enum::crit);
-    std::stack<stack_struct> tree_stack;
-    auto                     subtree_type = targets_.targets[seg.subtree_type()].original_ndx(); // seg.subtree_type();
-    const auto&              xpaths       = targets_.xpaths.at(subtree_type);
-    assert(xpaths.size() != 0);
-    const auto& limits = xpath_limits(targets_.xpaths.at(subtree_type));
-    if (log_trace)
-    {
-      log.trace(fmt::format("subtree type: {}\n{}", subtree_type, xpaths.dump()));
-      log.trace(limits.dump());
-    }
-    // ---------------------------------------------------------------------------------------------
-    read_status = xmlTextReaderRead(reader_.get());
-    tree_stack.emplace(stack_struct{.node = xml_node{"top", "top_uri"}, .limits = fsp::p_limits(0, xpaths.size())});
-    int                      value_ndx          = -1; // xpath index of the value
-    const std::size_t        initial_tree_depth = 50;
-    thread_local std::string indent(initial_tree_depth * 2, pad);
+    prepare_tree_stack(xpaths.size());
+    value_ndx_      = -1; // xpath index of the value
+    int read_status = xmlTextReaderRead(reader_.get());
     while (read_status == 1)
     {
       int  type      = xmlTextReaderNodeType(reader_.get());
       auto enum_type = static_cast<xmlReaderTypes>(type);
-      depth          = tree_stack.size() - 1;
+      depth_         = tree_stack_.size() - 1;
       switch (enum_type)
       {
       case XML_READER_TYPE_ELEMENT:
       { // open tag
-        auto x = process_and_prune_node(xpaths, tree_stack, limits, res);
-        if (! x)
-        { // FIXME too deep is critical error handle it properly
-          if (log_trace) log.trace(fmt::format("pruning: {} val:{}", x.error().err, tree_stack.top().node.tag()));
-          read_status = x.error().status;
-          continue;
-        }
-        value_ndx = x.value().status;
-        if (log_debug)
-        {
-          // if (indent.size() < depth * 2) indent.assign(depth * 2 * 2, pad);
-          log.debug(
-            fmt::format("**seg:{:5} {}{} value_ndx: {}", seg.id(), indent.substr(0, depth * 2), tree_stack.top().node.tag(), value_ndx));
-        }
+        if (! open_tag(read_status, seg, xpaths, limits, res)) continue;
         break;
       }
       case XML_READER_TYPE_TEXT:
       { // obtain values
-        if (value_ndx != -1)
-        { // we have value that we need to remember
-          const auto* value      = reinterpret_cast<const char*>(xmlTextReaderConstValue(reader_.get()));
-          cstr_t      value_name = xpaths[value_ndx].name();
-          res.values()[value_name].emplace_back(value != nullptr ? value : "");
-          value_ndx = -1; // again undefined
-          if (log_debug)
-          {
-            if (indent.size() < depth * 2) indent.assign(depth * 2 * 2, pad);
-            log.debug(fmt::format("++seg:{:5} {}name: {} tag:'{}' value: {}",
-                                  seg.id(),
-                                  indent.substr(0, (depth * 2) + 2),
-                                  value_name,
-                                  tree_stack.top().node.tag(),
-                                  value));
-          }
-        }
-        else if (log_debug)
-        {
-          // if (indent.size() < depth * 2) indent.assign(depth * 2 * 2, pad);
-          log.debug(fmt::format("--seg:{:5} {} tag: {} no value", seg.id(), indent.substr(0, depth * 2), tree_stack.top().node.tag()));
-        }
+        obtain_value(seg, xpaths, res);
         break;
       }
       case XML_READER_TYPE_END_ELEMENT:
-      {                // close tag
-        if (log_debug) // -2 to align with start element
-        {
-          // if (indent.size() < depth * 2) indent.assign(depth * 2 * 2, pad);
-          log.debug(fmt::format("seg:{:5} {}/{}", seg.id(), indent.substr(0, depth * 2), tree_stack.top().node.tag()));
-        }
-        tree_stack.pop();
+      { // close tag
+        close_tag(seg);
         break;
       }
       case XML_READER_TYPE_NONE:
@@ -240,17 +236,37 @@ namespace fsp
       case XML_READER_TYPE_XML_DECLARATION: [[fallthrough]];
       default:
         auto type_name = magic_enum::enum_name(enum_type);
-        if (log_crit) log.critical(fmt::format("nonsupported: {} {}", type_name, type));
+        auto msg       = fmt::format("nonsupported: {} {}", type_name, type);
+        if (log_crit_) log_.critical(msg);
+        throw std::runtime_error(msg);
       }
       read_status = xmlTextReaderRead(reader_.get());
     }
+    tree_stack_.pop();
     return res;
   }
+  // NO LINTNEXTLINE(readability-function-cognitive-complexity)
+  result<segment_result> xml_worker::extract_xml_values(cstr_t xml_buf, const xml_segment& seg)
+  {
+    //  NOLINTNEXTLINE(hicpp-signed-bitwise)
+    auto flags = (XML_PARSE_NOCDATA | XML_PARSE_NOERROR | XML_PARSE_NOWARNING | XML_PARSE_NOBLANKS | XML_PARSE_NONET);
+    reader_    = UniqueXmlTextReader(xmlReaderForMemory(xml_buf.data(), static_cast<int>(xml_buf.size()), nullptr, nullptr, flags));
+    auto        subtree_type = targets_.targets[seg.subtree_type()].original_ndx(); // seg.subtree_type();
+    const auto& xpaths       = targets_.xpaths.at(subtree_type);
+    assert(xpaths.size() != 0);
+    const auto& limits = xpath_limits(targets_.xpaths.at(subtree_type));
+    if (log_trace_)
+    {
+      log_.trace(fmt::format("subtree type: {}\n{}", subtree_type, xpaths.dump()));
+      log_.trace(limits.dump());
+    }
+    return loop(seg, xpaths, limits);
+  }
   std::expected<pp_result, err_result> xml_worker::process_and_prune_node( //
-    const fsp::xpath_node_struct& xpaths,
-    std::stack<stack_struct>&     stack,
-    const fsp::xpath_limits&      limits_vec,
-    fsp::segment_result&          seg_result)
+    const xpath_node_struct&  xpaths,
+    std::stack<stack_struct>& stack,
+    const xpath_limits&       limits_vec,
+    segment_result&           seg_result) const
   {
     int         read_status = 0;
     const char* uri         = reinterpret_cast<const char*>(xmlTextReaderConstNamespaceUri(reader_.get()));
@@ -311,42 +327,45 @@ namespace fsp
     return result; // Indicates normal execution flow, no pruning happened
   }
   int xml_worker::process_positive_xpath_element( //
-    const fsp::xml_attr& xp,
-    std::size_t          ndx,
-    std::size_t          depth,
-    fsp::segment_result& seg_result)
+    const xml_attr& xp,
+    std::size_t     ndx,
+    std::size_t     depth,
+    segment_result& seg_result) const
   {
-    const bool log_debug = log_.active(fsp::lvl_enum::debug);
-    if (xp.is_last(depth)) // are we reached the end of the current xpath?
+    if (xp.is_last(depth)) [[unlikely]] // are we reached the end of the current xpath?
     {
-      if (xp.is_attr()) // attribute xpath
+      if (xp.is_attr()) [[unlikely]] // attribute xpath
       {
         auto value = process_attribute(xp);
         seg_result.values()[xp.name()].emplace_back(value);
-        if (log_debug) log_.debug(fmt::format("attribute name: '{}' tag: {} value: '{}'", xp.name(), xp.attr_name(), value));
+        const bool log_debug = log_.active(fsp::lvl_enum::debug);
+        if (log_debug) [[unlikely]]
+          log_.debug(fmt::format("attribute name: '{}' tag: {} value: '{}'", xp.name(), xp.attr_name(), value));
         return -1;
       }
       return static_cast<int>(ndx);
     }
     return -1;
   }
-  std::optional<std::string> xml_worker::get_attribute_value_ns(const str_t& local_name, const str_t& namespace_uri)
+  std::optional<str_t> xml_worker::get_attribute_value_ns(const str_t& local_name, const str_t& namespace_uri) const
   {
     xmlChar* value = xmlTextReaderGetAttributeNs( //
       reader_.get(),
       BAD_CAST local_name.c_str(),
       ! namespace_uri.empty() ? BAD_CAST namespace_uri.c_str() : nullptr);
-    if (value == nullptr) return std::nullopt;
+    if (value == nullptr) [[unlikely]]
+      return std::nullopt;
     std::string result(reinterpret_cast<char*>(value));
     xmlFree(value); // pointer must be released
     return result;
   }
-  std::string xml_worker::process_attribute(const auto& xp)
+  std::string xml_worker::process_attribute(const xml_attr& xp) const
   {
     auto local_name = std::string(xp.attr_name());
     auto uri        = std::string(xp.attr_uri());
     auto value      = get_attribute_value_ns(local_name, uri);
-    if (value.has_value()) return value.value(); // non null value
+    if (value.has_value()) [[likely]]
+      return value.value(); // non null value
     throw std::runtime_error(fmt::format("attribute '{}:{}' has no value.", local_name, uri));
   }
 } // namespace fsp
