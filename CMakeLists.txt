@@ -126,7 +126,7 @@ set(b_target fsp_lib) # name of the target
 set(${b_target}_SOURCES
     ${CMAKE_SOURCE_DIR}/src/lib/x_str.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/handler.cpp
-    ${CMAKE_SOURCE_DIR}/src/lib/queue.cpp
+    ${CMAKE_SOURCE_DIR}/src/lib/lock_queue.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/xml_segment.cpp
 )
 # Specify additional libraries for fsp_lib (if needed)
@@ -144,7 +144,7 @@ set(${b_target}_SOURCES
     ${CMAKE_SOURCE_DIR}/src/lib/x_str.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/xerces_mgr.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/handler.cpp
-    ${CMAKE_SOURCE_DIR}/src/lib/queue.cpp
+    ${CMAKE_SOURCE_DIR}/src/lib/lock_queue.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/xml_segment.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/mmap_file.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/xml_processor.cpp

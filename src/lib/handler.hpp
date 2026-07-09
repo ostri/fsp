@@ -16,7 +16,7 @@
 #include "error_info.hpp"
 #include "logger.hpp"
 #include "parsing_util.hpp"
-#include "queue.hpp"
+#include "lock_queue.hpp"
 #include "x_str.hpp"
 
 namespace fsp

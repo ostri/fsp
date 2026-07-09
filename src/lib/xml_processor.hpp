@@ -24,7 +24,7 @@
 #include "mem_buf_holder.hpp"
 #include "mmap_file.hpp"
 #include "processor_config.hpp"
-#include "queue.hpp"
+#include "lock_queue.hpp"
 #include "xerces_mgr.hpp"
 #include "xpath_helpers.hpp"
 #include "parsing_util.hpp"
