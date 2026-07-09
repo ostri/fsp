@@ -38,10 +38,6 @@ Fast SEPA xml file parser
 ### profiling
 
 ```bash
-    cmake -B build-profile -DCMAKE_BUILD_TYPE=Profile
-    cmake --build build-profile --target fsp
-    cd build-profile
-    perf record -F 999 -g -- ../fsp ../../xml-data/pacs8-1M.xml
-    perf report > report.txt
-    perf report
+  # move to build folder
+  ../shell/profile.sh
 ```
