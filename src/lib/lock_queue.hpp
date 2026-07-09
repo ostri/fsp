@@ -4,17 +4,14 @@
 #include <condition_variable>
 #include <mutex>
 #include <queue>
-
-#include "xml_segment.hpp"
-
 namespace fsp
 {
   template <class T>
   class lock_queue
   {
   public:
-    void                      push(xml_segment&& s);        //< add new element ot be processed to the queue
-    bool                      pop(xml_segment& s);          //< block till available element or finished
+    void                      push(T&& s);                  //< add new element ot be processed to the queue
+    bool                      pop(T& s);                    //< block till available element or finished
     void                      set_finished();               //< we finished processing
     [[nodiscard]] bool        is_finished() const noexcept; //< are we finished processing?
     [[nodiscard]] std::size_t size() const;                 //< size of the waiting queue
@@ -55,7 +52,7 @@ namespace fsp
    * @param s element to be pushed
    */
   template <class T>
-  void lock_queue<T>::push(xml_segment&& s)
+  void lock_queue<T>::push(T&& s)
   {
     {
       std::lock_guard lock(mtx_);
@@ -71,7 +68,7 @@ namespace fsp
    * @return false - end of work
    */
   template <class T>
-  bool lock_queue<T>::pop(xml_segment& s)
+  bool lock_queue<T>::pop(T& s)
   {
     std::unique_lock lock(mtx_);
     cv_.wait(lock, [this] { return ! queue_.empty() || finished_; });

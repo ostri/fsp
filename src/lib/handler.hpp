@@ -18,6 +18,7 @@
 #include "parsing_util.hpp"
 #include "lock_queue.hpp"
 #include "x_str.hpp"
+#include "xml_segment.hpp"
 
 namespace fsp
 {
