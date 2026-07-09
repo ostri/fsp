@@ -1,5 +1,6 @@
 #pragma once
 
+#include "logger.hpp"
 #include <cstddef>
 #include <memory>
 #include <spdlog/logger.h>
@@ -10,7 +11,7 @@ namespace fsp
   class mem_buf_holder
   {
   public:
-    mem_buf_holder(const void* data, size_t size, std::string_view name, std::shared_ptr<spdlog::logger> logger);
+    mem_buf_holder(const void* data, size_t size, std::string_view name, const fsp_logger& logger);
     ~mem_buf_holder();
     /// no helper constructors
     mem_buf_holder(const mem_buf_holder&)            = delete;
@@ -25,8 +26,9 @@ namespace fsp
 
     [[nodiscard]] bool is_valid() const;
   private:
-    std::unique_ptr<xercesc::MemBufInputSource> source_; // xerces file buffer
-    std::shared_ptr<spdlog::logger>             logger_; // logger handler
-    std::string                                 name_;   // name of the file
+    const fsp_logger&                           logger_;    // logger handler
+    std::unique_ptr<xercesc::MemBufInputSource> source_;    // xerces file buffer
+    std::string                                 name_;      // name of the file
+    bool                                        log_debug_; // shall we log debug messages
   };
 } // namespace fsp

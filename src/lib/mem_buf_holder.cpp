@@ -4,9 +4,10 @@
 namespace fsp
 {
 
-  mem_buf_holder::mem_buf_holder(const void* data, size_t size, std::string_view name, std::shared_ptr<spdlog::logger> logger)
+  mem_buf_holder::mem_buf_holder(const void* data, size_t size, std::string_view name, const fsp_logger& logger)
   : logger_(std::move(logger))
   , name_(name)
+  , log_debug_(logger_.active(lvl_enum::debug))
   {
     if ((data != nullptr) && (size > 0))
     {
@@ -16,28 +17,28 @@ namespace fsp
         name_.data(),
         false);
 
-      if (logger_) { logger_->debug("Created buffer holder for '{}' ({} bytes)", name_, size); }
+      if (log_debug_) { logger_.debug(fmt::format("Created buffer holder for '{}' ({} bytes)", name_, size)); }
     }
     else
     {
-      if (logger_)
+      if (log_debug_)
       {
-        logger_->warn("Created empty buffer holder for '{}' (data: {}, size: {})", //
-                      name_,
-                      data != nullptr ? "valid" : "null",
-                      size);
+        logger_.warn(fmt::format("Created empty buffer holder for '{}' (data: {}, size: {})", //
+                                 name_,
+                                 data != nullptr ? "valid" : "null",
+                                 size));
       }
     }
   }
 
   mem_buf_holder::~mem_buf_holder()
   {
-    if (logger_)
+    if (log_debug_)
     {
-      if (source_) { logger_->debug("Destroying '{}' buffer holder)", name_.data()); }
+      if (source_) { logger_.debug(fmt::format("Destroying '{}' buffer holder)", name_)); }
       else
       {
-        logger_->debug("Destroying empty buffer holder '{}'", name_);
+        logger_.debug(fmt::format("Destroying empty buffer holder '{}'", name_));
       }
     }
   }
@@ -46,7 +47,7 @@ namespace fsp
 
   void mem_buf_holder::reset()
   {
-    if (logger_) { logger_->debug("Resetting buffer holder '{}'", name_); }
+    if (log_debug_) { logger_.debug(fmt::format("Resetting buffer holder '{}'", name_)); }
     source_.reset();
   }
 

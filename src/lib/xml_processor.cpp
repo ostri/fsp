@@ -237,7 +237,7 @@ namespace fsp
     std::size_t xsd_size,
     std::string xsd_path)
   {
-    const auto& logger = logger_; // kopija shared_ptr — nit ima lastno referenco
+    const auto& logger = logger_; // the thread has its own copy of logger
 
     // std::async vrne future; .share() ga pretvori v shared_future ki ga
     // lahko get() pokličemo večkrat brez uničenja vrednosti
@@ -251,8 +251,7 @@ namespace fsp
 
                         try
                         {
-                          // Lasten parser — xercesc::SAX2XMLReader ni thread-safe, ne smemo
-                          // deliti parser_ iz glavne niti
+                          // we need to create own parser, since it is not reentrant
                           std::unique_ptr<xercesc::SAX2XMLReader> vparser(xercesc::XMLReaderFactory::createXMLReader());
 
                           // NOLINTBEGIN(hicpp-no-array-decay)
@@ -267,7 +266,7 @@ namespace fsp
                           // NOLINTEND(hicpp-no-array-decay)
 
                           // Naloži XSD shemo v lasten parser
-                          mem_buf_holder xsd_holder(xsd_data, xsd_size, xsd_path, log.get());
+                          mem_buf_holder xsd_holder(xsd_data, xsd_size, xsd_path, log);
                           if (xsd_holder.source() != nullptr)
                             vparser->loadGrammar(*xsd_holder.source(), xercesc::Grammar::SchemaGrammarType, true);
 

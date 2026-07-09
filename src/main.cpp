@@ -101,7 +101,7 @@ int main(int argc, const char* argv[])
                                .log_level      = spdlog::level::trace, // spdlog::level::info;
                                .logger_name    = "fsp"};
 
-    const auto no_of_workers = 4U;                                   // number of paralell workers
+    const auto no_of_workers = 2U;                                   // number of paralell workers
     auto       result        = fsp::xml_processor::process_xml_file( //
       xml_file,                                                      // path to the xml file
       xsd_file,                                                      // path to the xsd file that xml file must comply with
