@@ -18,9 +18,9 @@ namespace fsp
     using value_type      = std::byte;
     using size_type       = size_t;
     using difference_type = std::ptrdiff_t;
-    using pointer         = const std::byte*;
+    using pointer         = std::byte*;
     using const_pointer   = const std::byte*;
-    using reference       = const std::byte&;
+    using reference       = std::byte&;
     using const_reference = const std::byte&;
     using iterator        = const_pointer;
     using const_iterator  = const_pointer;
@@ -69,5 +69,22 @@ namespace fsp
       return std::unexpected(std::string(e.what()));
     }
   }
+  inline mmap_file::iterator       mmap_file::begin() const noexcept { return data_; }
+  inline mmap_file::const_iterator mmap_file::cbegin() const noexcept { return data_; }
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic)
+  inline mmap_file::iterator mmap_file::end() const noexcept { return data_ + size_; }
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic)
+  inline mmap_file::const_iterator  mmap_file::cend() const noexcept { return data_ + size_; }
+  inline std::span<const std::byte> mmap_file::span() const noexcept { return {data_, size_}; }
+  inline mmap_file::                operator bool() const noexcept { return is_open(); }
+  inline std::string_view           mmap_file::path() const { return path_; }
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
+  inline std::string_view         mmap_file::view() const { return {reinterpret_cast<const char*>(data()), size()}; }
+  inline mmap_file::const_pointer mmap_file::data() const noexcept { return data_; }
+  inline mmap_file::size_type     mmap_file::size() const noexcept { return size_; }
+  inline bool                     mmap_file::empty() const noexcept { return size_ == 0; }
+  inline bool                     mmap_file::is_open() const noexcept { return fd_ != -1; }
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic)
+  inline mmap_file::const_reference mmap_file::operator[](size_type pos) const { return data_[pos]; }
 
 } // namespace fsp
