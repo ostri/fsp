@@ -13,17 +13,26 @@ namespace fsp
   [[nodiscard]] std::unique_ptr<spdlog::custom_flag_formatter> ThreadNameFormatter::clone() const
   { return std::make_unique<ThreadNameFormatter>(); }
 
-  // Zgradi logger glede na logger_config.
-  // Če sta enable_console in enable_file oba false, samodejno odpre barvno
-  // konzolno izhajanje kot rezervni izhod.
+  /**
+   * @brief Construct a new logger in accordance with the provided configuration
+   *
+   * If both enable_console and enable_file are false it opens color console
+   * as predefined logging device.
+   *
+   * @param cfg logger configuration
+   */
   fsp_logger::fsp_logger(const logger_config& cfg) { build(cfg); }
 
   fsp_logger::~fsp_logger()
   {
     if (logger_) logger_->flush();
   }
-
-  /// Vrne shared_ptr ki ga je varno kopirati in posredovati nitim.
+  /**
+   * @brief returns shred pointer to the logger
+   * Shared pointer can be copied or transfered to the threads.
+   *
+   * @return std::shared_ptr<spdlog::logger>
+   */
   [[nodiscard]] std::shared_ptr<spdlog::logger> fsp_logger::get() const { return logger_; }
 
   void fsp_logger::critical(const error_info& e) const
@@ -64,18 +73,14 @@ namespace fsp
 
   void fsp_logger::debug([[maybe_unused]] std::string_view msg) const
   {
-#ifndef NDEBUG
-    if (active(lvl_enum::debug)) [[unlikely]]
-      logger_->debug(msg);
-#endif
+    if constexpr (is_debug())
+      if (active(lvl_enum::debug)) logger_->debug(msg);
   }
 
   void fsp_logger::trace([[maybe_unused]] std::string_view msg) const
   {
-#ifndef NDEBUG
-    if (active(lvl_enum::trace)) [[unlikely]]
-      logger_->trace(msg);
-#endif
+    if constexpr (is_debug())
+      if (active(lvl_enum::trace)) logger_->trace(msg);
   }
 
   [[nodiscard]] lvl_enum fsp_logger::level() const noexcept { return static_cast<lvl_enum>(level_); }
@@ -97,7 +102,7 @@ namespace fsp
 
   void fsp_logger::build(const logger_config& cfg)
   {
-    log_thread_name = "main >";
+    make_log_name("main >");
     std::vector<spdlog::sink_ptr> sinks;
     if (cfg.enable_console) // console logger
     {

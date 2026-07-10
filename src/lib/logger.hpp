@@ -9,6 +9,7 @@
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <spdlog/spdlog.h>
 
+#include "common.hpp"
 #include "error_info.hpp"
 #include "logger_config.hpp"
 
@@ -40,7 +41,7 @@ namespace fsp
     trace = spdlog::level::trace
   };
   // ---------------------------------------------------------------------------
-  // fsp_logger — tanek razred okrog spdlog::logger.
+  // fsp_logger — spdlog::logger wrapper
   //
   // Odgovornosti:
   //   - gradi spdlog logger iz logger_config (konzola, datoteka ali oboje)
@@ -50,16 +51,16 @@ namespace fsp
   //     gradnji sporočilnih nizov ko raven ni aktivna)
   //   - izpostavlja underlying shared_ptr za kodo ki neposredno kliče spdlog
   //
-  // Uporaba:
+  // Usage:
   //   fsp::fsp_logger lg(cfg.log_config);
-  //   lg.info("Začenjam.");
-  //   auto sptr = lg.get();          // za posredovanje workerjem
+  //   lg.info("Starting...");
+  //   auto sptr = lg.get();          // to transfer to workers
   // ---------------------------------------------------------------------------
   class fsp_logger
   {
   public:
     explicit fsp_logger(const logger_config& cfg);
-    // Nekopirljiv, nepremakljiv — lastništvo se prenaša prek shared_ptr.
+    // cant be copied or moved — ownership through shared_ptr.
     fsp_logger(const fsp_logger&)            = delete;
     fsp_logger& operator=(const fsp_logger&) = delete;
     fsp_logger(fsp_logger&&)                 = delete;
@@ -74,8 +75,11 @@ namespace fsp
     void                                          info(std::string_view msg) const;
     void                                          debug(std::string_view msg) const;
     void                                          trace(std::string_view msg) const;
-    [[nodiscard]] bool                            active(lvl_enum lvl = lvl_enum::trace) const noexcept;
+    [[nodiscard]] constexpr bool                  active(lvl_enum lvl = lvl_enum::trace) const noexcept;
     [[nodiscard]] lvl_enum                        level() const noexcept;
+    [[nodiscard]] cstr_t                          log_name() const;
+    void                                          make_log_name(cstr_t parent_name, cstr_t child_name) const;
+    void                                          make_log_name(cstr_t name) const;
     void                                          set_level(lvl_enum lvl);
   private: /// methods
     static std::unique_ptr<spdlog::pattern_formatter> make_formatter(std::string_view pattern);
@@ -86,12 +90,19 @@ namespace fsp
   };
 
   /// true if level is right for logging
-  [[nodiscard]] inline bool fsp_logger::active(lvl_enum lvl) const noexcept
+  [[nodiscard]] constexpr bool fsp_logger::active(lvl_enum lvl) const noexcept
   {
-#ifdef NDEBUG
-    // trace and debug are disabled in release version of the program
-    if (lvl == lvl_enum::trace || lvl == lvl_enum::debug) return false;
-#endif
+    if constexpr (is_release())
+      if (lvl == lvl_enum::trace || lvl == lvl_enum::debug) return false;
     return static_cast<uint8_t>(lvl) >= level_;
   }
+
+  inline cstr_t fsp_logger::log_name() const { return log_thread_name; }
+  inline void   fsp_logger::make_log_name(cstr_t parent_name, cstr_t child_name) const
+  {
+    if (child_name.empty()) log_thread_name = fmt::format("{}", parent_name);
+    else log_thread_name = fmt::format("{}|{}", parent_name, child_name);
+  }
+
+  inline void fsp_logger::make_log_name(cstr_t name) const { make_log_name(name, ""); };
 } // namespace fsp
