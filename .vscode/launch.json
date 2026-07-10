@@ -3,7 +3,7 @@
   "configurations": [
     {
       "name": "fsp-core",
-      "type": "lldb",
+      "type": "cppdbg",
       "request": "launch",
       "program": "${workspaceRoot}/build/fsp",
       "args": [
@@ -12,14 +12,10 @@
       ],
       "cwd": "${workspaceRoot}/build",
       "preLaunchTask": "build", // Najprej požene task "build" v tasks.json
-      "console": "integratedTerminal",
-      "env": {
-        "ASAN_OPTIONS": "detect_leaks=0"
-      },
     },
     {
       "name": "small file",
-      "type": "lldb",
+      "type": "cppdbg",
       "request": "launch",
       "program": "${workspaceRoot}/build/fsp",
       "args": [
@@ -27,10 +23,29 @@
       ],
       "cwd": "${workspaceRoot}/build",
       "preLaunchTask": "build", // Najprej požene task "build" v tasks.json
-      "console": "integratedTerminal",
-      "env": {
-        "ASAN_OPTIONS": "detect_leaks=0"
-      },
+      "environment": [
+        {
+          "name": "ASAN_OPTIONS",
+          "value": "detect_leaks=0"
+        }
+      ]
+    },
+    {
+      "name": "pacs8",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "${workspaceRoot}/build/pacs8",
+      "args": [
+        "../xml-data/pacs8-2.xml",
+      ],
+      "cwd": "${workspaceRoot}/build",
+      "preLaunchTask": "build", // Najprej požene task "build" v tasks.json
+      "environment": [
+        {
+          "name": "ASAN_OPTIONS",
+          "value": "detect_leaks=0"
+        }
+      ]
     }
   ]
 }
