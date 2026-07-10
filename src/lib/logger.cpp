@@ -102,7 +102,7 @@ namespace fsp
 
   void fsp_logger::build(const logger_config& cfg)
   {
-    make_log_name("main >");
+    // make_log_name("main >");
     std::vector<spdlog::sink_ptr> sinks;
     if (cfg.enable_console) // console logger
     {

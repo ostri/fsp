@@ -7,6 +7,7 @@
 #include <magic_enum.hpp>
 #include <spdlog/spdlog.h>
 #include <thread>
+#include <utility>
 #include <libxml/xmlreader.h>
 #include <fmt/chrono.h>
 namespace
@@ -18,22 +19,31 @@ namespace fsp
   // ============================================================================
   // Constructor / Destructor
   // ============================================================================
-
   xml_processor::xml_processor(processor_config cfg)
+  : fsp::xml_processor(std::move(cfg), "main")
+  {
+  }
+
+  xml_processor::xml_processor(processor_config cfg, const str_t& parent_log_name)
   : logger_(cfg.log_config)
   , config_(std::move(cfg))
+  , parent_log_name_(parent_log_name)
   {
-#ifdef NDEBUG
-    constexpr std::string_view build_type = "release";
-#else
-    constexpr std::string_view build_type = "debug";
-#endif
-    if (config_.num_workers == 0) config_.num_workers = std::thread::hardware_concurrency();
-    if (config_.num_workers == 0) config_.num_workers = 1; // if statement above fails
-    logger_.info(fmt::format("XML Processor: started: build type: {} -> {} workers, validation: {}",
-                             build_type,
-                             config_.num_workers,
-                             config_.validate_against_xsd));
+    bool first_time = logger_.log_name() == "unknown";
+    // if (! parent_log_name.empty()) logger_.make_log_name(parent_log_name, "sax");
+    // else if (first_time) logger_.make_log_name("main");
+    if (first_time)
+    {
+      std::string_view build_type;
+      if constexpr (is_release()) build_type = "release";
+      else build_type = "debug";
+      if (config_.num_workers == 0) config_.num_workers = std::thread::hardware_concurrency();
+      if (config_.num_workers == 0) config_.num_workers = 1; // if statement above fails
+      logger_.info(fmt::format("XML Processor: started: build type: {} -> {} workers, validation: {}",
+                               build_type,
+                               config_.num_workers,
+                               config_.validate_against_xsd));
+    }
   }
 
   xml_processor::~xml_processor()
@@ -200,6 +210,8 @@ namespace fsp
 
     for (std::size_t i = 0; i < config_.num_workers; ++i)
     {
+      str_t parent_name = logger_.log_name();
+      // logger_.info(fmt::format("DEBUG: start_workers parent for wrk{}: {}", i, parent_name)); // ← DODAJ
       workers_.emplace_back(xml_worker{seg_queue_,
                                        *active_mmap_,
                                        results_,
@@ -210,7 +222,8 @@ namespace fsp
                                        error_count_,
                                        cancel_flag_,
                                        logger_,
-                                       config_.targets},
+                                       config_.targets,
+                                       parent_name},
                             i);
     }
     logger_.info(fmt::format("{} workers started.", config_.num_workers));
@@ -438,7 +451,8 @@ namespace fsp
     xml_processor proc({.targets              = proc_data, //
                         .num_workers          = num_workers,
                         .validate_against_xsd = ! xsd_path.empty(),
-                        .log_config           = log_cfg});
+                        .log_config           = log_cfg},
+                       "outer");
     auto          res = proc.process_file(xml_path, xsd_path);
     if (! res) return std::unexpected(res.error());
     return std::make_pair(proc.get_results(), proc.get_errors());
@@ -447,6 +461,7 @@ namespace fsp
 
   void_result xml_processor::process_files(const std::vector<std::string>& xml_paths, const std::string& xsd_path, std::size_t num_parallel)
   {
+    logger_.make_log_name(">");
     if (xml_paths.empty())
     {
       logger_.info("No files to process.");
@@ -485,22 +500,31 @@ namespace fsp
     file_workers.reserve(num_parallel);
     for (std::size_t i = 0; i < num_parallel; ++i)
     {
+      auto log_name = logger_.log_name();
       file_workers.emplace_back(
-        [this, &file_queue, &xsd_path, &results_agg_mutex, &all_results, &all_errors, &file_processed, &has_error, &first_error, i]()
+        [this, //
+         &file_queue,
+         &xsd_path,
+         &results_agg_mutex,
+         &all_results,
+         &all_errors,
+         &file_processed,
+         &has_error,
+         &first_error,
+         i,
+         log_name]()
         {
           const auto& log = logger_;
-          log_thread_name = fmt::format("f{}>", i);
+          log.make_log_name(log_name, fmt::format("ft{}", i));
           while (true)
           {
             std::string xml_path;
             log.info(fmt::format("Waiting for file ..."));
             if (! file_queue.pop(xml_path)) break; // queue finished
             log.info(fmt::format("Processing file: '{}'", xml_path));
-
             // Each file gets its own processor instance to avoid state conflicts
-            xml_processor file_proc(config_);
-
-            auto res = file_proc.process_file(xml_path, xsd_path);
+            xml_processor file_proc(config_, log.log_name());
+            auto          res = file_proc.process_file(xml_path, xsd_path);
             if (! res)
             {
               auto err = res.error();

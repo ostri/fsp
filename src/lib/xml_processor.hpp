@@ -38,6 +38,7 @@ namespace fsp
   {
   public:
     explicit xml_processor(processor_config cfg);
+    xml_processor(processor_config cfg, const str_t& parent_log_name);
     ~xml_processor();
 
     xml_processor(const xml_processor&)            = delete;
@@ -110,6 +111,7 @@ namespace fsp
     std::chrono::steady_clock::time_point   start_time_;
     std::unique_ptr<mem_buf_holder>         xsd_holder_;
     const fsp::mmap_file*                   active_mmap_ = nullptr; // reference to mmap file (needed by workers)
+    str_t                                   parent_log_name_;
   };
 } // namespace fsp
 

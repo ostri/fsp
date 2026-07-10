@@ -9,6 +9,7 @@ namespace fsp
   using cstr_XMLCh_t = std::basic_string_view<XMLCh>;
   using str_XMLCh_t  = std::basic_string<XMLCh>;
   using cstr_t       = std::string_view;
+  using str_t        = std::string;
   // Whitespace characters to trim
   constexpr cstr_t WHITESPACE = " \t\n\r";
   // Trims whitespace from the start of the string_view

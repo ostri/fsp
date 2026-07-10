@@ -77,7 +77,7 @@ namespace fsp
     void                                          trace(std::string_view msg) const;
     [[nodiscard]] constexpr bool                  active(lvl_enum lvl = lvl_enum::trace) const noexcept;
     [[nodiscard]] lvl_enum                        level() const noexcept;
-    [[nodiscard]] cstr_t                          log_name() const;
+    [[nodiscard]] str_t                           log_name() const;
     void                                          make_log_name(cstr_t parent_name, cstr_t child_name) const;
     void                                          make_log_name(cstr_t name) const;
     void                                          set_level(lvl_enum lvl);
@@ -97,10 +97,10 @@ namespace fsp
     return static_cast<uint8_t>(lvl) >= level_;
   }
 
-  inline cstr_t fsp_logger::log_name() const { return log_thread_name; }
-  inline void   fsp_logger::make_log_name(cstr_t parent_name, cstr_t child_name) const
+  inline str_t fsp_logger::log_name() const { return log_thread_name; }
+  inline void  fsp_logger::make_log_name(cstr_t parent_name, cstr_t child_name) const
   {
-    if (child_name.empty()) log_thread_name = fmt::format("{}", parent_name);
+    if (child_name.empty()) log_thread_name = parent_name;
     else log_thread_name = fmt::format("{}|{}", parent_name, child_name);
   }
 

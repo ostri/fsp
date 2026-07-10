@@ -9,6 +9,7 @@
 #include <magic_enum.hpp>
 #include <libxml/xmlreader.h>
 #include <stack>
+#include <utility>
 // #include <thread>
 
 namespace
@@ -28,7 +29,8 @@ namespace fsp
                          std::atomic<std::size_t>&    error_count,
                          std::atomic<bool>&           cancel_flag,
                          const fsp_logger&            log,
-                         const proc_data&             targets)
+                         const proc_data&             targets,
+                         str_t                        parent_log_name)
   : log_(log)
   , seg_queue_(seg_queue)
   , xml_mmap_(xml_mmap)
@@ -40,13 +42,14 @@ namespace fsp
   , error_count_(error_count)
   , cancel_flag_(cancel_flag)
   , targets_(targets)
+  , parent_log_name_(std::move(parent_log_name))
   {
   }
 
   void xml_worker::operator()([[maybe_unused]] const std::stop_token& st, int worker_id)
   {
-    auto t0              = std::chrono::steady_clock::now();
-    log_thread_name      = fmt::format("wrk{:03}", worker_id);
+    auto t0 = std::chrono::steady_clock::now();
+    log_.make_log_name(parent_log_name_, fmt::format("st{:02}", worker_id));
     const bool log_debug = log_.active(fsp::lvl_enum::debug);
 
     if (log_debug) log_.debug(fmt::format("Worker thread '{}' started.", log_thread_name));

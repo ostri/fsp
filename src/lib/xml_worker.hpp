@@ -55,7 +55,8 @@ namespace fsp
                std::atomic<std::size_t>&    error_count,
                std::atomic<bool>&           cancel_flag,
                const fsp_logger&            log,
-               const proc_data&             targets);
+               const proc_data&             targets,
+               str_t                        parent_log_name);
 
     // main functor method
     void operator()(const std::stop_token& st, int worker_id);
@@ -105,7 +106,7 @@ namespace fsp
     std::size_t                  depth_     = 0UL; // depth within the tree/xpath
     std::stack<stack_struct>     tree_stack_;      // node and limits on specific depth
     int                          value_ndx_ = -1;  // index of the xpath value; -1 -> no value found
-                                                   //    const char                   pad_       = '.';
+    str_t                        parent_log_name_;
     // NOLINTEND(cppcoreguidelines-avoid-const-or-ref-data-members)
   };
 
