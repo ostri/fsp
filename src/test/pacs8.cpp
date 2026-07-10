@@ -6,6 +6,7 @@
 #include <spdlog/common.h>
 #include <string>
 #include <vector>
+#include <filesystem>
 namespace
 {
   static constexpr auto fetch_ns()
@@ -62,15 +63,24 @@ namespace
     return 1;
   }
 }; // namespace
+namespace fs = std::filesystem;
 int main(int argc, const char* argv[])
 {
+  using str_t = std::string;
   if (argc == 1) return help(*argv);
   std::vector<std::string> args(argv, argv + argc); // NOLINT (cppcoreguidelines-pro-bounds-pointer-arithmetic)
-
+  args.erase(args.begin());
   try
   {
-    const std::string xml_file(argv[1]);                  // NOLINT
-    const std::string xsd_file(argc == 3 ? argv[2] : ""); // NOLINT
+    std::string        xsd_file;
+    std::vector<str_t> files;
+    files.reserve(args.size());
+    for (const auto& file : args)
+    {
+      auto fn = fs::absolute(file).lexically_normal().string();
+      if (fn.ends_with(".xsd")) xsd_file = fn;
+      else files.push_back(fn);
+    };
 
     constexpr auto        ns          = fetch_ns();
     constexpr auto        targets_raw = fetch_targets();
@@ -102,25 +112,35 @@ int main(int argc, const char* argv[])
                                .log_level      = spdlog::level::trace, // spdlog::level::info;
                                .logger_name    = "fsp"};
 
-    const auto no_of_workers = 2U;                                   // number of paralell workers
-    auto       result        = fsp::xml_processor::process_xml_file( //
-      xml_file,                                                      // path to the xml file
-      xsd_file,                                                      // path to the xsd file that xml file must comply with
-      all,                                                           // array of xpaths that define split points of the xml tree
-      no_of_workers,                                                 // number of workers that process the xml file in parallel (0=all)
-      log_cfg                                                        // configuration of logging
-    );
+    const auto no_of_workers = 2U; // number of paralell workers
 
-    if (! result)
+    auto cfg = fsp::processor_config{//
+                                     .targets              = all,
+                                     .num_workers          = no_of_workers,
+                                     .validate_against_xsd = ! xsd_file.empty(),
+                                     .log_config           = log_cfg};
+
+    fsp::xml_processor proc(cfg);
+    auto               res = proc.process_files(files, xsd_file, 4); // 4 parallel workers
+    if (! res)
     {
-      std::cerr << "Processing failed: " << result.error().to_string() << "\n";
+      std::cerr << "Processing failed: " << res.error().to_string() << "\n";
       return 1;
     }
-    auto& [results, errors] = *result;
+    // Get aggregated results
+    auto results = proc.get_results();
+    auto errors  = proc.get_errors();
 
     std::cout << "\n=== Processing Results ===\n";
-    std::cout << "Processed segments: " << results.size() << "\n";
-    std::cout << "Errors: " << errors.size() << "\n";
+    std::cout << "Total files processed: " << files.size() << "\n";
+    std::cout << "Successful segments:   " << results.size() << "\n";
+    std::cout << "Errors:                " << errors.size() << "\n";
+
+    if (! errors.empty())
+    {
+      std::cout << "\n--- Errors ---\n";
+      for (const auto& e : errors) { std::cout << "  " << e.seg_id() << "\n"; }
+    }
   }
   catch (const std::exception& e)
   {

@@ -443,4 +443,117 @@ namespace fsp
     if (! res) return std::unexpected(res.error());
     return std::make_pair(proc.get_results(), proc.get_errors());
   }
+
+
+  void_result xml_processor::process_files(const std::vector<std::string>& xml_paths, const std::string& xsd_path, std::size_t num_parallel)
+  {
+    if (xml_paths.empty())
+    {
+      logger_.info("No files to process.");
+      return {};
+    }
+
+    if (num_parallel == 0)
+    {
+      num_parallel = std::thread::hardware_concurrency();
+      if (num_parallel == 0) num_parallel = 1;
+    }
+    num_parallel = std::min(num_parallel, xml_paths.size());
+
+    logger_.info(fmt::format(
+      "Processing {} XML files with {} parallel workers. XSD: {}", xml_paths.size(), num_parallel, xsd_path.empty() ? "none" : xsd_path));
+
+    start_time_ = std::chrono::steady_clock::now();
+
+    // Queue for file paths
+    lock_queue<std::string> file_queue;
+    for (const auto& path : xml_paths)
+    {
+      file_queue.push(std::string(path)); // copy
+    }
+    file_queue.set_finished(); // after all files are communicated we need to signal that this is all
+    // otherwise program hands on thread join
+    std::vector<std::jthread>   file_workers;
+    std::mutex                  results_agg_mutex;
+    std::vector<segment_result> all_results;
+    std::vector<segment_result> all_errors;
+    std::atomic<std::size_t>    file_processed{0};
+    std::atomic<bool>           has_error{false};
+    std::optional<error_info>   first_error;
+
+    // Start workers
+    file_workers.reserve(num_parallel);
+    for (std::size_t i = 0; i < num_parallel; ++i)
+    {
+      file_workers.emplace_back(
+        [this, &file_queue, &xsd_path, &results_agg_mutex, &all_results, &all_errors, &file_processed, &has_error, &first_error, i]()
+        {
+          const auto& log = logger_;
+          log_thread_name = fmt::format("f{}>", i);
+          while (true)
+          {
+            std::string xml_path;
+            log.info(fmt::format("Waiting for file ..."));
+            if (! file_queue.pop(xml_path)) break; // queue finished
+            log.info(fmt::format("Processing file: '{}'", xml_path));
+
+            // Each file gets its own processor instance to avoid state conflicts
+            xml_processor file_proc(config_);
+
+            auto res = file_proc.process_file(xml_path, xsd_path);
+            if (! res)
+            {
+              auto err = res.error();
+              {
+                std::lock_guard<std::mutex> lock(results_agg_mutex);
+                if (! has_error)
+                {
+                  has_error   = true;
+                  first_error = err;
+                }
+              }
+              log.error(fmt::format("File {} failed: {}", xml_path, err.to_string()));
+            }
+            else
+            {
+              auto fr = file_proc.get_results();
+              auto fe = file_proc.get_errors();
+              {
+                std::lock_guard<std::mutex> lock(results_agg_mutex);
+                all_results.insert(all_results.end(), std::make_move_iterator(fr.begin()), std::make_move_iterator(fr.end()));
+                all_errors.insert(all_errors.end(), std::make_move_iterator(fe.begin()), std::make_move_iterator(fe.end()));
+              }
+              log.info(fmt::format("File '{}' success*********", xml_path));
+            }
+            ++file_processed;
+          }
+        });
+    }
+
+    // Wait for all workers
+    for (auto& w : file_workers)
+      if (w.joinable()) w.join();
+
+    // Aggregate results into this instance
+    {
+      std::lock_guard lock(results_mutex_);
+      results_ = std::move(all_results);
+    }
+    {
+      std::lock_guard lock(errors_mutex_);
+      errors_ = std::move(all_errors);
+    }
+    // update statistics
+    processed_count_.store(results_.size(), std::memory_order_relaxed);
+    error_count_.store(errors_.size(), std::memory_order_relaxed);
+    if (has_error && first_error)
+    {
+      logger_.error(fmt::format("process_files failed with first error: {}", first_error->to_string()));
+      return std::unexpected(*first_error);
+    }
+
+    success_ = true;
+    logger_.info(fmt::format("Processed {} files successfully.", file_processed.load()));
+    return {};
+  }
 } // namespace fsp

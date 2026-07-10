@@ -60,12 +60,22 @@ namespace fsp
     explicit xml_processor(processor_config cfg);
     ~xml_processor();
 
-    xml_processor(const xml_processor&)                                  = delete;
-    xml_processor& operator=(const xml_processor&)                       = delete;
-    xml_processor(xml_processor&&)                                       = delete;
-    xml_processor&                            operator=(xml_processor&&) = delete;
-    void_result                               process_file(const std::string& xml_path, const std::string& xsd_path = "");
-    void_result                               process_from_buffer(fsp::mmap_file& xml_mmap, fsp::mmap_file* xsd_mmap = nullptr);
+    xml_processor(const xml_processor&)            = delete;
+    xml_processor& operator=(const xml_processor&) = delete;
+    xml_processor(xml_processor&&)                 = delete;
+    xml_processor& operator=(xml_processor&&)      = delete;
+    void_result    process_file(const std::string& xml_path, const std::string& xsd_path = "");
+    void_result    process_from_buffer(fsp::mmap_file& xml_mmap, fsp::mmap_file* xsd_mmap = nullptr);
+    /* @brief Process multiple XML files in parallel using N workers.
+     * Each worker processes files sequentially from the queue using process_file.
+     * Results and errors are collected from all files.
+     *
+     * @param xml_paths vector of XML file paths
+     * @param xsd_path XSD file path (shared for all)
+     * @param num_parallel number of parallel workers (0 = auto)
+     * @return void_result success or first error
+     */
+    void_result process_files(const std::vector<std::string>& xml_paths, const std::string& xsd_path = "", std::size_t num_parallel = 0);
     [[nodiscard]] std::vector<segment_result> get_results();
     [[nodiscard]] std::vector<segment_result> get_errors();
     struct stats
