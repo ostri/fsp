@@ -523,7 +523,7 @@ namespace fsp
                 all_results.insert(all_results.end(), std::make_move_iterator(fr.begin()), std::make_move_iterator(fr.end()));
                 all_errors.insert(all_errors.end(), std::make_move_iterator(fe.begin()), std::make_move_iterator(fe.end()));
               }
-              log.info(fmt::format("File '{}' success*********", xml_path));
+              log.info(fmt::format("File '{}' success", xml_path));
             }
             ++file_processed;
           }

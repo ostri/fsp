@@ -34,26 +34,6 @@ namespace fsp
   using cstr_t            = std::string_view;
   using processing_result = std::expected<std::pair<std::vector<segment_result>, std::vector<segment_result>>, error_info>;
   using segment_queue     = lock_queue<xml_segment>;
-
-  // // Worker context - all data that is needed by the worker
-  // // NOLINTBEGIN(cppcoreguidelines-avoid-const-or-ref-data-members)
-  // struct worker_context
-  // {
-  //   int                          worker_id;       // unique id of the worker
-  //   segment_queue&               seg_queue;       // input queue
-  //   const fsp::mmap_file&        xml_mmap;        // mmap mapping for buffer segment
-  //   std::vector<segment_result>& results;         // output queue for valid transactions
-  //   std::vector<segment_result>& errors;          // output queue for transactions with errors
-  //   std::mutex&                  results_mutex;   // results queue mutex
-  //   std::mutex&                  errors_mutex;    // errors queue mitex
-  //   std::atomic<std::size_t>&    processed_count; // number of processed segments
-  //   std::atomic<std::size_t>&    error_count;     // number of detected errors
-  //   std::atomic<bool>&           cancel_flag;     // is the operation cancelled?
-  //   const fsp_logger&            log;             // logger wrapper
-  //   const proc_data&             targets;         // how to partition the xml buffer and which
-  //                                                 // tags to extract from each partition type
-  // };
-  // // NOLINTEND(cppcoreguidelines-avoid-const-or-ref-data-members)
   class xml_processor
   {
   public:
@@ -66,7 +46,7 @@ namespace fsp
     xml_processor& operator=(xml_processor&&)      = delete;
     void_result    process_file(const std::string& xml_path, const std::string& xsd_path = "");
     void_result    process_from_buffer(fsp::mmap_file& xml_mmap, fsp::mmap_file* xsd_mmap = nullptr);
-    /* @brief Process multiple XML files in parallel using N workers.
+    /** @brief Process multiple XML files in parallel using N workers.
      * Each worker processes files sequentially from the queue using process_file.
      * Results and errors are collected from all files.
      *
