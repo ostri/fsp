@@ -190,6 +190,7 @@ set(${b_target}_SOURCES
 )
 set(FSP_TARGET_${b_target}_INCLUDES ${CMAKE_SOURCE_DIR}/src/auxiliary)
 set(FSP_TARGET_${b_target}_LIBS
+    fmt::fmt
     XercesC::XercesC
 )
 add_fsp_target(${b_target} EXECUTABLE ${${b_target}_SOURCES})
@@ -266,12 +267,14 @@ add_fsp_target(${b_target} EXECUTABLE ${${b_target}_SOURCES})
 set(b_target validator) # name of the target
 set(${b_target}_SOURCES
     ${CMAKE_SOURCE_DIR}/src/auxiliary/validator.cpp
+    ${CMAKE_SOURCE_DIR}/src/lib/xerces_mgr.cpp
+    ${CMAKE_SOURCE_DIR}/src/lib/x_str.cpp
 )
 set(FSP_TARGET_${b_target}_INCLUDES
   ${CMAKE_SOURCE_DIR}/src/lib
   ${CMAKE_SOURCE_DIR}/src/test
   )
-set(FSP_TARGET_${b_target}_LIBS
+set(FSP_TARGET_${b_target}_LIBS PRIVATE
     fmt::fmt
     spdlog::spdlog
     magic_enum::magic_enum

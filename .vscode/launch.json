@@ -46,6 +46,24 @@
           "value": "detect_leaks=0"
         }
       ]
+    },
+    {
+      "name": "validator",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "${workspaceRoot}/build/validator",
+      "args": [
+        "../xsd/pacs.008.xsd",
+        "../xml-data/pacs8-2.xml"
+      ],
+      "cwd": "${workspaceRoot}/build",
+      "preLaunchTask": "build", // Najprej požene task "build" v tasks.json
+      "environment": [
+        {
+          "name": "ASAN_OPTIONS",
+          "value": "detect_leaks=0"
+        }
+      ]
     }
   ]
 }

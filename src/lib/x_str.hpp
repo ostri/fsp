@@ -18,8 +18,6 @@ namespace fsp
     explicit x_str(std::u16string_view u16);
     x_str(const x_str& other);
     x_str(x_str&& other) noexcept;
-    //    x_str(const x_str&)            = delete;
-    //    x_str& operator=(const x_str&) = delete;
     /// operators
     x_str&                         operator=(const x_str& other);
     x_str&                         operator=(x_str&& other) noexcept;
