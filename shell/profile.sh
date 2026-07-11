@@ -4,7 +4,9 @@ folder=profile_$$
 mkdir $folder
 cd $folder
 cmake ../.. -DCMAKE_BUILD_TYPE=Profile
-cmake --build . --parallel --target fsp
-perf record -F 999 -g -- ./fsp ../../xml-data/pacs8-1M.xml ../../xsd/pacs.008.xsd
+cmake --build . --parallel --target pacs8
+x=../../xml-data/pacs8-1M.xml
+y=../../xsd/pacs.008.xsd
+perf record -F 999 -g -- ./pacs8 $x $x $x $x $x $x $x $x $x $x $y
 perf report > report.txt
 perf report
