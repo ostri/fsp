@@ -1,4 +1,5 @@
 #include <fmt/base.h>
+#include <memory>
 #include <xercesc/sax2/SAX2XMLReader.hpp>
 #include <xercesc/sax2/XMLReaderFactory.hpp>
 #include <xercesc/sax2/DefaultHandler.hpp>
@@ -15,59 +16,39 @@
 #include <vector>
 #include <string>
 #include <thread>
-#include <memory>
 
 // using namespace xercesc;
 namespace
 {
-  class ValidatorErrorHandler : public xercesc::DefaultHandler
+  using gr_pool_t = std::unique_ptr<xercesc::XMLGrammarPoolImpl>;
+  using str_t     = std::string;
+  class validation_err_handler : public xercesc::DefaultHandler
   {
   public:
-    void reset() { had_error = false; }
-
-    void error(const xercesc::SAXParseException& exc) override
-    {
-      had_error = true;
-      fmt::print("Napaka pri validaciji (vrstica {}, stolpec {}): {}\n",
-                 exc.getLineNumber(),
-                 exc.getColumnNumber(),
-                 xercesc::XMLString::transcode(exc.getMessage()));
-    }
-
-    void fatalError(const xercesc::SAXParseException& exc) override
-    {
-      had_error = true;
-      fmt::print("Fatalna napaka pri validaciji (vrstica {}, stolpec {}): {}\n",
-                 exc.getLineNumber(),
-                 exc.getColumnNumber(),
-                 xercesc::XMLString::transcode(exc.getMessage()));
-    }
-
-    void warning(const xercesc::SAXParseException& exc) override
-    {
-      fmt::print("Opozorilo pri validaciji (vrstica '{}', stolpec {} ): {}\n",
-                 exc.getLineNumber(),
-                 exc.getColumnNumber(),
-                 xercesc::XMLString::transcode(exc.getMessage()));
-    }
-
-    [[nodiscard]] bool is_error() const;
+    void                reset();
+    void                error(const xercesc::SAXParseException& exc) override;
+    void                fatalError(const xercesc::SAXParseException& exc) override;
+    void                warning(const xercesc::SAXParseException& exc) override;
+    [[nodiscard]] bool  is_error() const;
+    [[nodiscard]] str_t file() const;
+    void                set_file(const str_t& file);
   private:
-    bool had_error = false;
+    bool  had_error_ = false; // do we have some error?
+    str_t file_;              // file we are parsing
   };
 
   // Static function for loading the XSD schema
-  static void load_grammar([[maybe_unused]] const std::stop_token&             st,
-                           const std::shared_ptr<xercesc::XMLGrammarPoolImpl>& gr_pool,
-                           std::latch&                                         gr_latch,
-                           std::atomic<bool>&                                  gr_loaded,
-                           const std::string&                                  xsd_file)
+  static void load_grammar([[maybe_unused]] const std::stop_token& st,
+                           const gr_pool_t&                        gr_pool,
+                           std::latch&                             gr_latch,
+                           std::atomic<bool>&                      gr_loaded,
+                           const str_t&                            xsd_file)
   {
     try
     {
-      XMLCh*                        xsdPath = xercesc::XMLString::transcode(xsd_file.c_str());
-      xercesc::LocalFileInputSource inputSource(xsdPath);
-      xercesc::XMLString::release(&xsdPath);
+      XMLCh*                        xsd_path = xercesc::XMLString::transcode(xsd_file.c_str());
+      xercesc::LocalFileInputSource inputSource(xsd_path);
+      xercesc::XMLString::release(&xsd_path);
 
       // Using the previously fixed reader creation pattern
       std::unique_ptr<xercesc::SAX2XMLReader> reader(
@@ -78,99 +59,120 @@ namespace
       reader->setFeature(xercesc::XMLUni::fgXercesSchema, true);
       reader->setFeature(xercesc::XMLUni::fgXercesSchemaFullChecking, false);
       // NOLINTEND(hicpp-no-array-decay)
-
-      xercesc::Grammar* grammar = reader->loadGrammar(inputSource, xercesc::Grammar::SchemaGrammarType, true);
+      auto* grammar = reader->loadGrammar(inputSource, xercesc::Grammar::SchemaGrammarType, true);
       if (grammar != nullptr)
       {
         gr_pool->cacheGrammar(grammar);
         gr_loaded = true;
-        fmt::print("Slovnica uspesno nalozena.\n");
+        fmt::print("Grammar {} successfully loaded.\n", xsd_file);
       }
-      else
-      {
-        fmt::print("Napaka: nalaganje slovnice ni uspelo (loadGrammar vrnil nullptr).\n");
-      }
+      else fmt::print("Grammar {} loading failed. (loadGrammar returned nullptr).\n", xsd_file);
     }
     catch (const xercesc::XMLException& e)
     {
-      fmt::print("Izjema pri nalaganju slovnice: '{}'.", xercesc::XMLString::transcode(e.getMessage()));
+      fmt::print("Grammar loading xerces exception: '{}'.", xercesc::XMLString::transcode(e.getMessage()));
     }
     catch (const std::exception& e)
     {
-      fmt::print("Standardna izjema pri nalaganju slovnice: '{}'\n'", e.what());
+      fmt::print("Grammar loading standard exception: '{}'\n'", e.what());
     }
     catch (...)
     {
-      fmt::print("Neznana izjema pri nalaganju slovnice.\n");
+      fmt::print("Grammar loading unknown exception.\n");
     }
-
-    // Decrease latch count to unblock the validator thread
-    gr_latch.count_down();
+    gr_latch.count_down(); // Decrease latch count to unblock the validator thread
   }
-
   // Static function for validating XML files
-  static void validate_xml([[maybe_unused]] const std::stop_token&             st,
-                           const std::shared_ptr<xercesc::XMLGrammarPoolImpl>& gr_pool,
-                           std::latch&                                         gr_latch,
-                           std::atomic<bool>&                                  gr_loaded,
-                           const std::vector<std::string>&                     xml_files)
+  static void validate_xml([[maybe_unused]] const std::stop_token& st,
+                           const gr_pool_t&                        gr_pool,
+                           std::latch&                             gr_latch,
+                           std::atomic<bool>&                      gr_loaded,
+                           const std::vector<str_t>&               xml_files)
   {
     gr_latch.wait();
-
     if (! gr_loaded)
     {
-      fmt::print("Slovnica ni bila nalozena, validacija se ne bo izvedla.\n");
+      fmt::print("Grammar is not loaded. Validation aborted.\n");
       return;
     }
-
+    // Create the parser ONCE outside the loop
+    std::unique_ptr<xercesc::SAX2XMLReader> reader(
+      xercesc::XMLReaderFactory::createXMLReader(xercesc::XMLPlatformUtils::fgMemoryManager, gr_pool.get()));
+    // Set permanent features
+    // NOLINTBEGIN(hicpp-no-array-decay)
+    reader->setFeature(xercesc::XMLUni::fgSAX2CoreValidation, true);
+    reader->setFeature(xercesc::XMLUni::fgSAX2CoreNameSpaces, true);
+    reader->setFeature(xercesc::XMLUni::fgXercesSchema, true);
+    reader->setFeature(xercesc::XMLUni::fgXercesSchemaFullChecking, false);
+    reader->setFeature(xercesc::XMLUni::fgXercesUseCachedGrammarInParse, true);
+    // NOLINTEND(hicpp-no-array-decay)
+    validation_err_handler eh;
+    reader->setErrorHandler(&eh);
     for (const auto& xml_file : xml_files)
     {
       try
       {
-        std::unique_ptr<xercesc::SAX2XMLReader> reader(
-          xercesc::XMLReaderFactory::createXMLReader(xercesc::XMLPlatformUtils::fgMemoryManager, gr_pool.get()));
-        // NOLINTBEGIN(hicpp-no-array-decay)
-        reader->setFeature(xercesc::XMLUni::fgSAX2CoreValidation, true);
-        reader->setFeature(xercesc::XMLUni::fgSAX2CoreNameSpaces, true);
-        reader->setFeature(xercesc::XMLUni::fgXercesSchema, true);
-        reader->setFeature(xercesc::XMLUni::fgXercesSchemaFullChecking, false);
-        reader->setFeature(xercesc::XMLUni::fgXercesUseCachedGrammarInParse, true);
-        // NOLINTEND(hicpp-no-array-decay)
-
-        ValidatorErrorHandler errorHandler;
-        reader->setErrorHandler(&errorHandler);
-
+        eh.reset(); // Reset error state for the new file
+        eh.set_file(xml_file);
         XMLCh*                        xmlPath = xercesc::XMLString::transcode(xml_file.c_str());
         xercesc::LocalFileInputSource xmlSource(xmlPath);
         xercesc::XMLString::release(&xmlPath);
-
         reader->parse(xmlSource);
-
-        if (! errorHandler.is_error()) fmt::print("Datoteka '{}' je veljavna.\n", xml_file);
-        else fmt::print("Datoteka '{}' vsebuje napake.\n", xml_file);
+        if (! eh.is_error()) fmt::print("File '{}' is valid.\n", xml_file);
+        else fmt::print("File '{}' is invalid.\n", xml_file);
       }
       catch (const xercesc::XMLException& e)
       {
-        fmt::print("Izjema pri obdelavi '{}': {}\n'", xml_file, xercesc::XMLString::transcode(e.getMessage()));
+        fmt::print("Validation xerces exception '{}': {}\n", xml_file, xercesc::XMLString::transcode(e.getMessage()));
       }
       catch (const std::exception& e)
       {
-        fmt::print("Standardna izjema pri obdelavi '{}': {}\n", xml_file, e.what());
+        fmt::print("Validation standard exception '{}': {}\n", xml_file, e.what());
       }
       catch (...)
       {
-        fmt::print("Neznana izjema pri obdelavi '{}'.\n", xml_file);
+        fmt::print("Validation unknown exception '{}'.\n", xml_file);
       }
     }
   }
-
-  inline bool ValidatorErrorHandler::is_error() const { return had_error; }
+  inline void validation_err_handler::reset()
+  {
+    had_error_ = false;
+    file_      = "unknown";
+  }
+  inline void validation_err_handler::error(const xercesc::SAXParseException& e)
+  {
+    had_error_ = true;
+    fmt::print("Validation error '{}' (row: {}, col: {}):\n  {}\n",
+               file_,
+               e.getLineNumber(),
+               e.getColumnNumber(),
+               xercesc::XMLString::transcode(e.getMessage()));
+  }
+  inline void validation_err_handler::fatalError(const xercesc::SAXParseException& exc)
+  {
+    had_error_ = true;
+    fmt::print("Validation fatal error (row: {}, col: {}): {}\n",
+               exc.getLineNumber(),
+               exc.getColumnNumber(),
+               xercesc::XMLString::transcode(exc.getMessage()));
+  }
+  inline str_t validation_err_handler::file() const { return file_; }
+  inline void  validation_err_handler::set_file(const str_t& file) { file_ = file; }
+  inline void  validation_err_handler::warning(const xercesc::SAXParseException& exc)
+  {
+    fmt::print("Validation warning (row: '{}', col: {}): {}\n",
+               exc.getLineNumber(),
+               exc.getColumnNumber(),
+               xercesc::XMLString::transcode(exc.getMessage()));
+  }
+  inline bool validation_err_handler::is_error() const { return had_error_; }
 } // namespace
 int main(int argc, char* argv[])
 {
   if (argc < 3)
   {
-    fmt::print("Uporaba: <slovnica.xsd> <xml1> [xml2 ...]\n", *argv);
+    fmt::print("Usage: <grammar.xsd> <xml1> [xml2 ...]\n", *argv);
     return 1;
   }
 
@@ -180,22 +182,19 @@ int main(int argc, char* argv[])
   }
   catch (const xercesc::XMLException& e)
   {
-    fmt::print("Napaka pri inicializaciji Xerces: {}\n", xercesc::XMLString::transcode(e.getMessage()));
+    fmt::print("Xerces initialization error: {}\n", xercesc::XMLString::transcode(e.getMessage()));
     return 1;
   }
-
-  // Uporabimo shared_ptr za varno deljenje med nitmi
-  auto gp = std::make_shared<xercesc::XMLGrammarPoolImpl>();
-
-  std::latch        grammarLatch(1);
-  std::atomic<bool> grammarLoaded{false};
-
-  std::string              xsdFile = argv[1]; // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic)
-  std::vector<std::string> xmlFiles;
+  // // shared pointer since there
+  auto               gp(std::make_unique<xercesc::XMLGrammarPoolImpl>()); // std::make_shared<xercesc::XMLGrammarPoolImpl>();
+  std::latch         grammarLatch(1);
+  std::atomic<bool>  grammarLoaded{false};
+  str_t              xsdFile = argv[1]; // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic)
+  std::vector<str_t> xmlFiles;
   for (int i = 2; i < argc; ++i) xmlFiles.emplace_back(argv[i]); // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic)
 
-  std::jthread loader(load_grammar, gp, std::ref(grammarLatch), std::ref(grammarLoaded), xsdFile);
-  std::jthread validator(validate_xml, gp, std::ref(grammarLatch), std::ref(grammarLoaded), std::cref(xmlFiles));
+  std::jthread loader(load_grammar, std::ref(gp), std::ref(grammarLatch), std::ref(grammarLoaded), xsdFile);
+  std::jthread validator(validate_xml, std::ref(gp), std::ref(grammarLatch), std::ref(grammarLoaded), std::cref(xmlFiles));
   // Počakamo, da se obe niti zaključita
   loader.join();
   validator.join();
