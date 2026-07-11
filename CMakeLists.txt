@@ -260,6 +260,24 @@ set(FSP_TARGET_${b_target}_LIBS
     magic_enum::magic_enum
 )
 add_fsp_target(${b_target} EXECUTABLE ${${b_target}_SOURCES})
+# -----------------------------------------------------------------------------
+# --- target: validator
+# -----------------------------------------------------------------------------
+set(b_target validator) # name of the target
+set(${b_target}_SOURCES
+    ${CMAKE_SOURCE_DIR}/src/auxiliary/validator.cpp
+)
+set(FSP_TARGET_${b_target}_INCLUDES
+  ${CMAKE_SOURCE_DIR}/src/lib
+  ${CMAKE_SOURCE_DIR}/src/test
+  )
+set(FSP_TARGET_${b_target}_LIBS
+    fmt::fmt
+    spdlog::spdlog
+    magic_enum::magic_enum
+    XercesC::XercesC
+)
+add_fsp_target(${b_target} EXECUTABLE ${${b_target}_SOURCES})
 #-------------------------------------------------------------------------------
 # --- 6. (Optional) Display built targets ---
 message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
