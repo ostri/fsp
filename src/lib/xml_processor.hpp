@@ -38,7 +38,7 @@ namespace fsp
   {
   public:
     explicit xml_processor(processor_config cfg);
-    xml_processor(processor_config cfg, const str_t& parent_log_name);
+    xml_processor(processor_config cfg, str_t parent_log_name);
     ~xml_processor();
 
     xml_processor(const xml_processor&)            = delete;

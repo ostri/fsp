@@ -24,14 +24,12 @@ namespace fsp
   {
   }
 
-  xml_processor::xml_processor(processor_config cfg, const str_t& parent_log_name)
+  xml_processor::xml_processor(processor_config cfg, str_t parent_log_name)
   : logger_(cfg.log_config)
   , config_(std::move(cfg))
-  , parent_log_name_(parent_log_name)
+  , parent_log_name_(std::move(parent_log_name))
   {
     bool first_time = logger_.log_name() == "unknown";
-    // if (! parent_log_name.empty()) logger_.make_log_name(parent_log_name, "sax");
-    // else if (first_time) logger_.make_log_name("main");
     if (first_time)
     {
       std::string_view build_type;
@@ -318,7 +316,7 @@ namespace fsp
 
     try
     {
-      handler_ = std::make_unique<Handler>(config_.targets, seg_queue_, logger_, parser_.get(), xml_mmap.view());
+      handler_ = std::make_unique<Handler>(config_.targets, seg_queue_, logger_, parser_.get(), xml_mmap.string_view());
       parser_->setContentHandler(handler_.get());
       parser_->setErrorHandler(handler_.get());
     }
