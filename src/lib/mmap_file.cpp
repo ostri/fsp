@@ -36,7 +36,6 @@ namespace fsp
   void mmap_file::open(const std::string& path)
   {
     close();
-
     fd_ = ::open(path.c_str(), O_RDONLY | O_CLOEXEC); // NOLINT(hicpp-vararg)
     if (fd_ == -1)
     {

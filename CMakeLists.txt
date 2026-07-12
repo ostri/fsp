@@ -271,6 +271,7 @@ set(${b_target}_SOURCES
     ${CMAKE_SOURCE_DIR}/src/lib/xerces_mgr.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/x_str.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/load_grammar.cpp
+    ${CMAKE_SOURCE_DIR}/src/lib/mmap_file.cpp
 )
 set(FSP_TARGET_${b_target}_INCLUDES
   ${CMAKE_SOURCE_DIR}/src/lib

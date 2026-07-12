@@ -106,7 +106,7 @@ int main(int argc, const char* argv[])
     const fsp::str_t  xsd_file = argv[1];                                  // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic)
     fsp::vec_str_t    xml_files(argv + 2, argv + argc);                    // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic)
 
-    std::jthread loader(fsp::load_grammar, std::ref(gp), std::ref(gr_latch), std::ref(gr_loaded), xsd_file);
+    std::jthread loader(fsp::load_grammar::load, std::ref(gp), std::ref(gr_latch), std::ref(gr_loaded), xsd_file);
     std::jthread validator(fsp::validate_xml, std::ref(gp), std::ref(gr_latch), std::ref(gr_loaded), std::cref(xml_files));
     // waiting for threads to finish;
     loader.join();
