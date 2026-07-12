@@ -152,6 +152,7 @@ set(${b_target}_SOURCES
     ${CMAKE_SOURCE_DIR}/src/lib/logger.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/root_cb.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/xml_worker.cpp
+    ${CMAKE_SOURCE_DIR}/src/lib/load_grammar.cpp
 )
 # Specify additional libraries for fsp_lib (if needed)
 set(FSP_TARGET_${b_target}_LIBS
@@ -269,10 +270,12 @@ set(${b_target}_SOURCES
     ${CMAKE_SOURCE_DIR}/src/auxiliary/validator.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/xerces_mgr.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/x_str.cpp
+    ${CMAKE_SOURCE_DIR}/src/lib/load_grammar.cpp
 )
 set(FSP_TARGET_${b_target}_INCLUDES
   ${CMAKE_SOURCE_DIR}/src/lib
   ${CMAKE_SOURCE_DIR}/src/test
+  ${XERCESC_INCLUDE_DIR}
   )
 set(FSP_TARGET_${b_target}_LIBS PRIVATE
     fmt::fmt
