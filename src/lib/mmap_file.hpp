@@ -35,7 +35,7 @@ namespace fsp
     ~mmap_file();
     void                                     open(const std::string& path);
     void                                     close() noexcept;
-    [[nodiscard]] std::string_view           view() const;
+    [[nodiscard]] std::string_view           string_view() const;
     [[nodiscard]] mmap_file::const_pointer   data() const noexcept;
     [[nodiscard]] size_type                  size() const noexcept;
     [[nodiscard]] bool                       empty() const noexcept;
@@ -47,7 +47,22 @@ namespace fsp
     [[nodiscard]] iterator                   end() const noexcept;
     [[nodiscard]] const_iterator             cend() const noexcept;
     [[nodiscard]] std::span<const std::byte> span() const noexcept;
-
+    [[nodiscard]] std::span<const std::byte> subspan(size_type offset, size_type count) const
+    {
+      if (offset >= size_) return {};
+      auto actual_count = std::min(count, size_ - offset);
+      return std::span<const std::byte>{data_ + offset, actual_count}; // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic)
+    }
+    static constexpr size_type prefetch_size = 4096;
+    void                       prefetch(size_type offset, size_type count = prefetch_size) const noexcept
+    {
+      if (data_ != nullptr && offset < size_)
+      {
+        auto actual_count = std::min(count, size_ - offset);
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic, cppcoreguidelines-pro-type-const-cast)
+        ::madvise(const_cast<void*>(static_cast<const void*>(data_ + offset)), actual_count, MADV_WILLNEED);
+      }
+    }
     explicit                       operator bool() const noexcept;
     [[nodiscard]] std::string_view path() const;
   private:
@@ -79,7 +94,7 @@ namespace fsp
   inline mmap_file::                operator bool() const noexcept { return is_open(); }
   inline std::string_view           mmap_file::path() const { return path_; }
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
-  inline std::string_view         mmap_file::view() const { return {reinterpret_cast<const char*>(data()), size()}; }
+  inline std::string_view         mmap_file::string_view() const { return {reinterpret_cast<const char*>(data()), size()}; }
   inline mmap_file::const_pointer mmap_file::data() const noexcept { return data_; }
   inline mmap_file::size_type     mmap_file::size() const noexcept { return size_; }
   inline bool                     mmap_file::empty() const noexcept { return size_ == 0; }
