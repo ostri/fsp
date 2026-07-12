@@ -69,7 +69,7 @@ namespace fsp
       data_ = static_cast<pointer>(mapped);
       // we are going to read sequentially
       //      if (sequential) ::madvise(mapped, size_, MADV_SEQUENTIAL);
-      if (sequential) ::madvise(mapped, size_, MADV_RANDOM);
+      // if (sequential) ::madvise(mapped, size_, MADV_RANDOM);
     }
     else data_ = nullptr;
     path_ = path;
