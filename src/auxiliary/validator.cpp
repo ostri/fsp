@@ -103,7 +103,7 @@ int main(int argc, const char* argv[])
     fsp::gr_pool_t    gp(std::make_unique<xercesc::XMLGrammarPoolImpl>()); // std::make_shared<xercesc::XMLGrammarPoolImpl>();
     std::latch        gr_latch(1);                                         // just waiting for grammar to be loaded
     std::atomic<bool> gr_loaded{false};                                    // is grammar loaded?
-    fsp::str_t        xsd_file = argv[1];                                  // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic)
+    const fsp::str_t  xsd_file = argv[1];                                  // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic)
     fsp::vec_str_t    xml_files(argv + 2, argv + argc);                    // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic)
 
     std::jthread loader(fsp::load_grammar, std::ref(gp), std::ref(gr_latch), std::ref(gr_loaded), xsd_file);
