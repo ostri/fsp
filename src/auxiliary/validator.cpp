@@ -1,5 +1,4 @@
 #include "validator.hpp"
-#include "x_str.hpp"
 #include "xerces_mgr.hpp"
 #include <fmt/base.h>
 #include <memory>
@@ -16,13 +15,19 @@
 
 #include <latch>
 #include <atomic>
-#include <vector>
 #include <string>
 #include <thread>
 #include <chrono>
 
-// using namespace xercesc;
 namespace
+{
+  inline int help(const char** argv)
+  {
+    fmt::print("Usage: <grammar.xsd> <xml1> [xml2 ...]\n", *argv);
+    return 1;
+  }
+} // namespace
+namespace fsp
 {
 
 
@@ -32,7 +37,7 @@ namespace
    * @param gr_pool grammar pool
    * @return sax reader
    */
-  fsp::sax_reader_t prepare_parser(const fsp::gr_pool_t& gr_pool)
+  sax_reader_t prepare_parser(const fsp::gr_pool_t& gr_pool)
   {
     // Create the parser ONCE outside the loop
     std::unique_ptr<xercesc::SAX2XMLReader> reader(
@@ -47,11 +52,11 @@ namespace
     return reader;
   }
   // Static function for validating XML files
-  static void validate_xml([[maybe_unused]] const std::stop_token& st,
-                           const fsp::gr_pool_t&                   gr_pool,
-                           std::latch&                             gr_latch,
-                           std::atomic<bool>&                      gr_loaded,
-                           const fsp::vec_str_t&                   xml_files)
+  void validate_xml([[maybe_unused]] const std::stop_token& st,
+                    const fsp::gr_pool_t&                   gr_pool,
+                    std::latch&                             gr_latch,
+                    std::atomic<bool>&                      gr_loaded,
+                    const fsp::vec_str_t&                   xml_files)
   {
     gr_latch.wait();
     if (! gr_loaded) throw std::runtime_error("Grammar is not loaded. Validation aborted.");
@@ -87,12 +92,8 @@ namespace
       }
     }
   }
-  inline int help(const char** argv)
-  {
-    fmt::print("Usage: <grammar.xsd> <xml1> [xml2 ...]\n", *argv);
-    return 1;
-  }
-} // namespace
+
+} // namespace fsp
 int main(int argc, const char* argv[])
 {
   if (argc < 3) return help(argv);
@@ -106,7 +107,7 @@ int main(int argc, const char* argv[])
     fsp::vec_str_t    xml_files(argv + 2, argv + argc);                    // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic)
 
     std::jthread loader(fsp::load_grammar, std::ref(gp), std::ref(gr_latch), std::ref(gr_loaded), xsd_file);
-    std::jthread validator(validate_xml, std::ref(gp), std::ref(gr_latch), std::ref(gr_loaded), std::cref(xml_files));
+    std::jthread validator(fsp::validate_xml, std::ref(gp), std::ref(gr_latch), std::ref(gr_loaded), std::cref(xml_files));
     // waiting for threads to finish;
     loader.join();
     validator.join();

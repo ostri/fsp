@@ -11,6 +11,12 @@ namespace fsp
   using str_t     = std::string;
   using vec_str_t = std::vector<str_t>;
 
+  sax_reader_t prepare_parser(const gr_pool_t& gr_pool);
+  void         validate_xml([[maybe_unused]] const std::stop_token& st,
+                            const gr_pool_t&                        gr_pool,
+                            std::latch&                             gr_latch,
+                            std::atomic<bool>&                      gr_loaded,
+                            const vec_str_t&                        xml_files);
   class valid_handler : public xercesc::DefaultHandler
   {
   public:
@@ -19,7 +25,6 @@ namespace fsp
                                      std::latch&                             gr_latch,
                                      std::atomic<bool>&                      gr_loaded,
                                      const vec_str_t&                        xml_files);
-    sax_reader_t        prepare_parser(const gr_pool_t& gr_pool);
     void                reset();
     void                error(const xercesc::SAXParseException& exc) override;
     void                fatalError(const xercesc::SAXParseException& exc) override;
@@ -60,9 +65,5 @@ namespace fsp
   }
   inline bool valid_handler::is_error() const { return had_error_; }
 
-  void validate_xml([[maybe_unused]] const std::stop_token& st,
-                    const gr_pool_t&                        gr_pool,
-                    std::latch&                             gr_latch,
-                    std::atomic<bool>&                      gr_loaded,
-                    const vec_str_t&                        xml_files);
+
 } // namespace fsp
