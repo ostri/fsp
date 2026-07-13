@@ -121,7 +121,7 @@ int main(int argc, const char* argv[])
                                      .log_config           = log_cfg};
 
     fsp::xml_processor proc(cfg);
-    auto               res = proc.process_files(files, xsd_file, 4); // 4 parallel workers
+    auto               res = proc.process_files(files, xsd_file, 5); // 5 parallel documents
     if (! res)
     {
       std::cerr << "Processing failed: " << res.error().to_string() << "\n";
