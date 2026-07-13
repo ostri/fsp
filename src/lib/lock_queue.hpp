@@ -15,6 +15,7 @@ namespace fsp
     void                      set_finished();               //< we finished processing
     [[nodiscard]] bool        is_finished() const noexcept; //< are we finished processing?
     [[nodiscard]] std::size_t size() const;                 //< size of the waiting queue
+    std::optional<T>          try_pop();
   private:
     std::queue<T>           queue_;
     mutable std::mutex      mtx_;
@@ -45,6 +46,16 @@ namespace fsp
     std::lock_guard lock(mtx_);
     return queue_.size();
   }
+  template <class T>
+  inline std::optional<T> lock_queue<T>::try_pop()
+  {
+    std::unique_lock lock(mtx_);
+    if (queue_.empty()) return std::nullopt; // queue is empty
+    T value = std::move(queue_.front());
+    queue_.pop();
+    return value; // return element from the queue
+  }
+
   /**
    * @brief push new element to the queue
    *
@@ -77,6 +88,7 @@ namespace fsp
     queue_.pop();
     return true;
   }
+
   /**
    * @brief mark processing to be finished
    *

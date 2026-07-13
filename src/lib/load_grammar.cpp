@@ -21,6 +21,7 @@ namespace fsp
     reader->setFeature(xercesc::XMLUni::fgSAX2CoreNameSpaces, true);
     reader->setFeature(xercesc::XMLUni::fgXercesSchema, true);
     reader->setFeature(xercesc::XMLUni::fgXercesSchemaFullChecking, false);
+    reader->setFeature(xercesc::XMLUni::fgXercesCacheGrammarFromParse, false);
     // NOLINTEND(hicpp-no-array-decay)
     return reader;
   }
@@ -31,39 +32,17 @@ namespace fsp
                           std::atomic<bool>&                      gr_loaded,
                           const str_t&                            xsd_file)
   {
-    auto start = std::chrono::high_resolution_clock::now();
+    // auto start = std::chrono::high_resolution_clock::now();
     try
     {
       mmap_file mm(xsd_file);
       load_mem(st, gr_pool, gr_latch, gr_loaded, mm.string_view(), xsd_file);
-      //   x_str                         xsd_path(xsd_file);
-      //   xercesc::LocalFileInputSource inputSource(xsd_path.to_u16string().data());
-
-      //   auto  reader  = prepare_grammar_parser(gr_pool);
-      //   auto* grammar = reader->loadGrammar(inputSource, xercesc::Grammar::SchemaGrammarType, true);
-      //   if (grammar != nullptr)
-      //   {
-      //     gr_pool->cacheGrammar(grammar);
-      //     gr_loaded                                         = true;
-      auto                                      end     = std::chrono::high_resolution_clock::now();
-      std::chrono::duration<double, std::milli> elapsed = end - start;
-      fmt::print("Grammar {} successfully loaded.({:.2f}ms)\n", xsd_file, elapsed.count());
-      //   }
-      //   else fmt::print("Grammar {} loading failed. (loadGrammar returned nullptr).\n", xsd_file);
     }
-    // catch (const xercesc::XMLException& e)
-    // {
-    //   fmt::print("Grammar loading xerces exception: '{}'.", xercesc::XMLString::transcode(e.getMessage()));
-    // }
-    // catch (const std::exception& e)
-    // {
-    //   fmt::print("Grammar loading standard exception: '{}'\n'", e.what());
-    // }
     catch (...)
     {
       fmt::print("Grammar loading unknown exception.\n");
+      gr_latch.count_down(); // if mm throws
     }
-    // gr_latch.count_down(); // Decrease latch count to unblock the validator thread
   }
 
   // New implementation for string_view buffer
@@ -87,6 +66,7 @@ namespace fsp
       if (grammar != nullptr)
       {
         gr_pool->cacheGrammar(grammar);
+        gr_pool->lockPool();
         gr_loaded                                         = true;
         auto                                      end     = std::chrono::high_resolution_clock::now();
         std::chrono::duration<double, std::milli> elapsed = end - start;

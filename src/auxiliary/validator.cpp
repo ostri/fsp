@@ -30,14 +30,13 @@ namespace
 namespace fsp
 {
 
-
   /**
    * @brief create sax reader for validator with assigned grammar pool
    *
    * @param gr_pool grammar pool
    * @return sax reader
    */
-  sax_reader_t prepare_parser(const fsp::gr_pool_t& gr_pool)
+  sax_reader_t parser_for_validation(const fsp::gr_pool_t& gr_pool)
   {
     // Create the parser ONCE outside the loop
     std::unique_ptr<xercesc::SAX2XMLReader> reader(
@@ -48,6 +47,10 @@ namespace fsp
     reader->setFeature(xercesc::XMLUni::fgXercesSchema, true);
     reader->setFeature(xercesc::XMLUni::fgXercesSchemaFullChecking, false);
     reader->setFeature(xercesc::XMLUni::fgXercesUseCachedGrammarInParse, true);
+    reader->setFeature(xercesc::XMLUni::fgXercesValidationErrorAsFatal, true);
+    reader->setFeature(xercesc::XMLUni::fgSAX2CoreNameSpacePrefixes, false);
+    reader->setFeature(xercesc::XMLUni::fgXercesCalculateSrcOfs, false);
+    reader->setFeature(xercesc::XMLUni::fgXercesCacheGrammarFromParse, false);
     // NOLINTEND(hicpp-no-array-decay)
     return reader;
   }
@@ -60,7 +63,7 @@ namespace fsp
   {
     gr_latch.wait();
     if (! gr_loaded) throw std::runtime_error("Grammar is not loaded. Validation aborted.");
-    auto               reader = prepare_parser(gr_pool);
+    auto               reader = parser_for_validation(gr_pool);
     fsp::valid_handler eh;
     reader->setErrorHandler(&eh);
     for (const auto& xml_file : xml_files)

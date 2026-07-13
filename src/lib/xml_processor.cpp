@@ -1,15 +1,18 @@
 #include "xml_processor.hpp"
+#include "load_grammar.hpp"
 #include "x_str.hpp"
 #include "xml_worker.hpp"
 #include "xpath_helpers.hpp"
 #include <chrono>
 #include <fmt/format.h>
+#include <functional>
 #include <magic_enum.hpp>
 #include <spdlog/spdlog.h>
 #include <thread>
 #include <utility>
 #include <libxml/xmlreader.h>
 #include <fmt/chrono.h>
+#include <xercesc/framework/XMLGrammarPoolImpl.hpp>
 namespace
 {
 } // namespace
@@ -61,11 +64,24 @@ namespace fsp
   // ============================================================================
   // Parser setup
   // ============================================================================
-  void_result xml_processor::setup_parser_no_validation()
+  void_result xml_processor::setup_parser_no_validation(const gr_pool_t&   gp,
+                                                        std::latch&        gp_latch,
+                                                        std::atomic<bool>& gp_loaded,
+                                                        bool               have_grammar)
   {
     try
     {
-      parser_.reset(xercesc::XMLReaderFactory::createXMLReader());
+      if (have_grammar)
+      {
+        gp_latch.wait(); // wait till xsd grammar is loaded
+        if (! gp_loaded)
+        {
+          auto err = error_info{processor_error::internal_error, "Grammar failed to load.)", "", 0};
+          logger_.error(err.to_string());
+          return std::unexpected(err);
+        }
+      }
+      parser_.reset(xercesc::XMLReaderFactory::createXMLReader(xercesc::XMLPlatformUtils::fgMemoryManager, gp.get()));
       // NOLINTBEGIN(hicpp-no-array-decay)
       parser_->setFeature(xercesc::XMLUni::fgSAX2CoreValidation, false);   // must be false
       parser_->setFeature(xercesc::XMLUni::fgXercesCalculateSrcOfs, true); // we need offset
@@ -86,7 +102,88 @@ namespace fsp
   // ============================================================================
   // Validation thread
   // ============================================================================
+  // Statična funkcija, ki izvaja validacijo
+  std::optional<error_info> xml_processor::validate_xml_worker(const cstr_t&      f_xml_data,
+                                                               gr_pool_t&         gp,
+                                                               std::string        xsd_path,
+                                                               const fsp_logger&  logger,
+                                                               const std::string& parent_log_name)
+  {
+    auto        start = std::chrono::steady_clock::now();
+    const auto& log   = logger;
+    log.make_log_name(parent_log_name, "valid");
 
+    if (log.active(info)) log.info(fmt::format("Validation started. file: xsd:{}", xsd_path));
+
+    try
+    {
+      // Ustvarimo lasten parser, ker ni reentrant
+      std::unique_ptr<xercesc::SAX2XMLReader> vparser(xercesc::XMLReaderFactory::createXMLReader( //
+        xercesc::XMLPlatformUtils::fgMemoryManager,
+        gp.get()));
+
+      // Konfiguracija parserja
+      // NOLINTBEGIN(hicpp-no-array-decay)
+      vparser->setFeature(xercesc::XMLUni::fgSAX2CoreValidation, true);
+      vparser->setFeature(xercesc::XMLUni::fgXercesSchema, true);
+      vparser->setFeature(xercesc::XMLUni::fgXercesValidationErrorAsFatal, true);
+      vparser->setFeature(xercesc::XMLUni::fgXercesUseCachedGrammarInParse, true);
+      vparser->setFeature(xercesc::XMLUni::fgSAX2CoreNameSpaces, true);
+      vparser->setFeature(xercesc::XMLUni::fgXercesSchemaFullChecking, false);
+      vparser->setFeature(xercesc::XMLUni::fgSAX2CoreNameSpacePrefixes, false);
+      vparser->setFeature(xercesc::XMLUni::fgXercesCalculateSrcOfs, false);
+      vparser->setFeature(xercesc::XMLUni::fgXercesCacheGrammarFromParse, false);
+      // NOLINTEND(hicpp-no-array-decay)
+
+      // Naložimo XSD shemo v parser
+      // mem_buf_holder xsd_holder(f_xsd_data.data(), f_xsd_data.size(), xsd_path, log);
+      // if (xsd_holder.source() != nullptr) vparser->loadGrammar(*xsd_holder.source(), xercesc::Grammar::SchemaGrammarType, true);
+
+      // Handler za napake, ki vrže izjemo
+      struct ThrowingErrorHandler : public xercesc::DefaultHandler
+      { // NOLINTBEGIN(hicpp-exception-baseclass)
+        void error(const xercesc::SAXParseException& e) override { throw e; }
+        void fatalError(const xercesc::SAXParseException& e) override { throw e; }
+        // NOLINTEND(hicpp-exception-baseclass)
+      } err_handler;
+      vparser->setErrorHandler(&err_handler);
+
+      // Parsiranje XML
+      xercesc::MemBufInputSource src(
+        reinterpret_cast<const XMLByte*>(f_xml_data.data()), static_cast<XMLSize_t>(f_xml_data.size()), "xml_validation", false);
+      vparser->parse(src);
+
+      if (log.active(fsp::lvl_enum::info))
+      {
+        auto end      = std::chrono::steady_clock::now();
+        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+        log.info(fmt::format("Validation finished in {} ms {} bytes.", duration.count(), f_xml_data.size()));
+      }
+      return std::nullopt; // ni napak
+    }
+    catch (const xercesc::SAXParseException& e)
+    {
+      auto err = error_info{
+        processor_error::xsd_validation_failed,
+        fmt::format("SAX validation error: {} (row:{} col:{})", x_str(e.getMessage()).to_string(), e.getLineNumber(), e.getColumnNumber()),
+        "",
+        static_cast<std::size_t>(e.getLineNumber())};
+      if (log.active(lvl_enum::err)) log.error(err.to_string());
+      return err;
+    }
+    catch (const xercesc::XMLException& e)
+    {
+      auto err = error_info{processor_error::xsd_validation_failed, fmt::format("XML error: {}", x_str(e.getMessage()).to_string()), "", 0};
+      if (log.active(lvl_enum::err)) log.error(err.to_string());
+      return err;
+    }
+    catch (...)
+    {
+      auto err = error_info{processor_error::internal_error, "Validation: unknown error", "", 0};
+      if (log.active(lvl_enum::err)) log.error(err.to_string());
+      return err;
+    }
+  }
   // Zažene validacijo XML proti XSD v ločeni niti. Vrne shared_future ki se
   // razreši takoj ko validacija konča — bodisi z nullopt (ok) ali error_info
   // (prva napaka). shared_future (ne unique future) ker ga delita dve mesti:
@@ -99,90 +196,27 @@ namespace fsp
   // a nit ne sme imeti surovih referenc nanj (lifetime ni garantiran).
   // xml_data/xsd_data sta raw pointer-ja na mmap ki živita dlje od niti — ok.
   std::shared_future<std::optional<error_info>> xml_processor::launch_validation_thread( //
-    const void* xml_data,
-    std::size_t xml_size,
-    const void* xsd_data,
-    std::size_t xsd_size,
-    std::string xsd_path)
+    const cstr_t& f_xml_data,
+    gr_pool_t&    gp,      // xml file contents
+    std::string   xsd_path // path to the grammar file
+  )
   {
-    const auto& logger = logger_; // the thread has its own copy of logger
-                                  // feature is converted to shared feature (see .share at the end),
-                                  // so that we can read (get()) it more than onece
-    return std::async(            //
-             std::launch::async,
-             [xml_data, xml_size, xsd_data, xsd_size, xsd_path = std::move(xsd_path), &logger]() -> std::optional<error_info>
-             {
-               log_thread_name   = "valid>";
-               auto        start = std::chrono::steady_clock::now();
-               const auto& log   = logger;
-               if (log.active(info)) log.info(fmt::format("Validation started. file: xsd:{}", xsd_path));
-               try
-               {
-                 // we need to create own parser, since it is not reentrant
-                 std::unique_ptr<xercesc::SAX2XMLReader> vparser(xercesc::XMLReaderFactory::createXMLReader());
-                 // NOLINTBEGIN(hicpp-no-array-decay)
-                 vparser->setFeature(xercesc::XMLUni::fgSAX2CoreValidation, true);
-                 vparser->setFeature(xercesc::XMLUni::fgXercesSchema, true);
-                 vparser->setFeature(xercesc::XMLUni::fgXercesValidationErrorAsFatal, true);
-                 vparser->setFeature(xercesc::XMLUni::fgXercesUseCachedGrammarInParse, true);
-                 vparser->setFeature(xercesc::XMLUni::fgSAX2CoreNameSpaces, true);
-                 vparser->setFeature(xercesc::XMLUni::fgXercesSchemaFullChecking, false);
-                 vparser->setFeature(xercesc::XMLUni::fgSAX2CoreNameSpacePrefixes, false);
-                 vparser->setFeature(xercesc::XMLUni::fgXercesCalculateSrcOfs, false);
-                 // NOLINTEND(hicpp-no-array-decay)
-                 // load xsd schema to the parser
-                 mem_buf_holder xsd_holder(xsd_data, xsd_size, xsd_path, log);
-                 if (xsd_holder.source() != nullptr) //
-                   vparser->loadGrammar(*xsd_holder.source(), xercesc::Grammar::SchemaGrammarType, true);
-                 struct ThrowingErrorHandler : public xercesc::DefaultHandler // Handler that throws on error no matter what
-                 {                                                            // NOLINTBEGIN(hicpp-exception-baseclass)
-                   void error(const xercesc::SAXParseException& e) override { throw e; }
-                   void fatalError(const xercesc::SAXParseException& e) override { throw e; }
-                   // NOLINTEND(hicpp-exception-baseclass)
-                 } err_handler;
-                 vparser->setErrorHandler(&err_handler);
+    // Kopiramo podatke za nit
+    auto xml_data = f_xml_data; // kopija
+    // auto xsd_data = f_xsd_data; // kopija
+    auto path = std::move(xsd_path);
 
-                 xercesc::MemBufInputSource src(
-                   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
-                   reinterpret_cast<const XMLByte*>(xml_data),
-                   static_cast<XMLSize_t>(xml_size),
-                   "xml_validation",
-                   false);
-                 vparser->parse(src);
-                 if (log.active(fsp::lvl_enum::info))
-                 {
-                   auto end      = std::chrono::steady_clock::now();
-                   auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
-                   log.info(fmt::format("Validation finished in {} ms {} bytes.", duration.count(), xml_size));
-                 }
-                 return std::nullopt; // no errors
-               }
-               catch (const xercesc::SAXParseException& e)
-               { // there was a validaton error detected. signal & exit
-                 auto err = error_info{
-                   processor_error::xsd_validation_failed,
-                   fmt::format(
-                     "SAX validation error: {} (row:{} col:{})", x_str(e.getMessage()).to_string(), e.getLineNumber(), e.getColumnNumber()),
-                   "",
-                   static_cast<std::size_t>(e.getLineNumber())};
-                 if (log.active(lvl_enum::err)) log.error(err.to_string());
-                 return err;
-               }
-               catch (const xercesc::XMLException& e)
-               { // there was xml syntax error: signal & exit
-                 auto err = error_info{
-                   processor_error::xsd_validation_failed, fmt::format("XML error: {}", x_str(e.getMessage()).to_string()), "", 0};
-                 if (log.active(lvl_enum::err)) log.error(err.to_string());
-                 return err;
-               }
-               catch (...)
-               { // unknown error - we should not leave the feature in broken state
-                 auto err = error_info{processor_error::internal_error, "Validation: unknown error", "", 0};
-                 if (log.active(lvl_enum::err)) log.error(err.to_string());
-                 return err;
-               }
-             })
-      .share(); // .share() → shared_future
+    // Ustvarimo async nalogo s statično funkcijo
+    auto future = std::async(std::launch::async,
+                             validate_xml_worker,
+                             std::cref(xml_data),        // referenca na kopijo
+                             std::ref(gp),               // referenca na kopijo
+                             std::move(path),            // premaknemo path
+                             std::cref(logger_),         // referenca na logger
+                             std::cref(parent_log_name_) // referenca na parent log name
+    );
+    // Vrnemo shared_future
+    return future.share();
   }
 
   void_result xml_processor::start_workers()
@@ -254,7 +288,12 @@ namespace fsp
    * @param xsd_path filepath to the corresponding grammas (XSD)
    * @return void_result
    */
-  void_result xml_processor::process_file(const std::string& xml_path, const std::string& xsd_path)
+  void_result xml_processor::process_file(const std::string& xml_path,
+                                          const std::string& xsd_path,
+                                          gr_pool_t&         gp,
+                                          std::latch&        gp_latch,
+                                          std::atomic<bool>& gp_loaded,
+                                          bool               have_grammar)
   {
     start_time_ = std::chrono::steady_clock::now();
     logger_.info(fmt::format("XML file: '{}'", xml_path));
@@ -293,7 +332,7 @@ namespace fsp
         return std::unexpected(err);
       }
     }
-    return process_from_buffer(xml_mmap, xsd_mmap ? &*xsd_mmap : nullptr);
+    return process_from_buffer(xml_mmap, xsd_mmap ? &*xsd_mmap : nullptr, gp, gp_latch, gp_loaded, have_grammar);
   }
 
   //   1. setup_parser_no_validation() — SAX parser brez XSD overhead-a
@@ -309,9 +348,14 @@ namespace fsp
   //   parser_->parse()  →  vrže izjemo → ujamemo v catch bloku spodaj
   //   cancel()          →  cancel_flag_ = true → workerji se ustavijo
   //   val_future.get()  →  vrnemo napako klicatelju
-  void_result xml_processor::process_from_buffer(fsp::mmap_file& xml_mmap, fsp::mmap_file* xsd_mmap)
+  void_result xml_processor::process_from_buffer(fsp::mmap_file&    xml_mmap,
+                                                 fsp::mmap_file*    xsd_mmap,
+                                                 gr_pool_t&         gp,
+                                                 std::latch&        gp_latch,
+                                                 std::atomic<bool>& gp_loaded,
+                                                 bool               have_grammar)
   {
-    auto ps = setup_parser_no_validation();
+    auto ps = setup_parser_no_validation(gp, gp_latch, gp_loaded, have_grammar);
     if (! ps) return std::unexpected(ps.error());
 
     try
@@ -334,8 +378,7 @@ namespace fsp
     std::shared_future<std::optional<error_info>> val_future;
     if (xsd_mmap != nullptr && config_.validate_against_xsd)
     {
-      val_future =
-        launch_validation_thread(xml_mmap.data(), xml_mmap.size(), xsd_mmap->data(), xsd_mmap->size(), std::string(xsd_mmap->path()));
+      val_future = launch_validation_thread(xml_mmap.string_view(), gp, std::string(xsd_mmap->path()));
       handler_->set_validation_future(val_future); // to receive signal, taht validation failed
     }
     bool validation_interrupted = false; // true: validation error; false: xml parsing error
@@ -437,25 +480,120 @@ namespace fsp
       .processing_time_ms  = static_cast<double>(ms),
     };
   }
-  // ============================================================================
-  // Convenience function
-  // ============================================================================
-  processing_result xml_processor::process_xml_file(const std::string&   xml_path,
-                                                    const std::string&   xsd_path,
-                                                    const proc_data&     proc_data,
-                                                    std::size_t          num_workers,
-                                                    const logger_config& log_cfg)
+  // // ============================================================================
+  // // Convenience function
+  // // ============================================================================
+  void xml_processor::process_one_file(const std::string&           xml_path,
+                                       const std::string&           xsd_path,
+                                       std::mutex&                  results_agg_mutex,
+                                       std::vector<segment_result>& all_results,
+                                       std::vector<segment_result>& all_errors,
+                                       std::atomic<bool>&           has_error,
+                                       std::optional<error_info>&   first_error,
+                                       const processor_config&      config,
+                                       const fsp_logger&            log, // Using auto to deduce the fsp::logger type
+                                       gr_pool_t&                   gp,
+                                       std::latch&                  gr_latch,
+                                       std::atomic<bool>&           gr_loaded,
+                                       bool                         have_grammar)
   {
-    xml_processor proc({.targets              = proc_data, //
-                        .num_workers          = num_workers,
-                        .validate_against_xsd = ! xsd_path.empty(),
-                        .log_config           = log_cfg},
-                       "outer");
-    auto          res = proc.process_file(xml_path, xsd_path);
-    if (! res) return std::unexpected(res.error());
-    return std::make_pair(proc.get_results(), proc.get_errors());
-  }
+    log.info(fmt::format("Processing file: '{}'", xml_path));
 
+    // Each file gets its own processor instance to avoid state conflicts
+    xml_processor file_proc(config, log.log_name());
+    auto          res = file_proc.process_file(xml_path, xsd_path, gp, gr_latch, gr_loaded, have_grammar);
+
+    if (! res)
+    {
+      auto err = res.error();
+      {
+        std::lock_guard<std::mutex> lock(results_agg_mutex);
+        if (! has_error)
+        {
+          has_error   = true;
+          first_error = err;
+        }
+      }
+      log.error(fmt::format("File {} failed: {}", xml_path, err.to_string()));
+    }
+    else
+    {
+      auto fr = file_proc.get_results();
+      auto fe = file_proc.get_errors();
+      {
+        std::lock_guard<std::mutex> lock(results_agg_mutex);
+        all_results.insert(all_results.end(), std::make_move_iterator(fr.begin()), std::make_move_iterator(fr.end()));
+        all_errors.insert(all_errors.end(), std::make_move_iterator(fe.begin()), std::make_move_iterator(fe.end()));
+      }
+      log.info(fmt::format("File '{}' success", xml_path));
+    }
+  }
+  // Helper static function for jthread execution
+  void xml_processor::file_worker_task(lock_queue<std::string>&     file_queue,
+                                       const std::string&           xsd_path,
+                                       std::mutex&                  results_agg_mutex,
+                                       std::vector<segment_result>& all_results,
+                                       std::vector<segment_result>& all_errors,
+                                       std::atomic<std::size_t>&    file_processed,
+                                       std::atomic<bool>&           has_error,
+                                       std::optional<error_info>&   first_error,
+                                       std::size_t                  worker_idx,
+                                       const std::string&           parent_log_name,
+                                       const processor_config&      config,
+                                       const fsp_logger&            log, // Using auto to deduce the fsp::logger type
+                                       gr_pool_t&                   gp,
+                                       std::latch&                  gr_latch,
+                                       std::atomic<bool>&           gr_loaded,
+                                       bool                         have_grammar)
+  {
+    log.make_log_name(parent_log_name, fmt::format("ft{}", worker_idx));
+    std::string xml_path;
+    while (true)
+    {
+      if (auto opt = file_queue.try_pop())
+        process_one_file(*opt,
+                         xsd_path,
+                         results_agg_mutex,
+                         all_results,
+                         all_errors,
+                         has_error,
+                         first_error,
+                         config,
+                         log,
+                         gp,
+                         gr_latch,
+                         gr_loaded,
+                         have_grammar);
+      else
+      {
+        {
+          if (file_queue.is_finished()) break; // end of job
+          auto start = std::chrono::steady_clock::now();
+          if (file_queue.pop(xml_path)) // new item arrived after while
+          {
+            auto end     = std::chrono::steady_clock::now();
+            auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+            log.info(fmt::format("waiting time for new file {} ms.", elapsed));
+            process_one_file(xml_path,
+                             xsd_path,
+                             results_agg_mutex,
+                             all_results,
+                             all_errors,
+                             has_error,
+                             first_error,
+                             config,
+                             log,
+                             gp,
+                             gr_latch,
+                             gr_loaded,
+                             have_grammar);
+          }
+          else break; // processing finished
+        }
+      }
+      ++file_processed;
+    }
+  }
 
   void_result xml_processor::process_files(const std::vector<std::string>& xml_paths, const std::string& xsd_path, std::size_t num_parallel)
   {
@@ -465,7 +603,13 @@ namespace fsp
       logger_.info("No files to process.");
       return {};
     }
+    bool                        have_grammar = ! xsd_path.empty();
+    std::optional<std::jthread> gr_loader;
+    gr_pool_t                   gp(std::make_unique<xercesc::XMLGrammarPoolImpl>()); // std::make_shared<xercesc::XMLGrammarPoolImpl>();
+    std::latch                  gr_latch(1);                                         // just waiting for grammar to be loaded
+    std::atomic<bool>           gr_loaded{false};                                    // is grammar loaded?
 
+    if (have_grammar) { gr_loader.emplace(fsp::load_grammar::load, std::ref(gp), std::ref(gr_latch), std::ref(gr_loaded), xsd_path); }
     if (num_parallel == 0)
     {
       num_parallel = std::thread::hardware_concurrency();
@@ -496,60 +640,83 @@ namespace fsp
 
     // Start workers
     file_workers.reserve(num_parallel);
+    if (have_grammar)
+    {
+      gr_latch.wait(); // wait till the grammar is loaded
+      if (! gr_loaded) throw std::runtime_error(fmt::format("XSD grammar '{}' cannot be loaded. aborting", xsd_path));
+    }
     for (std::size_t i = 0; i < num_parallel; ++i)
     {
       auto log_name = logger_.log_name();
       file_workers.emplace_back(
-        [this, //
-         &file_queue,
-         &xsd_path,
-         &results_agg_mutex,
-         &all_results,
-         &all_errors,
-         &file_processed,
-         &has_error,
-         &first_error,
-         i,
-         log_name]()
-        {
-          const auto& log = logger_;
-          log.make_log_name(log_name, fmt::format("ft{}", i));
-          while (true)
-          {
-            std::string xml_path;
-            log.info(fmt::format("Waiting for file ..."));
-            if (! file_queue.pop(xml_path)) break; // queue finished
-            log.info(fmt::format("Processing file: '{}'", xml_path));
-            // Each file gets its own processor instance to avoid state conflicts
-            xml_processor file_proc(config_, log.log_name());
-            auto          res = file_proc.process_file(xml_path, xsd_path);
-            if (! res)
-            {
-              auto err = res.error();
-              {
-                std::lock_guard<std::mutex> lock(results_agg_mutex);
-                if (! has_error)
-                {
-                  has_error   = true;
-                  first_error = err;
-                }
-              }
-              log.error(fmt::format("File {} failed: {}", xml_path, err.to_string()));
-            }
-            else
-            {
-              auto fr = file_proc.get_results();
-              auto fe = file_proc.get_errors();
-              {
-                std::lock_guard<std::mutex> lock(results_agg_mutex);
-                all_results.insert(all_results.end(), std::make_move_iterator(fr.begin()), std::make_move_iterator(fr.end()));
-                all_errors.insert(all_errors.end(), std::make_move_iterator(fe.begin()), std::make_move_iterator(fe.end()));
-              }
-              log.info(fmt::format("File '{}' success", xml_path));
-            }
-            ++file_processed;
-          }
-        });
+        xml_processor::file_worker_task,
+        std::ref(file_queue),
+        std::cref(xsd_path),
+        std::ref(results_agg_mutex),
+        std::ref(all_results),
+        std::ref(all_errors),
+        std::ref(file_processed),
+        std::ref(has_error),
+        std::ref(first_error),
+        i,
+        log_name,
+        std::cref(config_),
+        std::cref(logger_), // pass by value/copy to avoid race conditions
+        std::ref(gp),
+        std::ref(gr_latch),
+        std::ref(gr_loaded),
+        have_grammar
+        // [this, //
+        //  &file_queue,
+        //  &xsd_path,
+        //  &results_agg_mutex,
+        //  &all_results,
+        //  &all_errors,
+        //  &file_processed,
+        //  &has_error,
+        //  &first_error,
+        //  i,
+        //  log_name]()
+        // {
+        //   const auto& log = logger_;
+        //   log.make_log_name(log_name, fmt::format("ft{}", i));
+        //   while (true)
+        //   {
+        //     std::string xml_path;
+        //     log.info(fmt::format("Waiting for file ..."));
+        //     if (! file_queue.pop(xml_path)) break; // queue finished
+        //     log.info(fmt::format("Processing file: '{}'", xml_path));
+        //     // Each file gets its own processor instance to avoid state conflicts
+        //     xml_processor file_proc(config_, log.log_name());
+        //     auto          res = file_proc.process_file(xml_path, xsd_path);
+        //     if (! res)
+        //     {
+        //       auto err = res.error();
+        //       {
+        //         std::lock_guard<std::mutex> lock(results_agg_mutex);
+        //         if (! has_error)
+        //         {
+        //           has_error   = true;
+        //           first_error = err;
+        //         }
+        //       }
+        //       log.error(fmt::format("File {} failed: {}", xml_path, err.to_string()));
+        //     }
+        //     else
+        //     {
+        //       auto fr = file_proc.get_results();
+        //       auto fe = file_proc.get_errors();
+        //       {
+        //         std::lock_guard<std::mutex> lock(results_agg_mutex);
+        //         all_results.insert(all_results.end(), std::make_move_iterator(fr.begin()), std::make_move_iterator(fr.end()));
+        //         all_errors.insert(all_errors.end(), std::make_move_iterator(fe.begin()), std::make_move_iterator(fe.end()));
+        //       }
+        //       log.info(fmt::format("File '{}' success", xml_path));
+        //     }
+        //     ++file_processed;
+        //   }
+        // }
+      );
     }
 
     // Wait for all workers
@@ -576,6 +743,7 @@ namespace fsp
 
     success_ = true;
     logger_.info(fmt::format("Processed {} files successfully.", file_processed.load()));
+    if (have_grammar) gp.reset();
     return {};
   }
 } // namespace fsp

@@ -101,7 +101,7 @@ namespace fsp
   inline void  fsp_logger::make_log_name(cstr_t parent_name, cstr_t child_name) const
   {
     if (child_name.empty()) log_thread_name = parent_name;
-    else log_thread_name = fmt::format("{}|{}", parent_name, child_name);
+    else log_thread_name = fmt::format("{}:{}", parent_name, child_name);
   }
 
   inline void fsp_logger::make_log_name(cstr_t name) const { make_log_name(name, ""); };

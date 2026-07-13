@@ -77,6 +77,7 @@ int main(int argc, const char* argv[])
       {.name="instr.agent",   .path="CdtTrfTxInf/InstgAgt/FinInstnId/*BICFI", .is_opt=true},
     });
     // clang-format on
+
     static constexpr auto targets = fsp::build(targets_raw, ns);
     static_assert(targets.size() == targets_raw.size(), "split xpaths are not ok.");
     static_assert(targets.min(0) == "Document", "Should be document");
@@ -93,34 +94,45 @@ int main(int argc, const char* argv[])
     static_assert(txn.min(2) == "FinInstnId", "Should be FinInstnId");
     static_assert(txn.max(2) == "TxId", "Should be TxId");
     static const auto all = fsp::proc_data{.targets = targets, .xpaths = {hdr, txn}};
+
     assert(all.targets.size() == all.xpaths.size());
+    std::vector<std::string> files;
+    files.push_back(xml_file);
     //  Configure logging
-    fsp::logger_config log_cfg{.enable_console = true,
-                               .enable_file    = true,
-                               .log_file_path  = "xml_processor.log",
-                               .log_level      = spdlog::level::trace, // spdlog::level::info;
-                               .logger_name    = "fsp"};
+    auto cfg = fsp::logger_config{.enable_console = true,
+                                  .enable_file    = true,
+                                  .log_file_path  = "xml_processor.log",
+                                  .log_level      = spdlog::level::trace, // spdlog::level::info;
+                                  .logger_name    = "fsp"};
 
-    const auto no_of_workers = 2U;                                   // number of paralell workers
-    auto       result        = fsp::xml_processor::process_xml_file( //
-      xml_file,                                                      // path to the xml file
-      xsd_file,                                                      // path to the xsd file that xml file must comply with
-      all,                                                           // array of xpaths that define split points of the xml tree
-      no_of_workers,                                                 // number of workers that process the xml file in parallel (0=all)
-      log_cfg                                                        // configuration of logging
-    );
+    const auto no_of_workers = 2U; // number of paralell workers
 
-    if (! result)
+    auto proc = fsp::xml_processor({.targets              = all, //
+                                    .num_workers          = no_of_workers,
+                                    .validate_against_xsd = ! xsd_file.empty(),
+                                    .log_config           = cfg},
+                                   "fsp");
+
+    auto res = proc.process_files(files, xsd_file);
+    if (! res)
     {
-      std::cerr << "Processing failed: " << result.error().to_string() << "\n";
+      std::cerr << "Processing failed: " << res.error().to_string() << "\n";
       return 1;
     }
-
-    auto& [results, errors] = *result;
+    // Get aggregated results
+    auto results = proc.get_results();
+    auto errors  = proc.get_errors();
 
     std::cout << "\n=== Processing Results ===\n";
-    std::cout << "Processed segments: " << results.size() << "\n";
-    std::cout << "Errors: " << errors.size() << "\n";
+    std::cout << "Total files processed: " << files.size() << "\n";
+    std::cout << "Successful segments:   " << results.size() << "\n";
+    std::cout << "Errors:                " << errors.size() << "\n";
+
+    if (! errors.empty())
+    {
+      std::cout << "\n--- Errors ---\n";
+      for (const auto& e : errors) { std::cout << "  " << e.seg_id() << "\n"; }
+    }
 
     // for (const auto& err : errors)
     // {

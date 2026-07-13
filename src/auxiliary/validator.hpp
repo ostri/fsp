@@ -11,7 +11,7 @@ namespace fsp
   using str_t     = std::string;
   using vec_str_t = std::vector<str_t>;
 
-  sax_reader_t prepare_parser(const gr_pool_t& gr_pool);
+  sax_reader_t parser_for_validation(const gr_pool_t& gr_pool);
   void         validate_xml([[maybe_unused]] const std::stop_token& st,
                             const gr_pool_t&                        gr_pool,
                             std::latch&                             gr_latch,
