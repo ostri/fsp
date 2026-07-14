@@ -73,11 +73,15 @@ namespace fsp
     [[nodiscard]] std::vector<segment_result> get_errors();
     struct stats
     {
-      std::size_t total_segments      = 0;
-      std::size_t successful_segments = 0;
-      std::size_t failed_segments     = 0;
-      std::size_t active_workers      = 0;
-      double      processing_time_ms  = 0.0;
+      // NOLINTBEGIN(misc-non-private-member-variables-in-classes)
+      std::size_t successful_doc      = 0;   // successful documents (SAX+XSD)
+      std::size_t failed_doc          = 0;   // failed documents (validaiton or sax)
+      std::size_t successful_segments = 0;   // succesfull segments
+      std::size_t failed_segments     = 0;   // failed segments (semantic errors)
+      std::size_t active_workers      = 0;   // number of workers processing the document
+      double      processing_time_ms  = 0.0; // real thread processing time
+      // NOLINTEND(misc-non-private-member-variables-in-classes)
+      [[nodiscard]] std::size_t total_segments() const { return successful_segments + failed_segments; }
     };
     [[nodiscard]] stats      get_stats() const;
     [[nodiscard]] bool       is_successful() const { return success_.load(); }
@@ -151,8 +155,8 @@ namespace fsp
     std::vector<segment_result>             errors_;
     std::mutex                              results_mutex_;
     std::mutex                              errors_mutex_;
-    std::atomic<std::size_t>                processed_count_{0};
-    std::atomic<std::size_t>                error_count_{0};
+    std::size_t                             processed_count_{0};
+    std::size_t                             error_count_{0};
     std::atomic<bool>                       cancel_flag_{false};
     std::atomic<bool>                       success_{false};
     std::vector<std::jthread>               workers_;

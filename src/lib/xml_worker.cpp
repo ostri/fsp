@@ -27,18 +27,18 @@ namespace
 namespace fsp
 {
   using xml_char = std::unique_ptr<xmlChar, xml_deleter>;
-  xml_worker::xml_worker(segment_queue&               seg_queue,
-                         const mmap_file&             xml_mmap,
-                         std::vector<segment_result>& results,
-                         std::vector<segment_result>& errors,
-                         std::mutex&                  results_mutex,
-                         std::mutex&                  errors_mutex,
-                         std::atomic<std::size_t>&    processed_count,
-                         std::atomic<std::size_t>&    error_count,
-                         std::atomic<bool>&           cancel_flag,
-                         const fsp_logger&            log,
-                         const proc_data&             targets,
-                         str_t                        parent_log_name)
+  xml_worker::xml_worker(segment_queue&   seg_queue,
+                         const mmap_file& xml_mmap,
+                         vec_seg_result&  results,
+                         vec_seg_result&  errors,
+                         std::mutex&      results_mutex,
+                         std::mutex&      errors_mutex,
+                         //  std::atomic<std::size_t>& processed_count,
+                         //  std::atomic<std::size_t>& error_count,
+                         std::atomic<bool>& cancel_flag,
+                         const fsp_logger&  log,
+                         const proc_data&   targets,
+                         str_t              parent_log_name)
   : log_(log)
   , seg_queue_(seg_queue)
   , xml_mmap_(xml_mmap)
@@ -46,8 +46,8 @@ namespace fsp
   , errors_(errors)
   , results_mutex_(results_mutex)
   , errors_mutex_(errors_mutex)
-  , processed_count_(processed_count)
-  , error_count_(error_count)
+  // , processed_count_(0)
+  // , error_count_(0)
   , cancel_flag_(cancel_flag)
   , targets_(targets)
   , parent_log_name_(std::move(parent_log_name))
@@ -55,46 +55,62 @@ namespace fsp
     reader_.reset(xmlReaderForMemory("", 0, "noname.xml", nullptr, XML_PARSE_NOENT | XML_PARSE_NONET));
     if (reader_.get() == nullptr) { throw std::runtime_error("Failed to initialize xmlTextReader"); }
   }
-
-  void xml_worker::operator()([[maybe_unused]] const std::stop_token& st, int worker_id)
+  /**
+   * @brief main worker functor
+   * The thread is called to process xml document fragments.
+   * @param st should we interrupt the processing
+   * @param worker_id unique id of the worker
+   */
+  void xml_worker::operator()(const std::stop_token& st, int worker_id)
   {
     auto t0 = std::chrono::steady_clock::now();
     log_.make_log_name(parent_log_name_, fmt::format("st{:02}", worker_id));
-    const bool log_debug = log_.active(fsp::lvl_enum::debug);
 
-    if (log_debug) log_.debug(fmt::format("Worker thread '{}' started.", log_thread_name));
+    if (log_debug_) log_.debug(fmt::format("Worker thread: id {} name '{}' started.", worker_id, log_thread_name));
 
-    thread_local std::size_t txn_processed = 0; // number of segments proessed in this thread
+    thread_local vec_seg_result loc_res_ok;  // segments with ok result
+    thread_local vec_seg_result loc_res_nak; // segments with nak result
 
-    while (! cancel_flag_.load())
+    xml_segment seg{};
+    while (! cancel_flag_.load() && ! st.stop_requested())
     {
-      xml_segment seg{};
-      if (! seg_queue_.pop(seg)) break;
-
-      auto res = process_segment(seg);
-      txn_processed++;
-
-      if (res)
+      if (! seg_queue_.pop(seg)) break; // there won't be any new segment in the queue => bail out
+      if (auto res = process_segment(seg))
       {
-        std::lock_guard lock(results_mutex_);
-        results_.push_back(std::move(*res));
-        processed_count_++;
+        if (loc_res_ok.size() + 1 == loc_res_ok.capacity()) loc_res_ok.reserve(loc_res_ok.size() * 2);
+        loc_res_ok.emplace_back(std::move(*res));
       }
       else
       {
-        std::lock_guard lock(errors_mutex_);
-        errors_.push_back(std::move(*res)); // ali posebej konstruiran error result
-        error_count_++;
+        if (loc_res_nak.size() + 1 == loc_res_nak.capacity()) loc_res_nak.reserve(loc_res_nak.size() * 2);
+        loc_res_nak.emplace_back(std::move(*res));
       }
-    }
-
-    if (log_debug)
+    } // while end
+    if (log_debug_)
     {
       auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count();
-      log_.debug(fmt::format("Worker thread '{}' finished in {} ms, txn processed: {}.", log_thread_name, duration, txn_processed));
+      log_.debug(fmt::format("Worker thread '{}' finished in {} ms, txn processed: {} (ok:{} nak:{}).",
+                             log_thread_name,
+                             duration,
+                             loc_res_ok.size() + loc_res_nak.size(),
+                             loc_res_ok.size(),
+                             loc_res_nak.size()));
+    }
+    {
+      std::lock_guard lock(results_mutex_);
+      results_.append_range(std::move(loc_res_ok));
+    }
+    {
+      std::lock_guard lock(errors_mutex_);
+      errors_.append_range(std::move(loc_res_nak));
     }
   }
-
+  /**
+   * @brief process segmetn from the xml document
+   *
+   * @param seg segment to be processed
+   * @return result<segment_result>  extracted segmetn data
+   */
   result<segment_result> xml_worker::process_segment(const xml_segment& seg)
   {
     auto       t0        = std::chrono::steady_clock::now();

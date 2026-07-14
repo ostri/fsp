@@ -56,7 +56,7 @@ namespace fsp
     const auto kilo = 1000;
     logger_.info(fmt::format("XML Processor: finished: {:.3f} sec segments:{} (ok:{} err:{})",
                              stat.processing_time_ms / kilo, // converting from milisecond to seconds
-                             stat.total_segments,
+                             stat.total_segments(),
                              stat.successful_segments,
                              stat.failed_segments));
   }
@@ -243,15 +243,12 @@ namespace fsp
     for (std::size_t i = 0; i < config_.num_workers; ++i)
     {
       str_t parent_name = logger_.log_name();
-      // logger_.info(fmt::format("DEBUG: start_workers parent for wrk{}: {}", i, parent_name)); // ← DODAJ
-      workers_.emplace_back(xml_worker{seg_queue_,
+      workers_.emplace_back(xml_worker{seg_queue_, //
                                        *active_mmap_,
                                        results_,
                                        errors_,
                                        results_mutex_,
                                        errors_mutex_,
-                                       processed_count_,
-                                       error_count_,
                                        cancel_flag_,
                                        logger_,
                                        config_.targets,
@@ -473,9 +470,8 @@ namespace fsp
   {
     auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start_time_).count();
     return {
-      .total_segments      = processed_count_.load() + error_count_.load(),
-      .successful_segments = processed_count_.load(),
-      .failed_segments     = error_count_.load(),
+      .successful_segments = processed_count_,
+      .failed_segments     = error_count_,
       .active_workers      = workers_.size() > 0 ? workers_.size() : config_.num_workers,
       .processing_time_ms  = static_cast<double>(ms),
     };
@@ -629,7 +625,7 @@ namespace fsp
       file_queue.push(std::string(path)); // copy
     }
     file_queue.set_finished(); // after all files are communicated we need to signal that this is all
-    // otherwise program hands on thread join
+    // otherwise program hangs on thread join
     std::vector<std::jthread>   file_workers;
     std::mutex                  results_agg_mutex;
     std::vector<segment_result> all_results;
@@ -648,75 +644,23 @@ namespace fsp
     for (std::size_t i = 0; i < num_parallel; ++i)
     {
       auto log_name = logger_.log_name();
-      file_workers.emplace_back(
-        xml_processor::file_worker_task,
-        std::ref(file_queue),
-        std::cref(xsd_path),
-        std::ref(results_agg_mutex),
-        std::ref(all_results),
-        std::ref(all_errors),
-        std::ref(file_processed),
-        std::ref(has_error),
-        std::ref(first_error),
-        i,
-        log_name,
-        std::cref(config_),
-        std::cref(logger_), // pass by value/copy to avoid race conditions
-        std::ref(gp),
-        std::ref(gr_latch),
-        std::ref(gr_loaded),
-        have_grammar
-        // [this, //
-        //  &file_queue,
-        //  &xsd_path,
-        //  &results_agg_mutex,
-        //  &all_results,
-        //  &all_errors,
-        //  &file_processed,
-        //  &has_error,
-        //  &first_error,
-        //  i,
-        //  log_name]()
-        // {
-        //   const auto& log = logger_;
-        //   log.make_log_name(log_name, fmt::format("ft{}", i));
-        //   while (true)
-        //   {
-        //     std::string xml_path;
-        //     log.info(fmt::format("Waiting for file ..."));
-        //     if (! file_queue.pop(xml_path)) break; // queue finished
-        //     log.info(fmt::format("Processing file: '{}'", xml_path));
-        //     // Each file gets its own processor instance to avoid state conflicts
-        //     xml_processor file_proc(config_, log.log_name());
-        //     auto          res = file_proc.process_file(xml_path, xsd_path);
-        //     if (! res)
-        //     {
-        //       auto err = res.error();
-        //       {
-        //         std::lock_guard<std::mutex> lock(results_agg_mutex);
-        //         if (! has_error)
-        //         {
-        //           has_error   = true;
-        //           first_error = err;
-        //         }
-        //       }
-        //       log.error(fmt::format("File {} failed: {}", xml_path, err.to_string()));
-        //     }
-        //     else
-        //     {
-        //       auto fr = file_proc.get_results();
-        //       auto fe = file_proc.get_errors();
-        //       {
-        //         std::lock_guard<std::mutex> lock(results_agg_mutex);
-        //         all_results.insert(all_results.end(), std::make_move_iterator(fr.begin()), std::make_move_iterator(fr.end()));
-        //         all_errors.insert(all_errors.end(), std::make_move_iterator(fe.begin()), std::make_move_iterator(fe.end()));
-        //       }
-        //       log.info(fmt::format("File '{}' success", xml_path));
-        //     }
-        //     ++file_processed;
-        //   }
-        // }
-      );
+      file_workers.emplace_back(xml_processor::file_worker_task,
+                                std::ref(file_queue),
+                                std::cref(xsd_path),
+                                std::ref(results_agg_mutex),
+                                std::ref(all_results),
+                                std::ref(all_errors),
+                                std::ref(file_processed),
+                                std::ref(has_error),
+                                std::ref(first_error),
+                                i,
+                                log_name,
+                                std::cref(config_),
+                                std::cref(logger_), // pass by value/copy to avoid race conditions
+                                std::ref(gp),
+                                std::ref(gr_latch),
+                                std::ref(gr_loaded),
+                                have_grammar);
     }
 
     // Wait for all workers
@@ -733,8 +677,8 @@ namespace fsp
       errors_ = std::move(all_errors);
     }
     // update statistics
-    processed_count_.store(results_.size(), std::memory_order_relaxed);
-    error_count_.store(errors_.size(), std::memory_order_relaxed);
+    processed_count_ = results_.size();
+    error_count_     = errors_.size();
     if (has_error && first_error)
     {
       logger_.error(fmt::format("process_files failed with first error: {}", first_error->to_string()));
