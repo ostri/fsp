@@ -69,8 +69,8 @@ namespace fsp
      * @return void_result success or first error
      */
     void_result process_files(const std::vector<std::string>& xml_paths, const std::string& xsd_path = "", std::size_t num_parallel = 0);
-    [[nodiscard]] std::vector<segment_result> get_results();
-    [[nodiscard]] std::vector<segment_result> get_errors();
+    [[nodiscard]] const vec_seg_result& get_results() const;
+    [[nodiscard]] const vec_seg_result& get_errors() const;
     struct stats
     {
       // NOLINTBEGIN(misc-non-private-member-variables-in-classes)
@@ -112,37 +112,35 @@ namespace fsp
                                                          std::string        xsd_path,
                                                          const fsp_logger&  logger,
                                                          const std::string& parent_log_name);
-
-    static void file_worker_task(lock_queue<std::string>&     file_queue,
-                                 const std::string&           xsd_path,
-                                 std::mutex&                  results_agg_mutex,
-                                 std::vector<segment_result>& all_results,
-                                 std::vector<segment_result>& all_errors,
-                                 std::atomic<std::size_t>&    file_processed,
-                                 std::atomic<bool>&           has_error,
-                                 std::optional<error_info>&   first_error,
-                                 std::size_t                  worker_idx,
-                                 const std::string&           parent_log_name,
-                                 const processor_config&      config,
-                                 const fsp_logger&            log, // Using auto to deduce the fsp::logger type
-                                 gr_pool_t&                   gp,
-                                 std::latch&                  gr_latch,
-                                 std::atomic<bool>&           gr_loaded,
-                                 bool                         have_grammar);
-  private:
-    static void process_one_file(const std::string&           xml_path,
-                                 const std::string&           xsd_path,
-                                 std::mutex&                  results_agg_mutex,
-                                 std::vector<segment_result>& all_results,
-                                 std::vector<segment_result>& all_errors,
-                                 std::atomic<bool>&           has_error,
-                                 std::optional<error_info>&   first_error,
-                                 const processor_config&      config,
-                                 const fsp_logger&            log, // Using auto to deduce the fsp::logger type
-                                 gr_pool_t&                   gp,
-                                 std::latch&                  gr_latch,
-                                 std::atomic<bool>&           gr_loaded,
-                                 bool                         have_grammar);
+    static void                      file_worker_task(lock_queue<std::string>&     file_queue,
+                                                      const std::string&           xsd_path,
+                                                      std::mutex&                  results_agg_mutex,
+                                                      std::vector<segment_result>& all_results,
+                                                      std::vector<segment_result>& all_errors,
+                                                      std::atomic<std::size_t>&    file_processed,
+                                                      std::atomic<bool>&           has_error,
+                                                      std::optional<error_info>&   first_error,
+                                                      std::size_t                  worker_idx,
+                                                      const std::string&           parent_log_name,
+                                                      const processor_config&      config,
+                                                      const fsp_logger&            log, // Using auto to deduce the fsp::logger type
+                                                      gr_pool_t&                   gp,
+                                                      std::latch&                  gr_latch,
+                                                      std::atomic<bool>&           gr_loaded,
+                                                      bool                         have_grammar);
+    static void                      process_one_file(const std::string&           xml_path,
+                                                      const std::string&           xsd_path,
+                                                      std::mutex&                  results_agg_mutex,
+                                                      std::vector<segment_result>& all_results,
+                                                      std::vector<segment_result>& all_errors,
+                                                      std::atomic<bool>&           has_error,
+                                                      std::optional<error_info>&   first_error,
+                                                      const processor_config&      config,
+                                                      const fsp_logger&            log, // Using auto to deduce the fsp::logger type
+                                                      gr_pool_t&                   gp,
+                                                      std::latch&                  gr_latch,
+                                                      std::atomic<bool>&           gr_loaded,
+                                                      bool                         have_grammar);
   private: /// members
     const s_clock                           start_ = std::chrono::steady_clock::now();
     const fsp_logger                        logger_;      // logger must be created first and destructed last
@@ -151,12 +149,10 @@ namespace fsp
     std::unique_ptr<xercesc::SAX2XMLReader> parser_;
     std::unique_ptr<Handler>                handler_;
     segment_queue                           seg_queue_;
-    std::vector<segment_result>             results_;
-    std::vector<segment_result>             errors_;
-    std::mutex                              results_mutex_;
-    std::mutex                              errors_mutex_;
-    std::size_t                             processed_count_{0};
-    std::size_t                             error_count_{0};
+    vec_seg_result                          results_;
+    vec_seg_result                          errors_;
+    mutable std::mutex                      results_mutex_;
+    mutable std::mutex                      errors_mutex_;
     std::atomic<bool>                       cancel_flag_{false};
     std::atomic<bool>                       success_{false};
     std::vector<std::jthread>               workers_;

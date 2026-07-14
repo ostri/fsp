@@ -229,9 +229,9 @@ namespace fsp
       std::lock_guard lock(errors_mutex_);
       errors_.clear();
     }
-    processed_count_ = 0;
-    error_count_     = 0;
-    cancel_flag_     = false;
+    // processed_count_ = 0;
+    // error_count_     = 0;
+    cancel_flag_ = false;
 
     if (active_mmap_ == nullptr)
     {
@@ -456,22 +456,22 @@ namespace fsp
   // ============================================================================
   // Rezultati
   // ============================================================================
-  std::vector<segment_result> xml_processor::get_results()
+  const vec_seg_result& xml_processor::get_results() const
   {
     std::lock_guard lock(results_mutex_);
-    return std::move(results_);
+    return results_;
   }
-  std::vector<segment_result> xml_processor::get_errors()
+  const vec_seg_result& xml_processor::get_errors() const
   {
     std::lock_guard lock(errors_mutex_);
-    return std::move(errors_);
+    return errors_;
   }
   xml_processor::stats xml_processor::get_stats() const
   {
     auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start_time_).count();
     return {
-      .successful_segments = processed_count_,
-      .failed_segments     = error_count_,
+      .successful_segments = results_.size(), // processed_count_,
+      .failed_segments     = errors_.size(),  // error_count_,
       .active_workers      = workers_.size() > 0 ? workers_.size() : config_.num_workers,
       .processing_time_ms  = static_cast<double>(ms),
     };
@@ -677,8 +677,8 @@ namespace fsp
       errors_ = std::move(all_errors);
     }
     // update statistics
-    processed_count_ = results_.size();
-    error_count_     = errors_.size();
+    // processed_count_ = results_.size();
+    // error_count_     = errors_.size();
     if (has_error && first_error)
     {
       logger_.error(fmt::format("process_files failed with first error: {}", first_error->to_string()));
