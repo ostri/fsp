@@ -107,7 +107,8 @@ namespace fsp
     std::stack<stack_struct>     tree_stack_;      // node and limits on specific depth
     int                          value_ndx_ = -1;  // index of the xpath value; -1 -> no value found
     str_t                        parent_log_name_;
-    // NOLINTEND(cppcoreguidelines-avoid-const-or-ref-data-members)
+    // xmlDictPtr                   dict_ = xmlDictCreate(); // xml dictionary
+    //  NOLINTEND(cppcoreguidelines-avoid-const-or-ref-data-members)
   };
 
   inline void XmlTextReaderDeleter::operator()(xmlTextReaderPtr reader) const

@@ -44,6 +44,8 @@ namespace fsp
   , targets_(targets)
   , parent_log_name_(std::move(parent_log_name))
   {
+    reader_.reset(xmlReaderForMemory("", 0, "noname.xml", nullptr, XML_PARSE_NOENT | XML_PARSE_NONET));
+    if (reader_.get() == nullptr) { throw std::runtime_error("Failed to initialize xmlTextReader"); }
   }
 
   void xml_worker::operator()([[maybe_unused]] const std::stop_token& st, int worker_id)
@@ -248,12 +250,39 @@ namespace fsp
     tree_stack_.pop();
     return res;
   }
-  // NO LINTNEXTLINE(readability-function-cognitive-complexity)
   result<segment_result> xml_worker::extract_xml_values(cstr_t xml_buf, const xml_segment& seg)
   {
-    //  NOLINTNEXTLINE(hicpp-signed-bitwise)
-    auto flags = (XML_PARSE_NOCDATA | XML_PARSE_NOERROR | XML_PARSE_NOWARNING | XML_PARSE_NOBLANKS | XML_PARSE_NONET);
-    reader_    = UniqueXmlTextReader(xmlReaderForMemory(xml_buf.data(), static_cast<int>(xml_buf.size()), nullptr, nullptr, flags));
+    // NOLINTNEXTLINE(hicpp-signed-bitwise)
+    auto flags  = (XML_PARSE_NODICT |    // keep old dict
+                   XML_PARSE_NOCDATA |   // no CDATA as text
+                   XML_PARSE_NOERROR |   // no errors; it is already perfomraed by xerces
+                   XML_PARSE_NOWARNING | // no wrtnings
+                   XML_PARSE_NOBLANKS |  // we can skip the spaces
+                   XML_PARSE_NONET |     // no need to have acces to net
+                                         // XML_PARSE_NODTD |      // no DTD validation
+                  // XML_PARSE_NOXINCLUDE | // no XInclude processing
+                  XML_PARSE_NSCLEAN | // namespace-e cleanup (less program memory)
+                  // XML_PARSE_NOWRAP |     // no additional wrappers
+                  XML_PARSE_IGNORE_ENC // utf-8 encoding assumed
+    );
+    auto status = xmlReaderNewMemory(reader_.get(),
+                                     xml_buf.data(),
+                                     static_cast<int>(xml_buf.size()),
+                                     "noname.xml",
+                                     nullptr,
+                                     flags // XML_PARSE_NODICT tells it to reuse the existing dictionary
+    );
+
+    if (status < 0) { throw std::runtime_error("Failed to setup reader for new document\n"); }
+
+    if (reader_)
+    {
+      xmlTextReaderSetParserProp(reader_.get(), XML_PARSER_LOADDTD, 0);
+      xmlTextReaderSetParserProp(reader_.get(), XML_PARSER_DEFAULTATTRS, 0);
+      xmlTextReaderSetParserProp(reader_.get(), XML_PARSER_VALIDATE, 0);
+      xmlTextReaderSetParserProp(reader_.get(), XML_PARSER_SUBST_ENTITIES, 0);
+
+    } // 64KB
     auto        subtree_type = targets_.targets[seg.subtree_type()].original_ndx(); // seg.subtree_type();
     const auto& xpaths       = targets_.xpaths.at(subtree_type);
     assert(xpaths.size() != 0);
