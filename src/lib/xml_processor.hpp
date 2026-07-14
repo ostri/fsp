@@ -153,13 +153,13 @@ namespace fsp
     vec_seg_result                          errors_;
     mutable std::mutex                      results_mutex_;
     mutable std::mutex                      errors_mutex_;
-    std::atomic<bool>                       cancel_flag_{false};
-    std::atomic<bool>                       success_{false};
-    std::vector<std::jthread>               workers_;
-    std::chrono::steady_clock::time_point   start_time_;
-    std::unique_ptr<mem_buf_holder>         xsd_holder_;
-    const fsp::mmap_file*                   active_mmap_ = nullptr; // reference to mmap file (needed by workers)
-    str_t                                   parent_log_name_;
+    //    std::atomic<bool>                       cancel_flag_{false};
+    std::atomic<bool>                     success_{false};
+    std::vector<std::jthread>             workers_;
+    std::chrono::steady_clock::time_point start_time_;
+    std::unique_ptr<mem_buf_holder>       xsd_holder_;
+    const fsp::mmap_file*                 active_mmap_ = nullptr; // reference to mmap file (needed by workers)
+    str_t                                 parent_log_name_;
   };
 } // namespace fsp
 

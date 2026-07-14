@@ -33,12 +33,10 @@ namespace fsp
                          vec_seg_result&  errors,
                          std::mutex&      results_mutex,
                          std::mutex&      errors_mutex,
-                         //  std::atomic<std::size_t>& processed_count,
-                         //  std::atomic<std::size_t>& error_count,
-                         std::atomic<bool>& cancel_flag,
-                         const fsp_logger&  log,
-                         const proc_data&   targets,
-                         str_t              parent_log_name)
+                         //               std::atomic<bool>& cancel_flag,
+                         const fsp_logger& log,
+                         const proc_data&  targets,
+                         str_t             parent_log_name)
   : log_(log)
   , seg_queue_(seg_queue)
   , xml_mmap_(xml_mmap)
@@ -46,9 +44,7 @@ namespace fsp
   , errors_(errors)
   , results_mutex_(results_mutex)
   , errors_mutex_(errors_mutex)
-  // , processed_count_(0)
-  // , error_count_(0)
-  , cancel_flag_(cancel_flag)
+  // , cancel_flag_(cancel_flag)
   , targets_(targets)
   , parent_log_name_(std::move(parent_log_name))
   {
@@ -72,7 +68,8 @@ namespace fsp
     thread_local vec_seg_result loc_res_nak; // segments with nak result
 
     xml_segment seg{};
-    while (! cancel_flag_.load() && ! st.stop_requested())
+    // while (! cancel_flag_.load() && ! st.stop_requested())
+    while (! st.stop_requested())
     {
       if (! seg_queue_.pop(seg)) break; // there won't be any new segment in the queue => bail out
       if (auto res = process_segment(seg))

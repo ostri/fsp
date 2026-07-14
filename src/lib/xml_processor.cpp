@@ -231,7 +231,7 @@ namespace fsp
     }
     // processed_count_ = 0;
     // error_count_     = 0;
-    cancel_flag_ = false;
+    // cancel_flag_ = false;
 
     if (active_mmap_ == nullptr)
     {
@@ -249,7 +249,7 @@ namespace fsp
                                        errors_,
                                        results_mutex_,
                                        errors_mutex_,
-                                       cancel_flag_,
+                                       //                                       cancel_flag_,
                                        logger_,
                                        config_.targets,
                                        parent_name},
@@ -275,7 +275,8 @@ namespace fsp
    */
   void xml_processor::cancel()
   {
-    cancel_flag_ = true;
+    // cancel_flag_ = true;
+    for (auto& el : workers_) el.request_stop();
     seg_queue_.set_finished();
   }
   /**
