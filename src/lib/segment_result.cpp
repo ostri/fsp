@@ -2,13 +2,6 @@
 namespace fsp
 {
 
-  std::size_t segment_result::seg_id() const { return seg_id_; }
-
-  int segment_result::seg_type() const { return seg_type_; }
-
-  const xpath_result& segment_result::values() const { return values_; }
-  xpath_result&       segment_result::values() { return values_; }
-
   std::string fsp::segment_result::dump(int offs)
   {
     std::string msg = fmt::format(R"({}seg: {} seg type: {} values:
@@ -27,4 +20,5 @@ namespace fsp
     }
     return msg.substr(0, msg.size() - 1); // remove trailing nl
   }
+
 } // namespace fsp

@@ -13,35 +13,41 @@ namespace fsp
   struct segment_result
   {
   public:
-    // segment_result() = default;
-    segment_result(std::size_t seg_id, int seg_type)
-    : seg_id_(seg_id)
-    , seg_type_(seg_type)
-    {
-    }
-    segment_result(std::size_t seg_id, int seg_type, xpath_result values)
-    : seg_id_(seg_id)
-    , seg_type_(seg_type)
-    , values_(std::move(values))
-    {
-    }
+    segment_result(std::size_t seg_id, int seg_type);
+    segment_result(std::size_t seg_id, int seg_type, xpath_result values);
     std::size_t         seg_id() const;
     int                 seg_type() const;
     const xpath_result& values() const;
     xpath_result&       values();
-    cstr_t              values(cstr_t key) const { return values(key, 0); }
-    cstr_t              values(cstr_t key, std::size_t ndx = 0) const
-    {
-      const auto it = values_.find(key);
-      if (it != values_.end()) return it->second.at(ndx);
-      return "";
-    }
-    std::string dump(int offs = 0);
+    cstr_t              values(cstr_t key) const;
+    cstr_t              values(cstr_t key, std::size_t ndx = 0) const;
+    std::string         dump(int offs = 0);
   private:
-    // NOLINTBEGIN(misc-non-private-member-variables-in-classes)
     std::size_t  seg_id_   = 0;  // unique id of the segment
     int          seg_type_ = -1; // xpath index that was used to partiion the xml to get this subtree
     xpath_result values_;        // result values
-    // NOLINTEND(misc-non-private-member-variables-in-classes)
   };
+  //////////////////////////////////////////////////////////////////////
+  inline segment_result::segment_result(std::size_t seg_id, int seg_type)
+  : seg_id_(seg_id)
+  , seg_type_(seg_type)
+  {
+  }
+  inline segment_result::segment_result(std::size_t seg_id, int seg_type, xpath_result values)
+  : seg_id_(seg_id)
+  , seg_type_(seg_type)
+  , values_(std::move(values))
+  {
+  }
+  inline std::size_t         segment_result::seg_id() const { return seg_id_; }
+  inline int                 segment_result::seg_type() const { return seg_type_; }
+  inline const xpath_result& segment_result::values() const { return values_; }
+  inline xpath_result&       segment_result::values() { return values_; }
+  inline cstr_t              segment_result::values(cstr_t key) const { return values(key, 0); }
+  inline cstr_t              segment_result::values(cstr_t key, std::size_t ndx) const
+  {
+    const auto it = values_.find(key);
+    if (it != values_.end()) return it->second.at(ndx);
+    return "";
+  }
 } // namespace fsp
