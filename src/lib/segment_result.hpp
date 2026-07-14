@@ -27,6 +27,7 @@ namespace fsp
     int          seg_type_ = -1; // xpath index that was used to partiion the xml to get this subtree
     xpath_result values_;        // result values
   };
+  using vec_seg_result = std::vector<segment_result>;
   //////////////////////////////////////////////////////////////////////
   inline segment_result::segment_result(std::size_t seg_id, int seg_type)
   : seg_id_(seg_id)
