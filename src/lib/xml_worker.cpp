@@ -14,11 +14,19 @@
 
 namespace
 {
-
+  struct xml_deleter
+  {
+    void operator()(xmlChar* str) const
+    {
+      if (str != nullptr) xmlFree(str);
+    }
+  };
+  using xml_char = std::unique_ptr<xmlChar, xml_deleter>;
 } // namespace
 
 namespace fsp
 {
+  using xml_char = std::unique_ptr<xmlChar, xml_deleter>;
   xml_worker::xml_worker(segment_queue&               seg_queue,
                          const mmap_file&             xml_mmap,
                          std::vector<segment_result>& results,
@@ -147,8 +155,8 @@ namespace fsp
   }
   void xml_worker::prepare_tree_stack(const auto& xpaths_depth)
   {
-    if (tree_stack_.size() > 1)
-    {
+    if (tree_stack_.size() > 1) [[unlikely]]
+    { // rewinding the stack. should be empty anyway
       while (! tree_stack_.empty())
       {
         auto el = tree_stack_.top();
@@ -182,7 +190,7 @@ namespace fsp
   }
   bool xml_worker::open_tag(int& read_status, const xml_segment& seg, const auto& xpaths, const auto& limits, auto& res)
   {
-    auto x = process_and_prune_node(xpaths, tree_stack_, limits, res);
+    auto x = process_and_prune_node(xpaths, limits, res);
     if (! x)
     { // FIXME too deep is critical error handle it properly
       if (log_trace_) log_.trace(fmt::format("pruning: {} val:{}", x.error().err, tree_stack_.top().node.tag()));
@@ -252,19 +260,20 @@ namespace fsp
   }
   result<segment_result> xml_worker::extract_xml_values(cstr_t xml_buf, const xml_segment& seg)
   {
-    // NOLINTNEXTLINE(hicpp-signed-bitwise)
-    auto flags  = (XML_PARSE_NODICT |    // keep old dict
-                   XML_PARSE_NOCDATA |   // no CDATA as text
-                   XML_PARSE_NOERROR |   // no errors; it is already perfomraed by xerces
-                   XML_PARSE_NOWARNING | // no wrtnings
-                   XML_PARSE_NOBLANKS |  // we can skip the spaces
-                   XML_PARSE_NONET |     // no need to have acces to net
-                                         // XML_PARSE_NODTD |      // no DTD validation
-                  // XML_PARSE_NOXINCLUDE | // no XInclude processing
-                  XML_PARSE_NSCLEAN | // namespace-e cleanup (less program memory)
-                  // XML_PARSE_NOWRAP |     // no additional wrappers
-                  XML_PARSE_IGNORE_ENC // utf-8 encoding assumed
+    // NOLINTBEGIN(hicpp-signed-bitwise)
+    auto flags = (          // XML_PARSE_NODICT |    // keep old dict
+      XML_PARSE_NOCDATA |   // no CDATA as text
+      XML_PARSE_NOERROR |   // no errors; it is already perfomraed by xerces
+      XML_PARSE_NOWARNING | // no wrtnings
+      XML_PARSE_NOBLANKS |  // we can skip the spaces
+      XML_PARSE_NONET |     // no need to have acces to net
+                            // XML_PARSE_NODTD |      // no DTD validation
+      // XML_PARSE_NOXINCLUDE | // no XInclude processing
+      XML_PARSE_NSCLEAN | // namespace-e cleanup (less program memory)
+      // XML_PARSE_NOWRAP |     // no additional wrappers
+      XML_PARSE_IGNORE_ENC // utf-8 encoding assumed
     );
+    // NOLINTEND(hicpp-signed-bitwise)
     auto status = xmlReaderNewMemory(reader_.get(),
                                      xml_buf.data(),
                                      static_cast<int>(xml_buf.size()),
@@ -295,10 +304,10 @@ namespace fsp
     return loop(seg, xpaths, limits);
   }
   std::expected<pp_result, err_result> xml_worker::process_and_prune_node( //
-    const xpath_node_struct&  xpaths,
-    std::stack<stack_struct>& stack,
-    const xpath_limits&       limits_vec,
-    segment_result&           seg_result) const
+    const xpath_node_struct& xpaths,
+    // std::stack<stack_struct>& stack,
+    const xpath_limits& limits_vec,
+    segment_result&     seg_result)
   {
     int         read_status = 0;
     const char* uri         = reinterpret_cast<const char*>(xmlTextReaderConstNamespaceUri(reader_.get()));
@@ -308,16 +317,21 @@ namespace fsp
     // Safely handle potential null pointers from libxml2
     std::string_view safe_uri = uri != nullptr ? uri : "";
     std::string_view safe_tag = tag != nullptr ? tag : "";
-    auto             depth    = stack.size() - 1; // first available on stack
+    auto             depth    = tree_stack_.size() - 1; // first available on stack
     pp_result        result;
-    if (depth >= stack.size()) // guard to not go too deep
+    if (depth >= tree_stack_.size()) // guard to not go too deep
     {
-      if (log_trace) log_.trace(fmt::format("pruning subtree: '{}' too deep: '{}' max allowed: '{}'", safe_tag, depth, stack.size()));
-      read_status = xmlTextReaderNext(reader_.get()); // Skip all children, move to sibling or the end of parent tag
+      if (log_trace)
+        log_.trace(fmt::format( //
+          "pruning subtree: '{}' too deep: '{}' max allowed: '{}'",
+          safe_tag,
+          depth,
+          tree_stack_.size()));
+      read_status = xmlTextReaderNext(reader_.get()); // Skip all children, move to next sibling or the end of parent tag
       return std::unexpected(err_result{.status = read_status, .err = "Pruning, since it is too deep."});
     }
-    auto limits = limits_vec[depth] & stack.top().limits; // xpaths excluded in previous level are excluded
-                                                          // also on current level
+    auto limits = limits_vec[depth] & tree_stack_.top().limits; // xpaths excluded in previous level are excluded
+                                                                // also on current level
 
     result.node = fsp::xml_node{safe_uri, safe_tag};
     if (log_trace) //
@@ -355,7 +369,7 @@ namespace fsp
     if (result.status != -1 && ! xpaths[result.status].is_array())
       limits.reset(result.status); // we have this value and not searching in the future
     result.limits = limits;
-    stack.emplace(result.node, result.limits);
+    tree_stack_.emplace(result.node, result.limits);
     return result; // Indicates normal execution flow, no pruning happened
   }
   int xml_worker::process_positive_xpath_element( //
@@ -379,17 +393,49 @@ namespace fsp
     }
     return -1;
   }
+
+  // std::optional<str_t> xml_worker::get_attribute_value_ns(const str_t& local_name, const str_t& namespace_uri) const
+  // {
+  //   xml_char value(xmlTextReaderGetAttributeNs( //
+  //     reader_.get(),
+  //     BAD_CAST local_name.c_str(),
+  //     ! namespace_uri.empty() ? BAD_CAST namespace_uri.c_str() : nullptr));
+  //   if (value.get() == nullptr) return std::nullopt;
+  //   std::string result(reinterpret_cast<char*>(value.get()));
+  //   //    xmlFree(value); // pointer must be released
+  //   return result;
+  // }
   std::optional<str_t> xml_worker::get_attribute_value_ns(const str_t& local_name, const str_t& namespace_uri) const
   {
-    xmlChar* value = xmlTextReaderGetAttributeNs( //
-      reader_.get(),
-      BAD_CAST local_name.c_str(),
-      ! namespace_uri.empty() ? BAD_CAST namespace_uri.c_str() : nullptr);
-    if (value == nullptr) [[unlikely]]
-      return std::nullopt;
-    std::string result(reinterpret_cast<char*>(value));
-    xmlFree(value); // pointer must be released
-    return result;
+    const xmlChar* ln                   = BAD_CAST local_name.c_str();
+    int                          status = 0;
+
+    // 1. Pravilna izbira funkcije glede na prisotnost imenskega prostora
+    if (namespace_uri.empty())
+    {
+      // Za standardne atribute brez prefiksa (npr. Ccy="EUR")
+      status = xmlTextReaderMoveToAttribute(reader_.get(), ln);
+    }
+    else
+    {
+      // Za atribute z imenskim prostorom (npr. ns:Ccy="EUR")
+      const xmlChar* ns = BAD_CAST namespace_uri.c_str();
+      status            = xmlTextReaderMoveToAttributeNs(reader_.get(), ln, ns);
+    }
+
+    // 2. Branje vrednosti, če je bil atribut najden
+    if (status == 1)
+    {
+      const xmlChar* val = xmlTextReaderConstValue(reader_.get());
+      std::string    result(val != nullptr ? reinterpret_cast<const char*>(val) : "");
+
+      // 3. Obvezno vrnemo fokus bralnika nazaj na trenutni element!
+      xmlTextReaderMoveToElement(reader_.get());
+
+      return result;
+    }
+
+    return std::nullopt;
   }
   std::string xml_worker::process_attribute(const xml_attr& xp) const
   {
