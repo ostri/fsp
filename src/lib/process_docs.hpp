@@ -43,6 +43,12 @@ namespace fsp
     vec_seg_result         results_;         // ok segment data
     vec_seg_result         errors_;          // segments that have semantic errors
     stats_t                stats_{};         // document processing statistics
+    const bool             log_trace_ = log_.active(fsp::lvl_enum::trace);
+    const bool             log_debug_ = log_.active(fsp::lvl_enum::debug);
+    const bool             log_info_  = log_.active(fsp::lvl_enum::info);
+    const bool             log_warn_  = log_.active(fsp::lvl_enum::warn);
+    const bool             log_error_ = log_.active(fsp::lvl_enum::err);
+    const bool             log_crit_  = log_.active(fsp::lvl_enum::crit);
     // NOLINTEND(cppcoreguidelines-avoid-const-or-ref-data-members)
   };
 

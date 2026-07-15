@@ -88,26 +88,13 @@ namespace fsp
     for (auto& w : file_workers)
       if (w.joinable()) w.join();
 
-    // // Aggregate results into this instance
-    // {
-    //   std::lock_guard lock(results_mutex_);
-    //   results_ = std::move(all_results);
-    // }
-    // {
-    //   std::lock_guard lock(errors_mutex_);
-    //   errors_ = std::move(all_errors);
-    // }
-    // update statistics
-    // processed_count_ = results_.size();
-    // error_count_     = errors_.size();
     if (has_error && first_error)
     {
       log_.error(fmt::format("process_files failed with first error: {}", first_error->to_string()));
       return std::unexpected(*first_error);
     }
-
-    //    success_ = true;
-    log_.info(fmt::format("Processed {} files successfully.", file_processed.load()));
+    auto sec = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start_time_).count();
+    log_.info(fmt::format("Processed {} files successfully in {:.3f} sec.", file_processed.load(), static_cast<double>(sec / 1000.0)));
     if (has_grammar) gp.reset();
     return {};
   }

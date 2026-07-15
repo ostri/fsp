@@ -407,17 +407,6 @@ namespace fsp
     return -1;
   }
 
-  // std::optional<str_t> xml_worker::get_attribute_value_ns(const str_t& local_name, const str_t& namespace_uri) const
-  // {
-  //   xml_char value(xmlTextReaderGetAttributeNs( //
-  //     reader_.get(),
-  //     BAD_CAST local_name.c_str(),
-  //     ! namespace_uri.empty() ? BAD_CAST namespace_uri.c_str() : nullptr));
-  //   if (value.get() == nullptr) return std::nullopt;
-  //   std::string result(reinterpret_cast<char*>(value.get()));
-  //   //    xmlFree(value); // pointer must be released
-  //   return result;
-  // }
   std::optional<str_t> xml_worker::get_attribute_value_ns(const str_t& local_name, const str_t& namespace_uri) const
   {
     const xmlChar* ln                   = BAD_CAST local_name.c_str();
