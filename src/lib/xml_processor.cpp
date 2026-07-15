@@ -288,7 +288,7 @@ namespace fsp
    */
   void_result xml_processor::process_file(const std::string& xml_path,
                                           const std::string& xsd_path,
-                                          gr_pool_t&         gp,
+                                          const gr_pool_t&   gp,
                                           std::latch&        gp_latch,
                                           std::atomic<bool>& gp_loaded,
                                           bool               have_grammar)
@@ -346,9 +346,9 @@ namespace fsp
   //   parser_->parse()  →  vrže izjemo → ujamemo v catch bloku spodaj
   //   cancel()          →  cancel_flag_ = true → workerji se ustavijo
   //   val_future.get()  →  vrnemo napako klicatelju
-  void_result xml_processor::process_from_buffer(fsp::mmap_file&    xml_mmap,
-                                                 fsp::mmap_file*    xsd_mmap,
-                                                 gr_pool_t&         gp,
+  void_result xml_processor::process_from_buffer(mmap_file&         xml_mmap,
+                                                 mmap_file*         xsd_mmap,
+                                                 const gr_pool_t&   gp,
                                                  std::latch&        gp_latch,
                                                  std::atomic<bool>& gp_loaded,
                                                  bool               have_grammar)
@@ -489,7 +489,7 @@ namespace fsp
                                        std::optional<error_info>&   first_error,
                                        const processor_config&      config,
                                        const fsp_logger&            log, // Using auto to deduce the fsp::logger type
-                                       gr_pool_t&                   gp,
+                                       const gr_pool_t&             gp,
                                        std::latch&                  gr_latch,
                                        std::atomic<bool>&           gr_loaded,
                                        bool                         have_grammar)
@@ -538,7 +538,7 @@ namespace fsp
                                        const std::string&           parent_log_name,
                                        const processor_config&      config,
                                        const fsp_logger&            log, // Using auto to deduce the fsp::logger type
-                                       gr_pool_t&                   gp,
+                                       const gr_pool_t&             gp,
                                        std::latch&                  gr_latch,
                                        std::atomic<bool>&           gr_loaded,
                                        bool                         have_grammar)
@@ -600,13 +600,13 @@ namespace fsp
       logger_.info("No files to process.");
       return {};
     }
-    bool                        have_grammar = ! xsd_path.empty();
-    std::optional<std::jthread> gr_loader;
+    bool                        has_grammar = ! xsd_path.empty();
+    std::optional<std::jthread> gp_loader;
     gr_pool_t                   gp(std::make_unique<xercesc::XMLGrammarPoolImpl>()); // std::make_shared<xercesc::XMLGrammarPoolImpl>();
-    std::latch                  gr_latch(1);                                         // just waiting for grammar to be loaded
-    std::atomic<bool>           gr_loaded{false};                                    // is grammar loaded?
+    std::latch                  gp_latch(1);                                         // just waiting for grammar to be loaded
+    std::atomic<bool>           gp_loaded{false};                                    // is grammar loaded?
 
-    if (have_grammar) { gr_loader.emplace(fsp::load_grammar::load, std::ref(gp), std::ref(gr_latch), std::ref(gr_loaded), xsd_path); }
+    if (has_grammar) { gp_loader.emplace(fsp::load_grammar::load, std::ref(gp), std::ref(gp_latch), std::ref(gp_loaded), xsd_path); }
     if (num_parallel == 0)
     {
       num_parallel = std::thread::hardware_concurrency();
@@ -637,10 +637,10 @@ namespace fsp
 
     // Start workers
     file_workers.reserve(num_parallel);
-    if (have_grammar)
+    if (has_grammar)
     {
-      gr_latch.wait(); // wait till the grammar is loaded
-      if (! gr_loaded) throw std::runtime_error(fmt::format("XSD grammar '{}' cannot be loaded. aborting", xsd_path));
+      gp_latch.wait(); // wait till the grammar is loaded
+      if (! gp_loaded) throw std::runtime_error(fmt::format("XSD grammar '{}' cannot be loaded. aborting", xsd_path));
     }
     for (std::size_t i = 0; i < num_parallel; ++i)
     {
@@ -649,8 +649,10 @@ namespace fsp
                                 std::ref(file_queue),
                                 std::cref(xsd_path),
                                 std::ref(results_agg_mutex),
-                                std::ref(all_results),
-                                std::ref(all_errors),
+                                // std::ref(all_results),
+                                // std::ref(all_errors),
+                                std::ref(results_),
+                                std::ref(errors_),
                                 std::ref(file_processed),
                                 std::ref(has_error),
                                 std::ref(first_error),
@@ -658,25 +660,25 @@ namespace fsp
                                 log_name,
                                 std::cref(config_),
                                 std::cref(logger_), // pass by value/copy to avoid race conditions
-                                std::ref(gp),
-                                std::ref(gr_latch),
-                                std::ref(gr_loaded),
-                                have_grammar);
+                                std::cref(gp),
+                                std::ref(gp_latch),
+                                std::ref(gp_loaded),
+                                has_grammar);
     }
 
     // Wait for all workers
     for (auto& w : file_workers)
       if (w.joinable()) w.join();
 
-    // Aggregate results into this instance
-    {
-      std::lock_guard lock(results_mutex_);
-      results_ = std::move(all_results);
-    }
-    {
-      std::lock_guard lock(errors_mutex_);
-      errors_ = std::move(all_errors);
-    }
+    // // Aggregate results into this instance
+    // {
+    //   std::lock_guard lock(results_mutex_);
+    //   results_ = std::move(all_results);
+    // }
+    // {
+    //   std::lock_guard lock(errors_mutex_);
+    //   errors_ = std::move(all_errors);
+    // }
     // update statistics
     // processed_count_ = results_.size();
     // error_count_     = errors_.size();
@@ -688,7 +690,7 @@ namespace fsp
 
     success_ = true;
     logger_.info(fmt::format("Processed {} files successfully.", file_processed.load()));
-    if (have_grammar) gp.reset();
+    if (has_grammar) gp.reset();
     return {};
   }
 } // namespace fsp

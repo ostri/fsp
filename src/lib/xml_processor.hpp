@@ -49,13 +49,13 @@ namespace fsp
     xml_processor& operator=(xml_processor&&)      = delete;
     void_result    process_file(const std::string& xml_path,
                                 const std::string& xsd_path,
-                                gr_pool_t&         gp,
+                                const gr_pool_t&   gp,
                                 std::latch&        gp_latch,
                                 std::atomic<bool>& gp_loaded,
                                 bool               have_grammar);
-    void_result    process_from_buffer(fsp::mmap_file&    xml_mmap,
-                                       fsp::mmap_file*    xsd_mmap,
-                                       gr_pool_t&         gp,
+    void_result    process_from_buffer(mmap_file&         xml_mmap,
+                                       mmap_file*         xsd_mmap,
+                                       const gr_pool_t&   gp,
                                        std::latch&        gp_latch,
                                        std::atomic<bool>& gp_loaded,
                                        bool               have_grammar);
@@ -124,7 +124,7 @@ namespace fsp
                                                       const std::string&           parent_log_name,
                                                       const processor_config&      config,
                                                       const fsp_logger&            log, // Using auto to deduce the fsp::logger type
-                                                      gr_pool_t&                   gp,
+                                                      const gr_pool_t&             gp,
                                                       std::latch&                  gr_latch,
                                                       std::atomic<bool>&           gr_loaded,
                                                       bool                         have_grammar);
@@ -137,7 +137,7 @@ namespace fsp
                                                       std::optional<error_info>&   first_error,
                                                       const processor_config&      config,
                                                       const fsp_logger&            log, // Using auto to deduce the fsp::logger type
-                                                      gr_pool_t&                   gp,
+                                                      const gr_pool_t&             gp,
                                                       std::latch&                  gr_latch,
                                                       std::atomic<bool>&           gr_loaded,
                                                       bool                         have_grammar);
