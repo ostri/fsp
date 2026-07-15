@@ -15,7 +15,7 @@ namespace fsp
                                                                                             // std::size_t                     num_parallel
   )
   {
-    // log_.make_log_name(">");
+    log_.make_log_name(parent_log_name_);
     if (xml_paths.empty())
     {
       log_.info("No files to process.");

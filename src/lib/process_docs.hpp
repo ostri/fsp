@@ -1,11 +1,13 @@
 #pragma once
 
+#include "stats.hpp"
 #include "logger.hpp"
 #include "processor_config.hpp"
 #include "segment_result.hpp"
 #include "xerces_mgr.hpp"
 #include "xpath_helpers.hpp"
 #include <utility>
+
 
 namespace fsp
 {
@@ -14,27 +16,16 @@ namespace fsp
   {
   public:
     explicit process_docs(processor_config cfg);
-    process_docs(processor_config cfg, str_t parent_log_name)
-    : log_(cfg.log_config)
-    , cfg_(std::move(cfg))
-    , parent_log_name_(std::move(parent_log_name))
-    { log_.make_log_name(parent_log_name_); }
+    process_docs(processor_config cfg, str_t parent_log_name);
     ~process_docs()                                                    = default;
     process_docs(const process_docs&)                                  = delete;
     process_docs(process_docs&&)                                       = delete;
     process_docs&                       operator=(const process_docs&) = delete;
     process_docs&                       operator=(process_docs&&)      = delete;
     void_result                         process_files(const std::vector<std::string>& xml_paths, const std::string& xsd_path);
-    [[nodiscard]] const vec_seg_result& get_results() const
-    {
-      std::lock_guard lock(results_mutex_);
-      return results_;
-    }
-    [[nodiscard]] const vec_seg_result& get_errors() const
-    {
-      std::lock_guard lock(errors_mutex_);
-      return errors_;
-    }
+    [[nodiscard]] const vec_seg_result& get_results() const;
+    [[nodiscard]] const vec_seg_result& get_errors() const;
+    stats_t                             stats() const { return stats_; }
   private: // methods
     void_result process_files_internal(const std::vector<std::string>& xml_paths,
                                        const std::string&              xsd_path //,
@@ -51,6 +42,7 @@ namespace fsp
     mutable std::mutex     errors_mutex_;
     vec_seg_result         results_; // ok segment data
     vec_seg_result         errors_;  // segments that have semantic errors
+    stats_t                stats_{}; // document processing statistics
 
 
     // NOLINTEND(cppcoreguidelines-avoid-const-or-ref-data-members)
@@ -59,5 +51,23 @@ namespace fsp
   inline process_docs::process_docs(processor_config cfg)
   : fsp::process_docs(std::move(cfg), "main")
   {
+  }
+
+  inline process_docs::process_docs(processor_config cfg, str_t parent_log_name)
+  : log_(cfg.log_config)
+  , cfg_(std::move(cfg))
+  , parent_log_name_(std::move(parent_log_name))
+  { log_.make_log_name(parent_log_name_); }
+
+  inline const vec_seg_result& process_docs::get_results() const
+  {
+    std::lock_guard lock(results_mutex_);
+    return results_;
+  }
+
+  inline const vec_seg_result& process_docs::get_errors() const
+  {
+    std::lock_guard lock(errors_mutex_);
+    return errors_;
   }
 }; // namespace fsp

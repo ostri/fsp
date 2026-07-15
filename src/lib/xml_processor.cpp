@@ -28,11 +28,11 @@ namespace fsp
   }
 
   xml_processor::xml_processor(processor_config cfg, str_t parent_log_name)
-  : logger_(cfg.log_config)
+  : log_(cfg.log_config)
   , config_(std::move(cfg))
   , parent_log_name_(std::move(parent_log_name))
   {
-    bool first_time = logger_.log_name() == "unknown";
+    bool first_time = log_.log_name() == "unknown";
     if (first_time)
     {
       std::string_view build_type;
@@ -40,10 +40,10 @@ namespace fsp
       else build_type = "debug";
       if (config_.num_workers == 0) config_.num_workers = std::thread::hardware_concurrency();
       if (config_.num_workers == 0) config_.num_workers = 1; // if statement above fails
-      logger_.info(fmt::format("XML Processor: started: build type: {} -> {} workers, validation: {}",
-                               build_type,
-                               config_.num_workers,
-                               config_.validate_against_xsd));
+      log_.info(fmt::format("XML Processor: started: build type: {} -> {} workers, validation: {}",
+                            build_type,
+                            config_.num_workers,
+                            config_.validate_against_xsd));
     }
   }
 
@@ -52,13 +52,13 @@ namespace fsp
     cancel();
     stop_workers();
     parser_.reset();
-    auto       stat = get_stats();
+    auto       stat = save_stats();
     const auto kilo = 1000;
-    logger_.info(fmt::format("XML Processor: finished: {:.3f} sec segments:{} (ok:{} err:{})",
-                             stat.processing_time_ms / kilo, // converting from milisecond to seconds
-                             stat.total_segments(),
-                             stat.successful_segments,
-                             stat.failed_segments));
+    log_.info(fmt::format("XML Processor: finished: {:.3f} sec segments:{} (ok:{} err:{})",
+                          stat.processing_time_ms / kilo, // converting from milisecond to seconds
+                          stat.total_segments(),
+                          stat.successful_segments,
+                          stat.failed_segments));
   }
 
   // ============================================================================
@@ -77,7 +77,7 @@ namespace fsp
         if (! gp_loaded)
         {
           auto err = error_info{processor_error::internal_error, "Grammar failed to load.)", "", 0};
-          logger_.error(err.to_string());
+          log_.error(err.to_string());
           return std::unexpected(err);
         }
       }
@@ -89,13 +89,13 @@ namespace fsp
       parser_->setFeature(xercesc::XMLUni::fgSAX2CoreNameSpacePrefixes, false);
       // NOLINTEND(hicpp-no-array-decay)
 
-      logger_.debug("Parser (no-validation) setup ok");
+      log_.debug("Parser (no-validation) setup ok");
       return {};
     }
     catch (const xercesc::XMLException& e)
     {
       auto err = error_info{processor_error::internal_error, fmt::format("Parser init: {}", x_str(e.getMessage()).to_string()), "", 0};
-      logger_.error(err.to_string());
+      log_.error(err.to_string());
       return std::unexpected(err);
     }
   }
@@ -212,7 +212,7 @@ namespace fsp
                              xml_data,                   // must be by value
                              std::cref(gp),              // referenca na kopijo
                              std::move(path),            // premaknemo path
-                             std::cref(logger_),         // referenca na logger
+                             std::cref(log_),            // referenca na logger
                              std::cref(parent_log_name_) // referenca na parent log name
     );
     // Vrnemo shared_future
@@ -236,13 +236,13 @@ namespace fsp
     if (active_mmap_ == nullptr)
     {
       auto err = error_info{processor_error::internal_error, "mmap is null before 'start_workers()'", active_mmap_->path(), 0};
-      logger_.error(err.to_string());
+      log_.error(err.to_string());
       return std::unexpected(err);
     }
 
     for (std::size_t i = 0; i < config_.num_workers; ++i)
     {
-      str_t parent_name = logger_.log_name();
+      str_t parent_name = log_.log_name();
       workers_.emplace_back(xml_worker{seg_queue_, //
                                        *active_mmap_,
                                        results_,
@@ -250,12 +250,12 @@ namespace fsp
                                        results_mutex_,
                                        errors_mutex_,
                                        //                                       cancel_flag_,
-                                       logger_,
+                                       log_,
                                        config_.targets,
                                        parent_name},
                             i);
     }
-    logger_.info(fmt::format("{} workers started.", config_.num_workers));
+    log_.info(fmt::format("{} workers started.", config_.num_workers));
     return {};
   }
   /**
@@ -267,7 +267,7 @@ namespace fsp
     seg_queue_.set_finished();
     workers_.clear();
     active_mmap_ = nullptr;
-    logger_.info("All workers stopped.");
+    log_.info("All workers stopped.");
   }
   /**
    * @brief signal to workers to immediately finish with work
@@ -294,7 +294,7 @@ namespace fsp
                                           bool               have_grammar)
   {
     start_time_ = std::chrono::steady_clock::now();
-    logger_.info(fmt::format("XML file: '{}'", xml_path));
+    log_.info(fmt::format("XML file: '{}'", xml_path));
 
     fsp::mmap_file xml_mmap;
     try
@@ -304,14 +304,14 @@ namespace fsp
     catch (const std::exception& e)
     {
       auto err = error_info{processor_error::file_open_failed, e.what(), xml_path, 0};
-      logger_.error(err.to_string());
+      log_.error(err.to_string());
       return std::unexpected(err);
     }
 
     if (! xml_mmap.is_open() || xml_mmap.empty())
     {
       auto err = error_info{processor_error::mmap_failed, fmt::format("mmap neuspešen: '{}'", xml_path), xml_path, 0};
-      logger_.error(err.to_string());
+      log_.error(err.to_string());
       return std::unexpected(err);
     }
 
@@ -326,7 +326,7 @@ namespace fsp
       catch (const std::exception& e)
       {
         auto err = error_info{processor_error::file_open_failed, e.what(), xsd_path, 0};
-        logger_.error(err.to_string());
+        log_.error(err.to_string());
         return std::unexpected(err);
       }
     }
@@ -358,14 +358,14 @@ namespace fsp
 
     try
     {
-      handler_ = std::make_unique<Handler>(config_.targets, seg_queue_, logger_, parser_.get(), xml_mmap.string_view());
+      handler_ = std::make_unique<Handler>(config_.targets, seg_queue_, log_, parser_.get(), xml_mmap.string_view());
       parser_->setContentHandler(handler_.get());
       parser_->setErrorHandler(handler_.get());
     }
     catch (const std::exception& e)
     {
       auto err = error_info{processor_error::internal_error, fmt::format("Handler init: {}", e.what()), "", 0};
-      logger_.error(err.to_string());
+      log_.error(err.to_string());
       return std::unexpected(err);
     }
     active_mmap_ = &xml_mmap;
@@ -386,16 +386,14 @@ namespace fsp
     try
     {
       auto t0 = std::chrono::steady_clock::now();
-      logger_.info("SAX parsing started.");
+      if (log_info_) log_.info("SAX parsing started.");
       xercesc::MemBufInputSource src(
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
-        reinterpret_cast<const XMLByte*>(xml_mmap.data()),
-        static_cast<XMLSize_t>(xml_mmap.size()),
-        "xml_input",
-        false);
+        reinterpret_cast<const XMLByte*>(xml_mmap.data()), static_cast<XMLSize_t>(xml_mmap.size()), "xml_input", false);
       parser_->parse(src);
+      save_stats();
+
       auto us = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count();
-      logger_.info(fmt::format("SAX parsing finished. {} ms", us));
+      if (log_info_) log_.info(fmt::format("SAX parsing finished. {} ms pending segments: {}", us, seg_queue_.size()));
     }
     catch (const xercesc::SAXParseException& e)
     {
@@ -406,7 +404,7 @@ namespace fsp
       validation_interrupted = true;
       auto err               = error_info{
         processor_error::xsd_validation_failed, x_str(e.getMessage()).to_string(), "", static_cast<std::size_t>(e.getLineNumber())};
-      logger_.error(err.to_string());
+      log_.error(err.to_string());
     }
     catch (const xercesc::XMLException& e)
     {
@@ -416,7 +414,7 @@ namespace fsp
       workers_.clear();
       active_mmap_ = nullptr;
       auto err = error_info{processor_error::parse_failed, x_str(e.getMessage()).to_string(), "", static_cast<std::size_t>(e.getSrcLine())};
-      logger_.error(err.to_string());
+      log_.error(err.to_string());
 
       return std::unexpected(err);
     }
@@ -427,7 +425,7 @@ namespace fsp
       workers_.clear();
       active_mmap_ = nullptr;
       auto err     = error_info{processor_error::parse_failed, e.what(), "", 0};
-      logger_.error(err.to_string());
+      log_.error(err.to_string());
       return std::unexpected(err);
     }
 
@@ -467,15 +465,16 @@ namespace fsp
     std::lock_guard lock(errors_mutex_);
     return errors_;
   }
-  xml_processor::stats xml_processor::get_stats() const
+  stats_t xml_processor::save_stats()
   {
     auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start_time_).count();
-    return {
+    stats_  = stats_t{
       .successful_segments = results_.size(), // processed_count_,
       .failed_segments     = errors_.size(),  // error_count_,
       .active_workers      = workers_.size() > 0 ? workers_.size() : config_.num_workers,
       .processing_time_ms  = static_cast<double>(ms),
     };
+    return stats_;
   }
   // // ============================================================================
   // // Convenience function
@@ -515,33 +514,38 @@ namespace fsp
     }
     else
     {
-      const auto& fr = file_proc.get_results();
-      const auto& fe = file_proc.get_errors();
+      auto fr = file_proc.move_results();
+      auto fe = file_proc.move_errors();
       {
         std::lock_guard<std::mutex> lock(results_agg_mutex);
-        all_results.insert(all_results.end(), std::make_move_iterator(fr.begin()), std::make_move_iterator(fr.end()));
-        all_errors.insert(all_errors.end(), std::make_move_iterator(fe.begin()), std::make_move_iterator(fe.end()));
+        all_results.append_range(fr | std::views::as_rvalue);
+        all_errors.append_range(fe | std::views::as_rvalue);
+
+        // all_results.reserve(all_results.size() + fr.size());
+        // all_results.insert(all_results.end(), std::make_move_iterator(fr.begin()), std::make_move_iterator(fr.end()));
+        // all_errors.reserve(all_errors.size() + fe.size());
+        // all_errors.insert(all_errors.end(), std::make_move_iterator(fe.begin()), std::make_move_iterator(fe.end()));
       }
       log.info(fmt::format("File '{}' success", xml_path));
     }
   }
   // Helper static function for jthread execution
-  void xml_processor::file_worker_task(lock_queue<std::string>&     file_queue,
-                                       const std::string&           xsd_path,
-                                       std::mutex&                  results_agg_mutex,
-                                       std::vector<segment_result>& all_results,
-                                       std::vector<segment_result>& all_errors,
-                                       std::atomic<std::size_t>&    file_processed,
-                                       std::atomic<bool>&           has_error,
-                                       std::optional<error_info>&   first_error,
-                                       std::size_t                  worker_idx,
-                                       const std::string&           parent_log_name,
-                                       const processor_config&      config,
-                                       const fsp_logger&            log, // Using auto to deduce the fsp::logger type
-                                       const gr_pool_t&             gp,
-                                       std::latch&                  gr_latch,
-                                       std::atomic<bool>&           gr_loaded,
-                                       bool                         have_grammar)
+  void xml_processor::file_worker_task(lock_queue<std::string>&   file_queue,
+                                       const std::string&         xsd_path,
+                                       std::mutex&                results_agg_mutex,
+                                       vec_seg_result&            all_results,
+                                       vec_seg_result&            all_errors,
+                                       std::atomic<std::size_t>&  file_processed,
+                                       std::atomic<bool>&         has_error,
+                                       std::optional<error_info>& first_error,
+                                       std::size_t                worker_idx,
+                                       const std::string&         parent_log_name,
+                                       const processor_config&    config,
+                                       const fsp_logger&          log, // Using auto to deduce the fsp::logger type
+                                       const gr_pool_t&           gp,
+                                       std::latch&                gr_latch,
+                                       std::atomic<bool>&         gr_loaded,
+                                       bool                       has_grammar)
   {
     log.make_log_name(parent_log_name, fmt::format("doc<{:02}>", worker_idx));
     std::string xml_path;
@@ -560,7 +564,7 @@ namespace fsp
                          gp,
                          gr_latch,
                          gr_loaded,
-                         have_grammar);
+                         has_grammar);
       else
       {
         {
@@ -583,7 +587,7 @@ namespace fsp
                              gp,
                              gr_latch,
                              gr_loaded,
-                             have_grammar);
+                             has_grammar);
           }
           else break; // processing finished
         }

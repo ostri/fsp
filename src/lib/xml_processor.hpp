@@ -25,6 +25,7 @@
 #include "mmap_file.hpp"
 #include "processor_config.hpp"
 #include "lock_queue.hpp"
+#include "stats.hpp"
 #include "xpath_helpers.hpp"
 #include "parsing_util.hpp"
 #include "segment_result.hpp"
@@ -70,42 +71,39 @@ namespace fsp
     void_result process_files(const std::vector<std::string>& xml_paths, const std::string& xsd_path = "", std::size_t num_parallel = 0);
     [[nodiscard]] const vec_seg_result& get_results() const;
     [[nodiscard]] const vec_seg_result& get_errors() const;
-    struct stats
+    [[nodiscard]] bool                  is_successful() const { return success_.load(); }
+    void                                cancel();
+    static processing_result            process_xml_file(const std::string&   xml_path,
+                                                         const std::string&   xsd_path,
+                                                         const proc_data&     proc_data,
+                                                         std::size_t          num_workers = 0,
+                                                         const logger_config& log_cfg     = logger_config{});
+    static void                         file_worker_task(lock_queue<std::string>&   file_queue,
+                                                         const std::string&         xsd_path,
+                                                         std::mutex&                results_agg_mutex,
+                                                         vec_seg_result&            all_results,
+                                                         vec_seg_result&            all_errors,
+                                                         std::atomic<std::size_t>&  file_processed,
+                                                         std::atomic<bool>&         has_error,
+                                                         std::optional<error_info>& first_error,
+                                                         std::size_t                worker_idx,
+                                                         const std::string&         parent_log_name,
+                                                         const processor_config&    config,
+                                                         const fsp_logger&          log, // Using auto to deduce the fsp::logger type
+                                                         const gr_pool_t&           gp,
+                                                         std::latch&                gr_latch,
+                                                         std::atomic<bool>&         gr_loaded,
+                                                         bool                       has_grammar);
+    vec_seg_result                      move_results()
     {
-      // NOLINTBEGIN(misc-non-private-member-variables-in-classes)
-      std::size_t successful_doc      = 0;   // successful documents (SAX+XSD)
-      std::size_t failed_doc          = 0;   // failed documents (validaiton or sax)
-      std::size_t successful_segments = 0;   // succesfull segments
-      std::size_t failed_segments     = 0;   // failed segments (semantic errors)
-      std::size_t active_workers      = 0;   // number of workers processing the document
-      double      processing_time_ms  = 0.0; // real thread processing time
-      // NOLINTEND(misc-non-private-member-variables-in-classes)
-      [[nodiscard]] std::size_t total_segments() const { return successful_segments + failed_segments; }
-    };
-    [[nodiscard]] stats      get_stats() const;
-    [[nodiscard]] bool       is_successful() const { return success_.load(); }
-    void                     cancel();
-    static processing_result process_xml_file(const std::string&   xml_path,
-                                              const std::string&   xsd_path,
-                                              const proc_data&     proc_data,
-                                              std::size_t          num_workers = 0,
-                                              const logger_config& log_cfg     = logger_config{});
-    static void              file_worker_task(lock_queue<std::string>&     file_queue,
-                                              const std::string&           xsd_path,
-                                              std::mutex&                  results_agg_mutex,
-                                              std::vector<segment_result>& all_results,
-                                              std::vector<segment_result>& all_errors,
-                                              std::atomic<std::size_t>&    file_processed,
-                                              std::atomic<bool>&           has_error,
-                                              std::optional<error_info>&   first_error,
-                                              std::size_t                  worker_idx,
-                                              const std::string&           parent_log_name,
-                                              const processor_config&      config,
-                                              const fsp_logger&            log, // Using auto to deduce the fsp::logger type
-                                              const gr_pool_t&             gp,
-                                              std::latch&                  gr_latch,
-                                              std::atomic<bool>&           gr_loaded,
-                                              bool                         have_grammar);
+      std::lock_guard lock(results_mutex_);
+      return std::move(results_);
+    }
+    vec_seg_result move_errors()
+    {
+      std::lock_guard lock(errors_mutex_);
+      return std::move(errors_);
+    }
   private: /// methods
     void_result setup_parser_no_validation(const gr_pool_t& gp, std::latch& gp_latch, std::atomic<bool>& gp_loaded, bool have_grammar);
     void_result start_workers();
@@ -140,9 +138,10 @@ namespace fsp
                                                       std::latch&                  gr_latch,
                                                       std::atomic<bool>&           gr_loaded,
                                                       bool                         have_grammar);
+    stats_t                          save_stats();
   private: /// members
     const s_clock                           start_ = std::chrono::steady_clock::now();
-    const fsp_logger                        logger_; // logger must be created first and destructed last
+    const fsp_logger                        log_; // logger must be created first and destructed last
     processor_config                        config_;
     std::unique_ptr<xercesc::SAX2XMLReader> parser_;
     std::unique_ptr<Handler>                handler_;
@@ -151,13 +150,19 @@ namespace fsp
     vec_seg_result                          errors_;
     mutable std::mutex                      results_mutex_;
     mutable std::mutex                      errors_mutex_;
-    //    std::atomic<bool>                       cancel_flag_{false};
-    std::atomic<bool>                     success_{false};
-    std::vector<std::jthread>             workers_;
-    std::chrono::steady_clock::time_point start_time_;
-    std::unique_ptr<mem_buf_holder>       xsd_holder_;
-    const fsp::mmap_file*                 active_mmap_ = nullptr; // reference to mmap file (needed by workers)
-    str_t                                 parent_log_name_;
+    std::atomic<bool>                       success_{false};
+    std::vector<std::jthread>               workers_;
+    s_clock                                 start_time_;
+    std::unique_ptr<mem_buf_holder>         xsd_holder_;
+    const fsp::mmap_file*                   active_mmap_ = nullptr; // reference to mmap file (needed by workers)
+    str_t                                   parent_log_name_;
+    const bool                              log_trace_ = log_.active(lvl_enum::trace);
+    const bool                              log_debug_ = log_.active(lvl_enum::debug);
+    const bool                              log_info_  = log_.active(lvl_enum::info);
+    const bool                              log_warn_  = log_.active(lvl_enum::warn);
+    const bool                              log_error_ = log_.active(lvl_enum::err);
+    const bool                              log_crit_  = log_.active(lvl_enum::crit);
+    stats_t                                 stats_; // processing statistics
   };
 } // namespace fsp
 
