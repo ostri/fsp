@@ -18,8 +18,7 @@ namespace fsp
     : log_(cfg.log_config)
     , cfg_(std::move(cfg))
     , parent_log_name_(std::move(parent_log_name))
-    {
-    }
+    { log_.make_log_name(parent_log_name_); }
     ~process_docs()                                                    = default;
     process_docs(const process_docs&)                                  = delete;
     process_docs(process_docs&&)                                       = delete;

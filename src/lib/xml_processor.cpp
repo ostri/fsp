@@ -543,7 +543,7 @@ namespace fsp
                                        std::atomic<bool>&           gr_loaded,
                                        bool                         have_grammar)
   {
-    log.make_log_name(parent_log_name, fmt::format("doc.{:02}", worker_idx));
+    log.make_log_name(parent_log_name, fmt::format("doc<{:02}>", worker_idx));
     std::string xml_path;
     while (true)
     {

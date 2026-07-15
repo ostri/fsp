@@ -15,7 +15,7 @@ namespace fsp
                                                                                             // std::size_t                     num_parallel
   )
   {
-    log_.make_log_name(">");
+    // log_.make_log_name(">");
     if (xml_paths.empty())
     {
       log_.info("No files to process.");
@@ -78,7 +78,7 @@ namespace fsp
                                 i,
                                 log_name,
                                 std::cref(cfg_),
-                                std::cref(log_), // pass by value/copy to avoid race conditions
+                                std::cref(log_),
                                 std::cref(gp),
                                 std::ref(gp_latch),
                                 std::ref(gp_loaded),
