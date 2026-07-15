@@ -129,8 +129,8 @@ int main(int argc, const char* argv[])
       return 1;
     }
     // Get aggregated results
-    auto results = p.get_results();
-    auto errors  = p.get_errors();
+    const auto& results = p.get_results();
+    const auto& errors  = p.get_errors();
 
     std::cout << "\n=== Processing Results ===\n";
     std::cout << "Total files processed: " << files.size() << "\n";
