@@ -5,9 +5,10 @@
 #include <optional>
 #include <string>
 #include "error_info.hpp"
+#include "logger.hpp"
 #include "segment_result.hpp"
+#include "stats.hpp"
 #include "xml_segment.hpp"
-#include "xml_processor.hpp"
 
 namespace fsp
 {
@@ -62,8 +63,8 @@ namespace fsp
      * @param stats file processing statistics
      */
     virtual void doc_end( //
-      [[maybe_unused]] int                         worker_id,
-      [[maybe_unused]] const xml_processor::stats& stats)
+      [[maybe_unused]] int           worker_id,
+      [[maybe_unused]] const stats_t stats)
     {
     }
     /**
