@@ -104,7 +104,7 @@ namespace fsp
   // ============================================================================
   // Statična funkcija, ki izvaja validacijo
   std::optional<error_info> xml_processor::validate_xml_worker(const cstr_t&      f_xml_data,
-                                                               gr_pool_t&         gp,
+                                                               const gr_pool_t&   gp,
                                                                std::string        xsd_path,
                                                                const fsp_logger&  logger,
                                                                const std::string& parent_log_name)
@@ -196,9 +196,9 @@ namespace fsp
   // a nit ne sme imeti surovih referenc nanj (lifetime ni garantiran).
   // xml_data/xsd_data sta raw pointer-ja na mmap ki živita dlje od niti — ok.
   std::shared_future<std::optional<error_info>> xml_processor::launch_validation_thread( //
-    const cstr_t& f_xml_data,
-    gr_pool_t&    gp,      // xml file contents
-    std::string   xsd_path // path to the grammar file
+    const cstr_t&    f_xml_data,
+    const gr_pool_t& gp,      // xml file contents
+    std::string      xsd_path // path to the grammar file
   )
   {
     // Kopiramo podatke za nit
@@ -209,8 +209,8 @@ namespace fsp
     // Ustvarimo async nalogo s statično funkcijo
     auto future = std::async(std::launch::async,
                              validate_xml_worker,
-                             std::cref(xml_data),        // referenca na kopijo
-                             std::ref(gp),               // referenca na kopijo
+                             xml_data,                   // must be by value
+                             std::cref(gp),              // referenca na kopijo
                              std::move(path),            // premaknemo path
                              std::cref(logger_),         // referenca na logger
                              std::cref(parent_log_name_) // referenca na parent log name

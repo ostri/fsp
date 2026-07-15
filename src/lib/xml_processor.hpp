@@ -102,13 +102,13 @@ namespace fsp
     // "validacija izklopljena".
     std::shared_future<std::optional<error_info>> launch_validation_thread( //
                                                                             //
-      const cstr_t& f_xml_data,                                             // xml file contents
-      gr_pool_t&    gp,                                                     // grammar pool
-      std::string   xsd_path                                                // path to the grammar file
+      const cstr_t&    f_xml_data,                                          // xml file contents
+      const gr_pool_t& gp,                                                  // grammar pool
+      std::string      xsd_path                                             // path to the grammar file
     );
 
     static std::optional<error_info> validate_xml_worker(const cstr_t&      f_xml_data,
-                                                         gr_pool_t&         gp,
+                                                         const gr_pool_t&   gp,
                                                          std::string        xsd_path,
                                                          const fsp_logger&  logger,
                                                          const std::string& parent_log_name);
