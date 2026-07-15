@@ -46,13 +46,12 @@ namespace fsp
                             config_.validate_against_xsd));
     }
   }
-
   xml_processor::~xml_processor()
   {
     cancel();
     stop_workers();
     parser_.reset();
-    auto       stat = save_stats();
+    auto       stat = stats();
     const auto kilo = 1000;
     log_.info(fmt::format("XML Processor: finished: {:.3f} sec segments:{} (ok:{} err:{})",
                           stat.processing_time_ms / kilo, // converting from milisecond to seconds
@@ -60,7 +59,6 @@ namespace fsp
                           stat.successful_segments,
                           stat.failed_segments));
   }
-
   // ============================================================================
   // Parser setup
   // ============================================================================
@@ -465,16 +463,17 @@ namespace fsp
     std::lock_guard lock(errors_mutex_);
     return errors_;
   }
-  stats_t xml_processor::save_stats()
+  void xml_processor::save_stats()
   {
     auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start_time_).count();
     stats_  = stats_t{
+      .successful_doc      = 0,
+      .failed_doc          = 0,
       .successful_segments = results_.size(), // processed_count_,
       .failed_segments     = errors_.size(),  // error_count_,
       .active_workers      = workers_.size() > 0 ? workers_.size() : config_.num_workers,
       .processing_time_ms  = static_cast<double>(ms),
     };
-    return stats_;
   }
   // // ============================================================================
   // // Convenience function
@@ -514,19 +513,19 @@ namespace fsp
     }
     else
     {
+      file_proc.save_stats(); // save current stratistics
       auto fr = file_proc.move_results();
       auto fe = file_proc.move_errors();
       {
         std::lock_guard<std::mutex> lock(results_agg_mutex);
         all_results.append_range(fr | std::views::as_rvalue);
         all_errors.append_range(fe | std::views::as_rvalue);
-
-        // all_results.reserve(all_results.size() + fr.size());
-        // all_results.insert(all_results.end(), std::make_move_iterator(fr.begin()), std::make_move_iterator(fr.end()));
-        // all_errors.reserve(all_errors.size() + fe.size());
-        // all_errors.insert(all_errors.end(), std::make_move_iterator(fe.begin()), std::make_move_iterator(fe.end()));
       }
-      log.info(fmt::format("File '{}' success", xml_path));
+      auto stats = file_proc.stats();
+      log.info(fmt::format("File '{}' success (ok: {} err:{})", //
+                           xml_path,
+                           stats.successful_segments,
+                           stats.failed_segments));
     }
   }
   // Helper static function for jthread execution
@@ -541,7 +540,7 @@ namespace fsp
                                        std::size_t                worker_idx,
                                        const std::string&         parent_log_name,
                                        const processor_config&    config,
-                                       const fsp_logger&          log, // Using auto to deduce the fsp::logger type
+                                       const fsp_logger&          log,
                                        const gr_pool_t&           gp,
                                        std::latch&                gr_latch,
                                        std::atomic<bool>&         gr_loaded,

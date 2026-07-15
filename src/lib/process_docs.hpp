@@ -34,17 +34,15 @@ namespace fsp
   private: // data
     // NOLINTBEGIN(cppcoreguidelines-avoid-const-or-ref-data-members)
     const s_clock          start_time_ = std::chrono::steady_clock::now();
-    const fsp_logger       log_;         //< logger (before any logging)
-    const xerces_mgr       xerces_life_; //< must be first to be destructed last (before any xercesc)
-    const processor_config cfg_;         // NOLINT(cppcoreguidelines-avoid-const-or-ref-data-members)
-    const str_t            parent_log_name_;
-    mutable std::mutex     results_mutex_;
-    mutable std::mutex     errors_mutex_;
-    vec_seg_result         results_; // ok segment data
-    vec_seg_result         errors_;  // segments that have semantic errors
-    stats_t                stats_{}; // document processing statistics
-
-
+    const fsp_logger       log_;             //< logger (before any logging)
+    const xerces_mgr       xerces_life_;     //< must be first to be destructed last (before any xercesc)
+    const processor_config cfg_;             //< framework configuration
+    const str_t            parent_log_name_; //< parent name for logging
+    mutable std::mutex     results_mutex_;   //< results mutex
+    mutable std::mutex     errors_mutex_;    // errors mutex
+    vec_seg_result         results_;         // ok segment data
+    vec_seg_result         errors_;          // segments that have semantic errors
+    stats_t                stats_{};         // document processing statistics
     // NOLINTEND(cppcoreguidelines-avoid-const-or-ref-data-members)
   };
 

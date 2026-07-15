@@ -64,12 +64,11 @@ namespace fsp
     for (std::size_t i = 0; i < num_parallel; ++i)
     {
       auto log_name = log_.log_name();
+      // create file_worker_task thread
       file_workers.emplace_back(xml_processor::file_worker_task,
                                 std::ref(file_queue),
                                 std::cref(xsd_path),
                                 std::ref(results_agg_mutex),
-                                // std::ref(all_results),
-                                // std::ref(all_errors),
                                 std::ref(results_),
                                 std::ref(errors_),
                                 std::ref(file_processed),
