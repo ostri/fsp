@@ -60,7 +60,7 @@ namespace fsp
   void xml_worker::operator()(const std::stop_token& st, int worker_id)
   {
     auto t0 = std::chrono::steady_clock::now();
-    log_.make_log_name(parent_log_name_, fmt::format("st{:02}", worker_id));
+    log_.make_log_name(parent_log_name_, fmt::format("wrk.{:02}", worker_id));
 
     if (log_debug_) log_.debug(fmt::format("Worker thread: id {} name '{}' started.", worker_id, log_thread_name));
 

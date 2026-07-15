@@ -120,11 +120,7 @@ function(add_fsp_target TARGET_NAME TYPE)
     endif()
 endfunction()
 
-# --- 5. Define targets ---
-set(b_target fsp_lib) # name of the target
-# 5.1 fsp_lib (static library)
-set(${b_target}_SOURCES
-    ${CMAKE_SOURCE_DIR}/src/main.cpp
+set(SOURCES
     ${CMAKE_SOURCE_DIR}/src/lib/x_str.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/xerces_mgr.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/handler.cpp
@@ -153,6 +149,14 @@ set(${b_target}_SOURCES
     ${CMAKE_SOURCE_DIR}/src/lib/root_cb.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/xml_worker.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/load_grammar.cpp
+    ${CMAKE_SOURCE_DIR}/src/lib/process_docs.cpp
+)
+# --- 5. Define targets ---
+set(b_target fsp_lib) # name of the target
+# 5.1 fsp_lib (static library)
+set(${b_target}_SOURCES
+#    ${CMAKE_SOURCE_DIR}/src/main.cpp
+    ${SOURCES}
 )
 # Specify additional libraries for fsp_lib (if needed)
 set(FSP_TARGET_${b_target}_LIBS

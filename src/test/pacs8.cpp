@@ -1,6 +1,6 @@
 #include "parsing_util.hpp"
+#include "process_docs.hpp"
 #include "xml_attr.hpp"
-#include "xml_processor.hpp"
 #include <fmt/format.h>
 #include <iostream>
 #include <spdlog/common.h>
@@ -117,19 +117,20 @@ int main(int argc, const char* argv[])
     auto cfg = fsp::processor_config{//
                                      .targets              = all,
                                      .num_workers          = no_of_workers,
+                                     .num_docs             = 4,
                                      .validate_against_xsd = ! xsd_file.empty(),
                                      .log_config           = log_cfg};
 
-    fsp::xml_processor proc(cfg);
-    auto               res = proc.process_files(files, xsd_file, 4); // 5 parallel documents
+    auto p   = fsp::process_docs(cfg, "pacs8");
+    auto res = p.process_files(files, xsd_file);
     if (! res)
     {
       std::cerr << "Processing failed: " << res.error().to_string() << "\n";
       return 1;
     }
     // Get aggregated results
-    auto results = proc.get_results();
-    auto errors  = proc.get_errors();
+    auto results = p.get_results();
+    auto errors  = p.get_errors();
 
     std::cout << "\n=== Processing Results ===\n";
     std::cout << "Total files processed: " << files.size() << "\n";
