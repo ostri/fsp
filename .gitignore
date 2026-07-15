@@ -69,4 +69,7 @@ Testing/
 .cache/
 
 claude-work
-xml-data
+
+#big files
+xml-data/pacs8-100K.xml
+xml-data/pacs8-1M.xml
