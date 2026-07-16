@@ -8,6 +8,7 @@
 #include <span>
 #include <string>
 #include <array>
+#include <algorithm>
 
 namespace fsp
 {
@@ -30,12 +31,12 @@ namespace fsp
     // NOLINTEND(misc-non-private-member-variables-in-classes)
   };
 
+  constexpr const std::size_t max_xpath_len = 10; // maximum length of the xpath (in segmetns) /a/b/c/...
   using raw_inputs                          = std::span<const raw_attr>;
-  constexpr const std::size_t max_xpath_len = 10;
   using xpath_vec                           = std::array<xpath_el, max_xpath_len>;
   using xpath_span                          = std::span<const xpath_el>;
 
-  // Pomožna struktura za rezultat parse_xpath_to_elements — brez std::vector
+  // parse_xpath_to_elements result — no std::vector
   struct xpath_parse_result
   {
     xpath_vec   elements{};
@@ -45,11 +46,12 @@ namespace fsp
   // --- xml attribute (runtime friendly, built at compile time) ------------------------
   struct xml_attr
   {
+    static constexpr std::size_t MAX_XPATH_LEN = 1024;
   public:
     constexpr xml_attr() = default;
     constexpr xml_attr(std::size_t original_ndx, const raw_attr& raw, std::span<const ns> ns_arr);
 
-    // full_xpath in full_xpath_with_uri nista constexpr — fmt::format ni constexpr
+    // full_xpath and full_xpath_with_uri are not constexpr, since fmt::format is not constexpr
     [[nodiscard]] std::string full_xpath() const;
     [[nodiscard]] std::string full_xpath_with_uri() const;
 
@@ -75,31 +77,38 @@ namespace fsp
   private:
     cstr_t      name_;
     cstr_t      path_;
-    bool        is_array_ = false;
-    bool        is_opt_   = false;
-    xpath_vec   xpath_{};
-    xpath_el    attr_{};
-    std::size_t xpath_size_   = 0;
-    std::size_t original_ndx_ = 0;
+    bool        is_array_ = false; // is this xpath value multivalue (array '*')
+    bool        is_opt_   = false; // is this xpath value optional ?
+    xpath_vec   xpath_{};          // array of xpath segemtns minus optional attribute xpath
+    xpath_el    attr_{};           // attribute definition; for regular elements attr_.tag is empty
+    std::size_t xpath_size_   = 0; // actuaal length of the xpath minus attribute (we need it because of std::array)
+    std::size_t original_ndx_ = 0; // original index of xpath as provided by programmer (obsolete)
   };
+  /**
+   * @brief parse xpath string to array of xpath_vec and expand prefixes to uri
+   *
+   * @param input input string
+   * @param ns_arr array of translations prefix -> uri
+   * @return constexpr xpath_parse_result std::array with actual length
+   */
   constexpr xpath_parse_result xml_attr::parse_xpath_to_elements(cstr_t input, std::span<const ns> ns_arr)
   {
     if (input.empty()) throw compile_error("empty xpath");
     xpath_parse_result result{};
     for (auto segment_range : input | std::ranges::views::split('/'))
-    {
+    { // split string on / into segments and process the segments
       cstr_t segment{segment_range};
       if (segment.empty()) continue;
       if (result.size >= max_xpath_len) throw compile_error("xpath exceeds max_xpath_len");
       xpath_el element{};
       auto     colon_pos = segment.find(':');
       if (colon_pos != cstr_t::npos)
-      {
+      { // we found the colon in segment
         element.ns  = uri_from_prefix(segment.substr(0, colon_pos), ns_arr);
         element.tag = segment.substr(colon_pos + 1);
       }
       else
-      {
+      { // there is no colon in segment
         element.ns  = segment.starts_with('@') ? "" : uri_from_prefix("", ns_arr);
         element.tag = segment;
       }
@@ -127,7 +136,12 @@ namespace fsp
                        original_ndx_,
                        msg_xpath);
   }
-
+  /**
+   * @brief trim xpath string of leading/trailing ws and slashes
+   *
+   * @param str input xpath string (i.e. /a/b/c)
+   * @return constexpr cstr_t trimmed xpath string
+   */
   constexpr cstr_t xml_attr::trim_xpath(cstr_t str)
   {
     auto        is_ws_or_slash = [](char c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '/'; };
@@ -154,29 +168,38 @@ namespace fsp
     xpath_size_ = parsed.size;
     // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic)
     std::copy(parsed.elements.begin(), parsed.elements.begin() + xpath_size_, xpath_.begin());
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-constant-array-index)
-    auto& el = xpath_[xpath_size_ - 1];
-    if (el.tag.starts_with('@'))
+    auto  last_pos = xpath_size_ - 1;  // index of last element in the xpath
+    auto& last_el  = xpath_[last_pos]; // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index)
+    if (last_el.tag.starts_with('@'))
     {
-      attr_ = xpath_el{.ns = el.ns, .tag = el.tag.substr(1)};
+      attr_ = xpath_el{.ns = last_el.ns, .tag = last_el.tag.substr(1)}; // strip '@'
       xpath_size_--;
     }
-    else if (el.tag.starts_with('*'))
+    else if (last_el.tag.starts_with('*'))
     {
       is_array_ = true;
       // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-constant-array-index)
-      xpath_[xpath_size_ - 1] = xpath_el{.ns = el.ns, .tag = el.tag.substr(1)};
+      xpath_[last_pos] = xpath_el{.ns = last_el.ns, .tag = last_el.tag.substr(1)}; // strip '*'
     }
   }
 
   [[nodiscard]] inline std::string xml_attr::full_xpath() const
   {
+    // NOLINTBEGIN(cppcoreguidelines-pro-bounds-constant-array-index)
     std::string tmp;
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-constant-array-index)
-    for (std::size_t i = 0; i < xpath_size_; ++i) tmp += fmt::format("/{}", xpath_[i].tag);
-    if (is_attr()) tmp += fmt::format("/@{}", attr_name());
-    else if (is_array()) tmp += "/*";
+    if (is_array())
+    {
+      auto last_el_ndx = xpath_size_ - 1;
+      for (std::size_t i = 0; i < last_el_ndx; ++i) tmp += fmt::format("/{}", xpath_[i].tag);
+      tmp += fmt::format("/*{}", xpath_[last_el_ndx].tag);
+    }
+    else
+    {
+      for (std::size_t i = 0; i < xpath_size_; ++i) tmp += fmt::format("/{}", xpath_[i].tag);
+      if (is_attr()) tmp += fmt::format("/@{}", attr_name());
+    }
     return tmp;
+    // NOLINTEND(cppcoreguidelines-pro-bounds-constant-array-index)
   }
 
   [[nodiscard]] inline std::string xml_attr::full_xpath_with_uri() const
