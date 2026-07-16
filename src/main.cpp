@@ -74,19 +74,19 @@ int main(int argc, const char* argv[])
 
     static constexpr auto targets = fsp::build(targets_raw, ns);
     static_assert(targets.size() == targets_raw.size(), "split xpaths are not ok.");
-    static_assert(targets.min(0) == "Document", "Should be document");
-    static_assert(targets.max(0) == "Document", "Should be document");
-    static_assert(targets.min(1) == "FIToFICstmrCdtTrf", "Should be FIToFICstmrCdtTrf");
-    static_assert(targets.max(1) == "FIToFICstmrCdtTrf", "Should be FIToFICstmrCdtTrf");
-    static_assert(targets.min(2) == "CdtTrfTxInf", "Should be CdtTrfTxInf");
-    static_assert(targets.max(2) == "GrpHdr", "Should be GrpHdr");
+    //    static_assert(targets.min(0) == "Document", "Should be document");
+    //    static_assert(targets.max(0) == "Document", "Should be document");
+    //    static_assert(targets.min(1) == "FIToFICstmrCdtTrf", "Should be FIToFICstmrCdtTrf");
+    //    static_assert(targets.max(1) == "FIToFICstmrCdtTrf", "Should be FIToFICstmrCdtTrf");
+    //    static_assert(targets.min(2) == "CdtTrfTxInf", "Should be CdtTrfTxInf");
+    //    static_assert(targets.max(2) == "GrpHdr", "Should be GrpHdr");
     static constexpr auto hdr = fsp::build(xpath_hdr, ns);
     static constexpr auto txn = fsp::build(xpath_txn, ns);
     static_assert(txn.size() == xpath_txn.size(), "split xpaths are not ok.");
-    static_assert(txn.min(0) == "CdtTrfTxInf", "Should be CdtTrfTxInf");
-    static_assert(txn.max(0) == "CdtTrfTxInf", "Should be CdtTrfTxInf");
-    static_assert(txn.min(2) == "FinInstnId", "Should be FinInstnId");
-    static_assert(txn.max(2) == "TxId", "Should be TxId");
+    //    static_assert(txn.min(0) == "CdtTrfTxInf", "Should be CdtTrfTxInf");
+    //    static_assert(txn.max(0) == "CdtTrfTxInf", "Should be CdtTrfTxInf");
+    //    static_assert(txn.min(2) == "FinInstnId", "Should be FinInstnId");
+    // static_assert(txn.max(2) == "TxId", "Should be TxId");
     static const auto all = fsp::proc_data{.targets = targets, .xpaths = {hdr, txn}};
 
     assert(all.targets.size() == all.xpaths.size());

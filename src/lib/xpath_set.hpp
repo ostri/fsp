@@ -22,7 +22,7 @@ namespace fsp
     };
     using xpath_min_max = std::array<min_max, max_xpath_len>;
   public:
-    static constexpr std::size_t xpath_max = 64;
+    static constexpr std::size_t xpath_max = 64; // maximum number of different xpaths in the structure
 
     constexpr xpath_set() = default;
     constexpr xpath_set(std::span<const raw_attr> inputs, std::span<const ns> ns_arr);
@@ -39,20 +39,27 @@ namespace fsp
     [[nodiscard]] constexpr std::size_t first(std::size_t depth) const;
 
     // FIX 5: uint64_t namesto std::bitset (constexpr v C++20; bitset je constexpr šele v C++23)
-    [[nodiscard]] constexpr std::uint64_t available(std::size_t depth) const;
+    //[[nodiscard]] constexpr std::uint64_t available(std::size_t depth) const;
 
     // dump() ni constexpr — fmt::format alokira
     [[nodiscard]] std::string dump(int offs = 0) const;
 
     // reserve() je bil samo za vector — ni več potreben, a ga obdržimo za kompatibilnost
-    constexpr void                 reserve(std::size_t /*size*/) { }
-    [[nodiscard]] constexpr cstr_t max(std::size_t depth) const;
-    [[nodiscard]] constexpr cstr_t min(std::size_t depth) const;
+    constexpr void reserve(std::size_t /*size*/) { }
+    //    [[nodiscard]] constexpr cstr_t max(std::size_t depth) const;
+    //    [[nodiscard]] constexpr cstr_t        min(std::size_t depth) const;
+    [[nodiscard]] constexpr std::uint64_t elem_mask(std::size_t depth) const;
+    [[nodiscard]] constexpr std::uint64_t attr_mask(std::size_t depth) const;
+    [[nodiscard]] constexpr std::uint64_t array_mask() const { return array_mask_; }
+    [[nodiscard]] constexpr std::uint64_t full_mask() const
+    { return size_ >= xpath_max ? ~std::uint64_t{0} : ((std::uint64_t{1} << size_) - 1); }
   private:
-    std::array<xml_attr, xpath_max> data_{};
-    //    xpath_min_max                   mm_; // min max for each xpath element
-    std::size_t size_           = 0;
-    std::size_t max_xpath_size_ = 0;
+    std::array<xml_attr, xpath_max>          data_{};
+    std::size_t                              size_           = 0;
+    std::size_t                              max_xpath_size_ = 0;
+    std::uint64_t                            array_mask_     = 0;
+    std::array<std::uint64_t, max_xpath_len> elem_mask_by_depth_{}; // bit is set at depth that xpath has its value
+    std::array<std::uint64_t, max_xpath_len> attr_mask_by_depth_{}; // the same for attributes
   };
 
   // --- xpath_set impl ---------------------------------------------------------
@@ -63,35 +70,42 @@ namespace fsp
     for (const auto& input : inputs)
     {
       xml_attr attr(size_, input, ns_arr);
-      max_d = std::max(max_d, attr.size());
-      // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-constant-array-index)
-      data_[size_++] = attr;
+      max_d          = std::max(max_d, attr.size());
+      data_[size_++] = attr; // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index)
     }
     max_xpath_size_ = max_d;
-    // data_[0].xpath()[0].tag = "xxx";
+    // --- depth mask loading ---------------------------------------------------
+    for (std::size_t i = 0; i < size_; ++i)
+    {
+      // NOLINTBEGIN(cppcoreguidelines-pro-bounds-constant-array-index)
+      const auto& a     = data_[i];
+      auto        depth = a.size(); // xpath_size_, 1-based == path_stack.size() at matchu
+      if (depth == 0 || depth > max_xpath_len) throw compile_error("depth out of range for masks");
+      const auto bit = std::uint64_t{1} << i;
+      if (a.is_attr()) attr_mask_by_depth_[depth - 1] |= bit;
+      else elem_mask_by_depth_[depth - 1] |= bit;
+
+      if (a.is_array()) array_mask_ |= bit;
+      // NOLINTEND(cppcoreguidelines-pro-bounds-constant-array-index)
+    }
   }
 
   [[nodiscard]] constexpr const xml_attr& xpath_set::operator[](std::size_t ndx) const
   {
     if (ndx >= size_) throw compile_error("index out of range");
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-constant-array-index)
-    return data_[ndx];
+    return data_[ndx]; // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index)
   }
 
   [[nodiscard]] constexpr const xml_attr& xpath_set::operator[](cstr_t name) const
   {
     for (std::size_t i = 0; i < size_; ++i)
-      // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-constant-array-index)
-      if (data_[i].name() == name) return data_[i];
-    // FIX 4: fmt::format ni constexpr — string literal zadostuje za compile_error
+      if (data_[i].name() == name) return data_[i]; // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index)
     throw compile_error("unknown path name");
   }
 
   // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic)
-  [[nodiscard]] constexpr auto xpath_set::end() const { return data_.begin() + static_cast<std::ptrdiff_t>(size_); }
-
+  [[nodiscard]] constexpr auto        xpath_set::end() const { return data_.begin() + static_cast<std::ptrdiff_t>(size_); }
   [[nodiscard]] constexpr std::size_t xpath_set::max_xpath_size() const { return max_xpath_size_; }
-
   [[nodiscard]] constexpr std::size_t xpath_set::last(std::size_t depth) const
   {
     if (depth >= max_xpath_size_) throw compile_error("depth exceeds max xpath depth");
@@ -100,7 +114,6 @@ namespace fsp
       if (depth < data_[i].size()) return i;
     throw compile_error("no element at depth");
   }
-
   [[nodiscard]] constexpr std::size_t xpath_set::first(std::size_t depth) const
   {
     if (depth >= max_xpath_size_) throw compile_error("depth exceeds max xpath depth");
@@ -109,47 +122,44 @@ namespace fsp
       if (depth < data_[i].size()) return i;
     throw compile_error("no element at depth");
   }
-  [[nodiscard]] constexpr cstr_t xpath_set::max(std::size_t depth) const
-  {
-    if (depth >= max_xpath_size_) throw compile_error("depth exceeds max xpath depth");
-    auto   first_ndx = first(depth);
-    auto   last_ndx  = last(depth);
-    cstr_t val       = data_.at(first_ndx).xpath()[depth].tag;
-    for (std::size_t i = first_ndx + 1; i < last_ndx + 1; i++)
-      // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-constant-array-index)
-      if (depth < data_[i].size() && data_.at(i).xpath()[depth].tag > val) //
-        val = data_.at(i).xpath()[depth].tag;
-    return val;
-  }
-
-  [[nodiscard]] constexpr cstr_t xpath_set::min(std::size_t depth) const
-  {
-    if (depth >= max_xpath_size_) throw compile_error("depth exceeds max xpath depth");
-    auto   first_ndx = first(depth);
-    auto   last_ndx  = last(depth);
-    cstr_t val       = data_.at(first_ndx).xpath()[depth].tag;
-    for (std::size_t i = first_ndx + 1; i < last_ndx + 1; i++)
-      // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-constant-array-index)
-      if (depth < data_[i].size() && data_.at(i).xpath()[depth].tag < val) //
-        val = data_.at(i).xpath()[depth].tag;
-    return val;
-  }
-
+  // [[nodiscard]] constexpr cstr_t xpath_set::max(std::size_t depth) const
+  // {
+  //   if (depth >= max_xpath_size_) throw compile_error("depth exceeds max xpath depth");
+  //   auto   first_ndx = first(depth);
+  //   auto   last_ndx  = last(depth);
+  //   cstr_t val       = data_.at(first_ndx).xpath()[depth].tag;
+  //   for (std::size_t i = first_ndx + 1; i < last_ndx + 1; i++)
+  //     // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-constant-array-index)
+  //     if (depth < data_[i].size() && data_.at(i).xpath()[depth].tag > val) //
+  //       val = data_.at(i).xpath()[depth].tag;
+  //   return val;
+  // }
+  // [[nodiscard]] constexpr cstr_t xpath_set::min(std::size_t depth) const
+  // {
+  //   if (depth >= max_xpath_size_) throw compile_error("depth exceeds max xpath depth");
+  //   auto   first_ndx = first(depth);
+  //   auto   last_ndx  = last(depth);
+  //   cstr_t val       = data_.at(first_ndx).xpath()[depth].tag;
+  //   for (std::size_t i = first_ndx + 1; i < last_ndx + 1; i++)
+  //     // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-constant-array-index)
+  //     if (depth < data_[i].size() && data_.at(i).xpath()[depth].tag < val) //
+  //       val = data_.at(i).xpath()[depth].tag;
+  //   return val;
+  // }
   // FIX 5: std::bitset → std::uint64_t (constexpr v C++20)
   // Bit i je postavljen, če element i obstaja na globini depth.
   // Omejitev: deluje za do 64 elementov (xpath_max = 64).
-  [[nodiscard]] constexpr std::uint64_t xpath_set::available(std::size_t depth) const
-  {
-    static_assert(xpath_max <= sizeof(uint64_t) * CHAR_BIT, "available() uses uint64_t — xpath_max must be <= 64");
-    if (depth >= max_xpath_size_) throw compile_error("depth exceeds max xpath depth");
+  // [[nodiscard]] constexpr std::uint64_t xpath_set::available(std::size_t depth) const
+  // {
+  //   static_assert(xpath_max <= sizeof(uint64_t) * CHAR_BIT, "available() uses uint64_t — xpath_max must be <= 64");
+  //   if (depth >= max_xpath_size_) throw compile_error("depth exceeds max xpath depth");
 
-    std::uint64_t result = 0;
-    for (std::size_t i = 0; i < size_; ++i)
-      // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-constant-array-index)
-      if (depth < data_[i].size()) result |= (std::uint64_t{1} << i);
-    return result;
-  }
-
+  //   std::uint64_t result = 0;
+  //   for (std::size_t i = 0; i < size_; ++i)
+  //     // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-constant-array-index)
+  //     if (depth < data_[i].size()) result |= (std::uint64_t{1} << i);
+  //   return result;
+  // }
   // dump() ni constexpr (fmt::format alokira) — definicija brez constexpr
   [[nodiscard]] inline std::string xpath_set::dump(int offs) const
   {
@@ -159,4 +169,18 @@ namespace fsp
       msg_el += fmt::format("{}\n", data_[i].dump());
     return fmt::format("{}data.size: {} max_path_size: {}\n{}", std::string(offs, ' '), size_, max_xpath_size_, msg_el);
   }
+  [[nodiscard]] constexpr std::uint64_t xpath_set::elem_mask(std::size_t depth) const
+  {
+    if (depth == 0 || depth > max_xpath_len) return 0;
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-constant-array-index)
+    return elem_mask_by_depth_[depth - 1];
+  }
+
+  [[nodiscard]] constexpr std::uint64_t xpath_set::attr_mask(std::size_t depth) const
+  {
+    if (depth == 0 || depth > max_xpath_len) return 0;
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-constant-array-index)
+    return attr_mask_by_depth_[depth - 1];
+  }
+
 } // namespace fsp
