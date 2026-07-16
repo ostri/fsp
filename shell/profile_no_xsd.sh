@@ -1,6 +1,6 @@
 #/bin/bash
 set -x
-folder=profile_$$
+folder=profile
 mkdir $folder
 cd $folder
 cmake ../.. -DCMAKE_BUILD_TYPE=Profile
