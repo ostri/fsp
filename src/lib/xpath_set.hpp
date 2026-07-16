@@ -4,7 +4,6 @@
 #include "common.hpp"
 #include "compile_error.hpp"
 #include <array>
-#include <climits>
 #include <fmt/format.h>
 #include <span>
 namespace fsp
@@ -30,29 +29,20 @@ namespace fsp
     [[nodiscard]] constexpr const xml_attr& operator[](std::size_t ndx) const;
     [[nodiscard]] constexpr const xml_attr& operator[](cstr_t name) const;
 
-    [[nodiscard]] constexpr auto        begin() const { return data_.begin(); }
+    [[nodiscard]] constexpr auto        begin() const;
     [[nodiscard]] constexpr auto        end() const;
-    [[nodiscard]] constexpr std::size_t size() const { return size_; }
+    [[nodiscard]] constexpr std::size_t size() const;
     [[nodiscard]] constexpr std::size_t max_xpath_size() const;
 
     [[nodiscard]] constexpr std::size_t last(std::size_t depth) const;
     [[nodiscard]] constexpr std::size_t first(std::size_t depth) const;
 
-    // FIX 5: uint64_t namesto std::bitset (constexpr v C++20; bitset je constexpr šele v C++23)
-    //[[nodiscard]] constexpr std::uint64_t available(std::size_t depth) const;
-
-    // dump() ni constexpr — fmt::format alokira
     [[nodiscard]] std::string dump(int offs = 0) const;
 
-    // reserve() je bil samo za vector — ni več potreben, a ga obdržimo za kompatibilnost
-    constexpr void reserve(std::size_t /*size*/) { }
-    //    [[nodiscard]] constexpr cstr_t max(std::size_t depth) const;
-    //    [[nodiscard]] constexpr cstr_t        min(std::size_t depth) const;
     [[nodiscard]] constexpr std::uint64_t elem_mask(std::size_t depth) const;
     [[nodiscard]] constexpr std::uint64_t attr_mask(std::size_t depth) const;
-    [[nodiscard]] constexpr std::uint64_t array_mask() const { return array_mask_; }
-    [[nodiscard]] constexpr std::uint64_t full_mask() const
-    { return size_ >= xpath_max ? ~std::uint64_t{0} : ((std::uint64_t{1} << size_) - 1); }
+    [[nodiscard]] constexpr std::uint64_t array_mask() const;
+    [[nodiscard]] constexpr std::uint64_t full_mask() const;
   private:
     std::array<xml_attr, xpath_max>          data_{};
     std::size_t                              size_           = 0;
@@ -103,8 +93,11 @@ namespace fsp
     throw compile_error("unknown path name");
   }
 
+  [[nodiscard]] constexpr auto xpath_set::begin() const { return data_.begin(); }
+
   // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic)
   [[nodiscard]] constexpr auto        xpath_set::end() const { return data_.begin() + static_cast<std::ptrdiff_t>(size_); }
+  [[nodiscard]] constexpr std::size_t xpath_set::size() const { return size_; }
   [[nodiscard]] constexpr std::size_t xpath_set::max_xpath_size() const { return max_xpath_size_; }
   [[nodiscard]] constexpr std::size_t xpath_set::last(std::size_t depth) const
   {
@@ -182,5 +175,10 @@ namespace fsp
     // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-constant-array-index)
     return attr_mask_by_depth_[depth - 1];
   }
+
+  [[nodiscard]] constexpr std::uint64_t xpath_set::array_mask() const { return array_mask_; }
+
+  [[nodiscard]] constexpr std::uint64_t xpath_set::full_mask() const
+  { return size_ >= xpath_max ? ~std::uint64_t{0} : ((std::uint64_t{1} << size_) - 1); }
 
 } // namespace fsp
