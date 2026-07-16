@@ -151,6 +151,7 @@ set(SOURCES
     ${CMAKE_SOURCE_DIR}/src/lib/load_grammar.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/process_docs.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/stats.cpp
+    ${CMAKE_SOURCE_DIR}/src/lib/segment_sax.cpp
 )
 # --- 5. Define targets ---
 set(b_target fsp_lib) # name of the target
