@@ -22,7 +22,7 @@ namespace fsp
   using cstr_t = std::string_view;
 
   // --- main structure -----------------------------------------------------------------
-  class xpath_node_struct
+  class xpath_set
   {
     struct min_max
     {
@@ -33,8 +33,8 @@ namespace fsp
   public:
     static constexpr std::size_t xpath_max = 64;
 
-    constexpr xpath_node_struct() = default;
-    constexpr xpath_node_struct(std::span<const raw_attr> inputs, std::span<const ns> ns_arr);
+    constexpr xpath_set() = default;
+    constexpr xpath_set(std::span<const raw_attr> inputs, std::span<const ns> ns_arr);
 
     [[nodiscard]] constexpr const xml_attr& operator[](std::size_t ndx) const;
     [[nodiscard]] constexpr const xml_attr& operator[](cstr_t name) const;
@@ -70,19 +70,18 @@ namespace fsp
   // Če bi hoteli constexpr proc_data, bi potrebovali std::array<xpath_node_struct, N>.
   struct proc_data
   {
-    fsp::xpath_node_struct              targets; // NOLINT(misc-non-private-member-variables-in-classes)
-    std::vector<fsp::xpath_node_struct> xpaths;  // NOLINT(misc-non-private-member-variables-in-classes)
+    fsp::xpath_set              targets; // NOLINT(misc-non-private-member-variables-in-classes)
+    std::vector<fsp::xpath_set> xpaths;  // NOLINT(misc-non-private-member-variables-in-classes)
 
     [[nodiscard]] std::string dump(int offs = 0) const
     { return fmt::format("{0}targets:{1}\n{0}xpaths.size:{2}", std::string(offs, ' '), targets.dump(offs), xpaths.size()); }
   };
 
   // --- build --------------------------------------------------------------------------
-  [[nodiscard]] constexpr xpath_node_struct build(std::span<const raw_attr> raw_paths, std::span<const ns> ns_arr)
-  { return {raw_paths, ns_arr}; }
+  [[nodiscard]] constexpr xpath_set build(std::span<const raw_attr> raw_paths, std::span<const ns> ns_arr) { return {raw_paths, ns_arr}; }
 
   // --- xpath_node_struct impl ---------------------------------------------------------
-  constexpr xpath_node_struct::xpath_node_struct(std::span<const raw_attr> inputs, std::span<const ns> ns_arr)
+  constexpr xpath_set::xpath_set(std::span<const raw_attr> inputs, std::span<const ns> ns_arr)
   {
     if (inputs.size() > xpath_max) throw compile_error("inputs exceed xpath_max");
     std::size_t max_d = 0;
@@ -97,14 +96,14 @@ namespace fsp
     // data_[0].xpath()[0].tag = "xxx";
   }
 
-  [[nodiscard]] constexpr const xml_attr& xpath_node_struct::operator[](std::size_t ndx) const
+  [[nodiscard]] constexpr const xml_attr& xpath_set::operator[](std::size_t ndx) const
   {
     if (ndx >= size_) throw compile_error("index out of range");
     // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-constant-array-index)
     return data_[ndx];
   }
 
-  [[nodiscard]] constexpr const xml_attr& xpath_node_struct::operator[](cstr_t name) const
+  [[nodiscard]] constexpr const xml_attr& xpath_set::operator[](cstr_t name) const
   {
     for (std::size_t i = 0; i < size_; ++i)
       // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-constant-array-index)
@@ -113,7 +112,7 @@ namespace fsp
     throw compile_error("unknown path name");
   }
 
-  [[nodiscard]] constexpr std::size_t xpath_node_struct::last(std::size_t depth) const
+  [[nodiscard]] constexpr std::size_t xpath_set::last(std::size_t depth) const
   {
     if (depth >= max_xpath_size_) throw compile_error("depth exceeds max xpath depth");
     for (std::size_t i = size_; i-- > 0;)
@@ -122,7 +121,7 @@ namespace fsp
     throw compile_error("no element at depth");
   }
 
-  [[nodiscard]] constexpr std::size_t xpath_node_struct::first(std::size_t depth) const
+  [[nodiscard]] constexpr std::size_t xpath_set::first(std::size_t depth) const
   {
     if (depth >= max_xpath_size_) throw compile_error("depth exceeds max xpath depth");
     for (std::size_t i = 0; i < size_; ++i)
@@ -130,7 +129,7 @@ namespace fsp
       if (depth < data_[i].size()) return i;
     throw compile_error("no element at depth");
   }
-  [[nodiscard]] constexpr cstr_t xpath_node_struct::max(std::size_t depth) const
+  [[nodiscard]] constexpr cstr_t xpath_set::max(std::size_t depth) const
   {
     if (depth >= max_xpath_size_) throw compile_error("depth exceeds max xpath depth");
     auto   first_ndx = first(depth);
@@ -143,7 +142,7 @@ namespace fsp
     return val;
   }
 
-  [[nodiscard]] constexpr cstr_t xpath_node_struct::min(std::size_t depth) const
+  [[nodiscard]] constexpr cstr_t xpath_set::min(std::size_t depth) const
   {
     if (depth >= max_xpath_size_) throw compile_error("depth exceeds max xpath depth");
     auto   first_ndx = first(depth);
@@ -159,7 +158,7 @@ namespace fsp
   // FIX 5: std::bitset → std::uint64_t (constexpr v C++20)
   // Bit i je postavljen, če element i obstaja na globini depth.
   // Omejitev: deluje za do 64 elementov (xpath_max = 64).
-  [[nodiscard]] constexpr std::uint64_t xpath_node_struct::available(std::size_t depth) const
+  [[nodiscard]] constexpr std::uint64_t xpath_set::available(std::size_t depth) const
   {
     static_assert(xpath_max <= sizeof(uint64_t) * CHAR_BIT, "available() uses uint64_t — xpath_max mora biti <= 64");
     if (depth >= max_xpath_size_) throw compile_error("depth exceeds max xpath depth");
@@ -172,7 +171,7 @@ namespace fsp
   }
 
   // dump() ni constexpr (fmt::format alokira) — definicija brez constexpr
-  [[nodiscard]] inline std::string xpath_node_struct::dump(int offs) const
+  [[nodiscard]] inline std::string xpath_set::dump(int offs) const
   {
     std::string msg_el;
     for (std::size_t i = 0; i < size_; ++i)

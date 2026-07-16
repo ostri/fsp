@@ -258,7 +258,7 @@ namespace fsp
     }
     return true;
   }
-  segment_result xml_worker::loop(const xml_segment& seg, const fsp::xpath_node_struct& xpaths, const xpath_limits& limits)
+  segment_result xml_worker::loop(const xml_segment& seg, const fsp::xpath_set& xpaths, const xpath_limits& limits)
   {
     segment_result res(seg.id(), seg.subtree_type());
     prepare_tree_stack(xpaths.size());
@@ -350,7 +350,7 @@ namespace fsp
     return loop(seg, xpaths, limits);
   }
   std::expected<pp_result, err_result> xml_worker::process_and_prune_node( //
-    const xpath_node_struct& xpaths,
+    const xpath_set& xpaths,
     // std::stack<stack_struct>& stack,
     const xpath_limits& limits_vec,
     segment_result&     seg_result)

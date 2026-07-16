@@ -68,7 +68,7 @@ namespace fsp
   class xpath_limits
   {
   public:
-    explicit xpath_limits(const xpath_node_struct& xpaths)
+    explicit xpath_limits(const xpath_set& xpaths)
     {
       data_.reserve(xpaths.max_xpath_size());
       for (auto cnt = 0UL; cnt < xpaths.max_xpath_size(); cnt++)
