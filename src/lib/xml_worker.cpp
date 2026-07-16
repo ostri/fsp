@@ -48,7 +48,7 @@ namespace fsp
   , targets_(targets)
   , parent_log_name_(std::move(parent_log_name))
   {
-    reader_.reset(xmlReaderForMemory("", 0, "noname.xml", nullptr, XML_PARSE_NOENT | XML_PARSE_NONET));
+    reader_.reset(xmlReaderForMemory("", 0, "noname.xml", nullptr, reader_flags_));
     if (reader_.get() == nullptr) { throw std::runtime_error("Failed to initialize xmlTextReader"); }
   }
   /**
@@ -201,6 +201,47 @@ namespace fsp
       log_.debug(fmt::format("--seg:{:5} {} tag: {} no value", seg.id(), indent(), tree_stack_.top().node.tag()));
     }
   }
+  // === V xml_worker.cpp ===
+
+  bool xml_worker::reset_reader(cstr_t xml_buf)
+  {
+    if (! reader_) { return false; }
+
+    ++segment_counter_;
+
+    // Poskusimo ponovno uporabiti obstoječi reader
+    int ret = xmlReaderNewMemory(reader_.get(), xml_buf.data(), static_cast<int>(xml_buf.size()), "noname.xml", nullptr, reader_flags_);
+
+    if (ret == 0)
+    {
+      // Uspešno smo zamenjali vsebino
+      xmlTextReaderSetParserProp(reader_.get(), XML_PARSER_LOADDTD, 0);
+      xmlTextReaderSetParserProp(reader_.get(), XML_PARSER_DEFAULTATTRS, 0);
+      xmlTextReaderSetParserProp(reader_.get(), XML_PARSER_VALIDATE, 0);
+      xmlTextReaderSetParserProp(reader_.get(), XML_PARSER_SUBST_ENTITIES, 0);
+
+      // Periodični popolni reset (vsakih N segmentov)
+      if (segment_counter_ % 10000 == 0)
+      {
+        log_.debug(fmt::format("Periodic full reader recreation at segment {}", segment_counter_));
+        reader_.reset(xmlReaderForMemory(xml_buf.data(), static_cast<int>(xml_buf.size()), "noname.xml", nullptr, reader_flags_));
+      }
+      return true;
+    }
+
+    // Fallback - popolna ponovna kreacija
+    log_.warn("xmlReaderNewMemory reuse failed, doing full recreation");
+    reader_.reset(xmlReaderForMemory(xml_buf.data(), static_cast<int>(xml_buf.size()), "noname.xml", nullptr, reader_flags_));
+
+    if (! reader_) { throw std::runtime_error("Failed to create xmlTextReader"); }
+
+    xmlTextReaderSetParserProp(reader_.get(), XML_PARSER_LOADDTD, 0);
+    xmlTextReaderSetParserProp(reader_.get(), XML_PARSER_DEFAULTATTRS, 0);
+    xmlTextReaderSetParserProp(reader_.get(), XML_PARSER_VALIDATE, 0);
+    xmlTextReaderSetParserProp(reader_.get(), XML_PARSER_SUBST_ENTITIES, 0);
+
+    return true;
+  }
   bool xml_worker::open_tag(int& read_status, const xml_segment& seg, const auto& xpaths, const auto& limits, auto& res)
   {
     auto x = process_and_prune_node(xpaths, limits, res);
@@ -274,28 +315,20 @@ namespace fsp
   result<segment_result> xml_worker::extract_xml_values(cstr_t xml_buf, const xml_segment& seg)
   {
     // NOLINTBEGIN(hicpp-signed-bitwise)
-    auto flags = (          // XML_PARSE_NODICT |    // keep old dict
-      XML_PARSE_NOCDATA |   // no CDATA as text
-      XML_PARSE_NOERROR |   // no errors; it is already perfomraed by xerces
-      XML_PARSE_NOWARNING | // no wrtnings
-      XML_PARSE_NOBLANKS |  // we can skip the spaces
-      XML_PARSE_NONET |     // no need to have acces to net
-                            // XML_PARSE_NODTD |      // no DTD validation
-      // XML_PARSE_NOXINCLUDE | // no XInclude processing
-      XML_PARSE_NSCLEAN | // namespace-e cleanup (less program memory)
-      // XML_PARSE_NOWRAP |     // no additional wrappers
-      XML_PARSE_IGNORE_ENC // utf-8 encoding assumed
-    );
+    // auto flags = (          // XML_PARSE_NODICT |    // keep old dict
+    //   XML_PARSE_NOCDATA |   // no CDATA as text
+    //   XML_PARSE_NOERROR |   // no errors; it is already perfomraed by xerces
+    //   XML_PARSE_NOWARNING | // no wrtnings
+    //   XML_PARSE_NOBLANKS |  // we can skip the spaces
+    //   XML_PARSE_NONET |     // no need to have acces to net
+    //                         // XML_PARSE_NODTD |      // no DTD validation
+    //   // XML_PARSE_NOXINCLUDE | // no XInclude processing
+    //   XML_PARSE_NSCLEAN | // namespace-e cleanup (less program memory)
+    //   // XML_PARSE_NOWRAP |     // no additional wrappers
+    //   XML_PARSE_IGNORE_ENC // utf-8 encoding assumed
+    // );
     // NOLINTEND(hicpp-signed-bitwise)
-    auto status = xmlReaderNewMemory(reader_.get(),
-                                     xml_buf.data(),
-                                     static_cast<int>(xml_buf.size()),
-                                     "noname.xml",
-                                     nullptr,
-                                     flags // XML_PARSE_NODICT tells it to reuse the existing dictionary
-    );
-
-    if (status < 0) { throw std::runtime_error("Failed to setup reader for new document\n"); }
+    if (! reset_reader(xml_buf)) { throw std::runtime_error("Failed to reset reader for new segment"); }
 
     if (reader_)
     {

@@ -79,6 +79,7 @@ namespace fsp
     void                 close_tag(const xml_segment& seg);
     void                 prepare_tree_stack(const auto& xpaths);
     void                 obtain_value(const xml_segment& seg, const auto& xpaths, auto& res);
+    bool                 reset_reader(cstr_t xml_buf);
   private:
     // --- worker context ---
     // NOLINTBEGIN(cppcoreguidelines-avoid-const-or-ref-data-members)
@@ -102,6 +103,16 @@ namespace fsp
     std::stack<stack_struct> tree_stack_;      // node and limits on specific depth
     int                      value_ndx_ = -1;  // index of the xpath value; -1 -> no value found
     str_t                    parent_log_name_;
+    int                      reader_flags_    = (XML_PARSE_NOCDATA |    // NOLINT(hicpp-signed-bitwise)
+                                                 XML_PARSE_NOERROR |    // NOLINT(hicpp-signed-bitwise)
+                                                 XML_PARSE_NOWARNING |  // NOLINT(hicpp-signed-bitwise)
+                                                 XML_PARSE_NOBLANKS |   // NOLINT(hicpp-signed-bitwise)
+                                                 XML_PARSE_NONET |      // NOLINT(hicpp-signed-bitwise)
+                                                 XML_PARSE_NSCLEAN |    // NOLINT(hicpp-signed-bitwise)
+                                                 XML_PARSE_IGNORE_ENC | // NOLINT(hicpp-signed-bitwise)
+                                                 XML_PARSE_NODICT       // NOLINT(hicpp-signed-bitwise)
+    );
+    std::size_t              segment_counter_ = 0;
     //  NOLINTEND(cppcoreguidelines-avoid-const-or-ref-data-members)
   };
 
