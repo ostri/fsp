@@ -44,20 +44,21 @@ namespace fsp
   , errors_(errors)
   , results_mutex_(results_mutex)
   , errors_mutex_(errors_mutex)
-  // , cancel_flag_(cancel_flag)
   , targets_(targets)
   , parent_log_name_(std::move(parent_log_name))
+  , sax_(std::make_unique<segment_sax>(log_))
   {
     reader_.reset(xmlReaderForMemory("", 0, "noname.xml", nullptr, reader_flags_));
     if (reader_.get() == nullptr) { throw std::runtime_error("Failed to initialize xmlTextReader"); }
   }
+  ////////////////////////////////////////////////////////////////////////////////////////////////////////
   /**
    * @brief main worker functor
    * The thread is called to process xml document fragments.
    * @param st should we interrupt the processing
    * @param worker_id unique id of the worker
    */
-  void xml_worker::operator()(const std::stop_token& st, int worker_id)
+  void xml_worker::operator()([[maybe_unused]] const std::stop_token& st, int worker_id)
   {
     auto t0 = std::chrono::steady_clock::now();
     log_.make_log_name(parent_log_name_, fmt::format("wrk.{:02}", worker_id));
@@ -68,8 +69,9 @@ namespace fsp
     thread_local vec_seg_result loc_res_nak; // segments with nak result
 
     xml_segment seg{};
-    // while (! cancel_flag_.load() && ! st.stop_requested())
-    while (! st.stop_requested())
+    // we are finishing only when producer says so,
+    // and we don't have any segment to process
+    while (! seg_queue_.is_finished() || seg_queue_.size() > 0)
     {
       if (! seg_queue_.pop(seg)) break; // there won't be any new segment in the queue => bail out
       if (auto res = process_segment(seg))
@@ -121,9 +123,10 @@ namespace fsp
       }
       auto view     = seg.view(xml_mmap_.data());
       auto tmp_view = seg.subtree_str(view);
-      auto r        = extract_xml_values(tmp_view, seg);
+      // auto r        = extract_xml_values(tmp_view, seg);
+      auto r = sax_->exec(tmp_view, targets_.xpaths[seg.subtree_type()]);
 
-      if (r)
+      if (! r.empty())
       {
         auto us = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - t0).count();
         if (log_debug)
@@ -133,19 +136,18 @@ namespace fsp
                                  us,
                                  seg.offset(),
                                  seg.length()));
-          log_.trace(fmt::format("{}", r->dump()));
+          // log_.trace(fmt::format("{}", r->dump()));
         }
-        segment_result res(seg.id(), seg.subtree_type(), r.value().values());
+        segment_result res(seg.id(), seg.subtree_type(), r);
         return res;
       }
 
       error_info err( //
         processor_error::error_extracting_xpath_values,
-        fmt::format("Error extracting xpath values: {}", r.error().message()),
+        fmt::format("Error extracting xpath values: {}", "krneki"),
         "",
         0UL);
-      if (log_.active(fsp::lvl_enum::warn))
-        log_.warn(fmt::format("Segment {}: {} :: {}", seg.id(), r.error().message(), seg.dump_all(xml_mmap_.data())));
+      if (log_.active(fsp::lvl_enum::warn)) log_.warn(fmt::format("Segment {}: {} :: ", seg.id(), "krneki"));
       return std::unexpected(err);
     }
     catch (const std::exception& e)
@@ -181,18 +183,18 @@ namespace fsp
     if (tree_stack_.size() == 0)
       tree_stack_.emplace(stack_struct{.node = xml_node{"top", "top_uri"}, .limits = fsp::p_limits(0, xpaths_depth)});
   }
-  void xml_worker::obtain_value(const xml_segment& seg, const auto& xpaths, auto& res)
+  void xml_worker::obtain_value(const xml_segment& seg, const auto& /*xpaths*/, auto& res)
   {
     if (value_ndx_ != -1)
     { // we have value that we need to remember
-      const auto* value      = reinterpret_cast<const char*>(xmlTextReaderConstValue(reader_.get()));
-      cstr_t      value_name = xpaths[value_ndx_].name();
-      res.values()[value_name].emplace_back(value != nullptr ? value : "");
+      const auto* value = reinterpret_cast<const char*>(xmlTextReaderConstValue(reader_.get()));
+      // cstr_t      value_name = xpaths[value_ndx_].name();
+      res.values()[value_ndx_].emplace_back(value != nullptr ? value : "");
       value_ndx_ = -1; // again undefined
       if (log_debug_)
       {
         log_.debug(
-          fmt::format("++seg:{:5} {}name: {} tag:'{}' value: {}", seg.id(), indent(), value_name, tree_stack_.top().node.tag(), value));
+          fmt::format("++seg:{:5} {}name: {} tag:'{}' value: {}", seg.id(), indent(), value_ndx_, tree_stack_.top().node.tag(), value));
       }
     }
     else if (log_debug_)
@@ -220,12 +222,12 @@ namespace fsp
       xmlTextReaderSetParserProp(reader_.get(), XML_PARSER_VALIDATE, 0);
       xmlTextReaderSetParserProp(reader_.get(), XML_PARSER_SUBST_ENTITIES, 0);
 
-      // Periodični popolni reset (vsakih N segmentov)
-      if (segment_counter_ % 10000 == 0)
-      {
-        log_.debug(fmt::format("Periodic full reader recreation at segment {}", segment_counter_));
-        reader_.reset(xmlReaderForMemory(xml_buf.data(), static_cast<int>(xml_buf.size()), "noname.xml", nullptr, reader_flags_));
-      }
+      // // Periodični popolni reset (vsakih N segmentov)
+      // if (segment_counter_ % 10000 == 0)
+      // {
+      //   log_.debug(fmt::format("Periodic full reader recreation at segment {}", segment_counter_));
+      //   reader_.reset(xmlReaderForMemory(xml_buf.data(), static_cast<int>(xml_buf.size()), "noname.xml", nullptr, reader_flags_));
+      // }
       return true;
     }
 
@@ -429,7 +431,7 @@ namespace fsp
       if (xp.is_attr()) [[unlikely]] // attribute xpath
       {
         auto value = process_attribute(xp);
-        seg_result.values()[xp.name()].emplace_back(value);
+        seg_result.values()[ndx].emplace_back(value);
         const bool log_debug = log_.active(fsp::lvl_enum::debug);
         if (log_debug) [[unlikely]]
           log_.debug(fmt::format("attribute name: '{}' tag: {} value: '{}'", xp.name(), xp.attr_name(), value));

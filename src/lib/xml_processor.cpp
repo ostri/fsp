@@ -227,10 +227,6 @@ namespace fsp
       std::lock_guard lock(errors_mutex_);
       errors_.clear();
     }
-    // processed_count_ = 0;
-    // error_count_     = 0;
-    // cancel_flag_ = false;
-
     if (active_mmap_ == nullptr)
     {
       auto err = error_info{processor_error::internal_error, "mmap is null before 'start_workers()'", active_mmap_->path(), 0};
@@ -432,6 +428,10 @@ namespace fsp
     // useless, since the result is going to be dropped anyway
     if (validation_interrupted) cancel();
     else seg_queue_.set_finished();
+
+    // std::this_thread::sleep_for(std::chrono::milliseconds(1)); // začasno
+
+    log_.info(fmt::format("Before stopping workers - queue size: {}", seg_queue_.size()));
     // we need to wait the validation thread to finish before cleaning on our side
     if (val_future.valid()) val_future.wait();
     workers_.clear();

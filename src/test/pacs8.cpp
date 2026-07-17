@@ -92,17 +92,7 @@ int main(int argc, const char* argv[])
     static const auto     all         = fsp::proc_data{.targets = targets, .xpaths = {hdr, txn}};
     {
       static_assert(targets.size() == targets_raw.size(), "split xpaths are not ok.");
-      // static_assert(targets.min(0) == "Document", "Should be document");
-      // static_assert(targets.max(0) == "Document", "Should be document");
-      // static_assert(targets.min(1) == "FIToFICstmrCdtTrf", "Should be FIToFICstmrCdtTrf");
-      // static_assert(targets.max(1) == "FIToFICstmrCdtTrf", "Should be FIToFICstmrCdtTrf");
-      // static_assert(targets.min(2) == "CdtTrfTxInf", "Should be CdtTrfTxInf");
-      // static_assert(targets.max(2) == "GrpHdr", "Should be GrpHdr");
       static_assert(txn.size() == xpath_txn.size(), "split xpaths are not ok.");
-      // static_assert(txn.min(0) == "CdtTrfTxInf", "Should be CdtTrfTxInf");
-      // static_assert(txn.max(0) == "CdtTrfTxInf", "Should be CdtTrfTxInf");
-      // static_assert(txn.min(2) == "FinInstnId", "Should be FinInstnId");
-      // static_assert(txn.max(2) == "TxId", "Should be TxId");
     }
     assert(all.targets.size() == all.xpaths.size());
     //  Configure logging
@@ -112,7 +102,7 @@ int main(int argc, const char* argv[])
                                .log_level      = spdlog::level::trace, // spdlog::level::info;
                                .logger_name    = "fsp"};
 
-    const auto no_of_doc_workers = 3U; // number of paralell workers processing document
+    const auto no_of_doc_workers = 1U; // number of paralell workers processing document
     const auto no_of_doc         = 5U; // number of paralell documents processed
 
     auto cfg = fsp::processor_config{//

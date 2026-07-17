@@ -8,6 +8,7 @@
 #include "mmap_file.hpp"
 #include "xpath_helpers.hpp"
 #include "xpath_limits.hpp"
+#include "segment_sax.hpp"
 #include <libxml/xmlreader.h>
 #include <stack>
 #include <stop_token>
@@ -44,13 +45,12 @@ namespace fsp
   {
   public:
     // Konstruktor sprejme vse potrebne podatke (kopije/reference kjer je smiselno)
-    xml_worker(segment_queue&   seg_queue,
-               const mmap_file& xml_mmap,
-               vec_seg_result&  results,
-               vec_seg_result&  errors,
-               std::mutex&      results_mutex,
-               std::mutex&      errors_mutex,
-               //               std::atomic<bool>& cancel_flag,
+    xml_worker(segment_queue&    seg_queue,
+               const mmap_file&  xml_mmap,
+               vec_seg_result&   results,
+               vec_seg_result&   errors,
+               std::mutex&       results_mutex,
+               std::mutex&       errors_mutex,
                const fsp_logger& log,
                const proc_data&  targets,
                str_t             parent_log_name);
@@ -91,28 +91,29 @@ namespace fsp
     std::mutex&                  results_mutex_; //< mutex to lock results
     std::mutex&                  errors_mutex_;  //< mutex to lock erros
                                                  //    std::atomic<bool>&           cancel_flag_;   //< are we interupted?
-    const proc_data&         targets_;           //< targets to be processed
-    UniqueXmlTextReader      reader_;            //< libxml2 reader
-    const bool               log_trace_ = log_.active(fsp::lvl_enum::trace);
-    const bool               log_debug_ = log_.active(fsp::lvl_enum::debug);
-    const bool               log_info_  = log_.active(fsp::lvl_enum::info);
-    const bool               log_warn_  = log_.active(fsp::lvl_enum::warn);
-    const bool               log_error_ = log_.active(fsp::lvl_enum::err);
-    const bool               log_crit_  = log_.active(fsp::lvl_enum::crit);
-    std::size_t              depth_     = 0UL; // depth within the tree/xpath
-    std::stack<stack_struct> tree_stack_;      // node and limits on specific depth
-    int                      value_ndx_ = -1;  // index of the xpath value; -1 -> no value found
-    str_t                    parent_log_name_;
-    int                      reader_flags_    = (XML_PARSE_NOCDATA |    // NOLINT(hicpp-signed-bitwise)
-                                                 XML_PARSE_NOERROR |    // NOLINT(hicpp-signed-bitwise)
-                                                 XML_PARSE_NOWARNING |  // NOLINT(hicpp-signed-bitwise)
-                                                 XML_PARSE_NOBLANKS |   // NOLINT(hicpp-signed-bitwise)
-                                                 XML_PARSE_NONET |      // NOLINT(hicpp-signed-bitwise)
-                                                 XML_PARSE_NSCLEAN |    // NOLINT(hicpp-signed-bitwise)
-                                                 XML_PARSE_IGNORE_ENC | // NOLINT(hicpp-signed-bitwise)
-                                                 XML_PARSE_NODICT       // NOLINT(hicpp-signed-bitwise)
+    const proc_data&             targets_;       //< targets to be processed
+    UniqueXmlTextReader          reader_;        //< libxml2 reader
+    const bool                   log_trace_ = log_.active(fsp::lvl_enum::trace);
+    const bool                   log_debug_ = log_.active(fsp::lvl_enum::debug);
+    const bool                   log_info_  = log_.active(fsp::lvl_enum::info);
+    const bool                   log_warn_  = log_.active(fsp::lvl_enum::warn);
+    const bool                   log_error_ = log_.active(fsp::lvl_enum::err);
+    const bool                   log_crit_  = log_.active(fsp::lvl_enum::crit);
+    std::size_t                  depth_     = 0UL; // depth within the tree/xpath
+    std::stack<stack_struct>     tree_stack_;      // node and limits on specific depth
+    int                          value_ndx_ = -1;  // index of the xpath value; -1 -> no value found
+    str_t                        parent_log_name_;
+    int                          reader_flags_    = (XML_PARSE_NOCDATA |    // NOLINT(hicpp-signed-bitwise)
+                                                     XML_PARSE_NOERROR |    // NOLINT(hicpp-signed-bitwise)
+                                                     XML_PARSE_NOWARNING |  // NOLINT(hicpp-signed-bitwise)
+                                                     XML_PARSE_NOBLANKS |   // NOLINT(hicpp-signed-bitwise)
+                                                     XML_PARSE_NONET |      // NOLINT(hicpp-signed-bitwise)
+                                                     XML_PARSE_NSCLEAN |    // NOLINT(hicpp-signed-bitwise)
+                                                     XML_PARSE_IGNORE_ENC | // NOLINT(hicpp-signed-bitwise)
+                                                     XML_PARSE_NODICT       // NOLINT(hicpp-signed-bitwise)
     );
-    std::size_t              segment_counter_ = 0;
+    std::size_t                  segment_counter_ = 0;
+    std::unique_ptr<segment_sax> sax_; // sax parser
     //  NOLINTEND(cppcoreguidelines-avoid-const-or-ref-data-members)
   };
 

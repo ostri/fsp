@@ -1,3 +1,4 @@
+#include "logger.hpp"
 #include "xml_attr.hpp"
 #include "xpath_set.hpp"
 #include <libxml/parser.h>
@@ -35,21 +36,21 @@ namespace fsp
     // NOLINTEND(misc-non-private-member-variables-in-classes)
 
     explicit sax_ctx();
-    void reset_for_reuse(std::shared_ptr<xpath_set> t);
+    void reset_for_reuse(const xpath_set& t);
   };
 
   class segment_sax
   {
   public:
     using result_t = std::vector<std::vector<std::string>>;
-    segment_sax();
+    explicit segment_sax(const fsp_logger& log);
     ~segment_sax();
     segment_sax(segment_sax&&)                 = delete;
     segment_sax& operator=(segment_sax&&)      = delete;
     segment_sax(const segment_sax&)            = delete;
     segment_sax& operator=(const segment_sax&) = delete;
 
-    segment_sax::result_t exec(std::string_view xml_data, std::shared_ptr<xpath_set> targets);
+    segment_sax::result_t exec(std::string_view xml_data, const xpath_set& targets);
   private:
     template <typename F>
     static void for_each_set_bit(std::uint64_t bits, F&& func); //< oteration over bits set
@@ -72,9 +73,16 @@ namespace fsp
     static void check_stop_condition(sax_ctx* ctx);
     static bool is_path_match(const std::vector<xml_path_el>& stack, const xml_attr& attr);
   private:
-    xmlSAXHandler    handler_{};      // sax parser handler
-    xmlParserCtxtPtr ctxt_ = nullptr; // sax parser context
-    sax_ctx          ctx_;            // user data associated with the parsing
+    const fsp_logger& log_;            //< logger
+    xmlSAXHandler     handler_{};      // sax parser handler
+    xmlParserCtxtPtr  ctxt_ = nullptr; // sax parser context
+    sax_ctx           ctx_;            // user data associated with the parsing
+    const bool        log_trace_ = log_.active(fsp::lvl_enum::trace);
+    const bool        log_debug_ = log_.active(fsp::lvl_enum::debug);
+    const bool        log_info_  = log_.active(fsp::lvl_enum::info);
+    const bool        log_warn_  = log_.active(fsp::lvl_enum::warn);
+    const bool        log_error_ = log_.active(fsp::lvl_enum::err);
+    const bool        log_crit_  = log_.active(fsp::lvl_enum::crit);
   };
 
   inline sax_ctx::sax_ctx()
@@ -83,9 +91,9 @@ namespace fsp
     current_buffer.reserve(buf_size);
   }
 
-  inline void sax_ctx::reset_for_reuse(std::shared_ptr<xpath_set> t)
+  inline void sax_ctx::reset_for_reuse(const xpath_set& t)
   {
-    targets = std::move(t);
+    targets = std::make_shared<fsp::xpath_set>(t); // FIXME
     results.resize(targets->size());
     path_stack.reserve(targets->max_xpath_size());
     for (auto& r : results) r.clear();
@@ -96,7 +104,8 @@ namespace fsp
     current_buffer.clear();
   }
 
-  inline segment_sax::segment_sax()
+  inline segment_sax::segment_sax(const fsp_logger& log)
+  : log_(log)
   {
     handler_.initialized    = XML_SAX2_MAGIC;
     handler_.startElementNs = &on_start;
@@ -121,15 +130,31 @@ namespace fsp
    * @param xml_data xml document
    * @return segment_sax::result_t values of the targets found in xml document
    */
-  inline segment_sax::result_t segment_sax::exec(std::string_view xml_data, std::shared_ptr<xpath_set> targets)
+  inline segment_sax::result_t segment_sax::exec(std::string_view xml_data, const xpath_set& targets)
   {
-    ctx_.reset_for_reuse(std::move(targets));
+    ctx_.reset_for_reuse(targets);
     // xmlCtxtResetPush perserves allocated internal structures (dict, ns tabele ...)
     // and only set new xml document to be parsed.
     xmlCtxtResetPush(ctxt_, xml_data.data(), static_cast<int>(xml_data.size()), nullptr, nullptr);
     xmlCtxtUseOptions(ctxt_, XML_PARSE_NOERROR | XML_PARSE_NOWARNING | XML_PARSE_NONET); // NOLINT(hicpp-signed-bitwise)
     ctx_.ctxt = ctxt_; // xmlCtxtResetPush lahko premakne notranje kazalce, ponovno poveži
     xmlParseChunk(ctxt_, xml_data.data(), static_cast<int>(xml_data.size()), 1);
+    if (log_debug_)
+    {
+      auto  ndx = 0UL;
+      str_t msg = "\n";
+      for (auto& result : ctx_.results)
+      {
+        str_t msg_el;
+        for (const auto& el : result)
+        {
+          msg_el.append(" ,");
+          msg_el.append(el);
+        }
+        msg += fmt::format("{:15} : [{}]\n", (*ctx_.targets)[ndx++].name(), msg_el.substr(2, msg_el.size() - 2));
+      }
+      log_.debug(msg);
+    }
     return ctx_.results; // brez move — caller mora podatke porabiti/kopirati pred naslednjim exec(
   }
 
@@ -161,7 +186,8 @@ namespace fsp
         [&](int t)
         {
           const auto& target = (*ctx->targets)[static_cast<std::size_t>(t)];
-          if (is_path_match(ctx->path_stack, target) && target.attr_name() == reinterpret_cast<const char*>(attr_localname) &&
+          if (is_path_match(ctx->path_stack, target) && //
+              target.attr_name() == reinterpret_cast<const char*>(attr_localname) &&
               target.attr_uri() == (nullptr != attr_uri ? reinterpret_cast<const char*>(attr_uri) : ""))
           {
             ctx->results[t].emplace_back(reinterpret_cast<const char*>(val_ptr), val_end - val_ptr);
