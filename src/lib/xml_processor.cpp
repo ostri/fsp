@@ -62,37 +62,34 @@ namespace fsp
   // ============================================================================
   // Parser setup
   // ============================================================================
-  void_result xml_processor::setup_parser_no_validation(const gr_pool_t&   gp,
-                                                        std::latch&        gp_latch,
-                                                        std::atomic<bool>& gp_loaded,
-                                                        bool               have_grammar)
+  void_result xml_processor::setup_parser_no_validation()
   {
     try
     {
-      if (have_grammar)
-      {
-        gp_latch.wait(); // wait till xsd grammar is loaded
-        if (! gp_loaded)
-        {
-          auto err = error_info{processor_error::internal_error, "Grammar failed to load.)", "", 0};
-          log_.error(err.to_string());
-          return std::unexpected(err);
-        }
-      }
-      parser_.reset(xercesc::XMLReaderFactory::createXMLReader(xercesc::XMLPlatformUtils::fgMemoryManager, gp.get()));
+      // no grammar pool
+      parser_.reset(xercesc::XMLReaderFactory::createXMLReader(xercesc::XMLPlatformUtils::fgMemoryManager));
       // NOLINTBEGIN(hicpp-no-array-decay)
-      parser_->setFeature(xercesc::XMLUni::fgSAX2CoreValidation, false);   // must be false
-      parser_->setFeature(xercesc::XMLUni::fgXercesCalculateSrcOfs, true); // we need offset
-      parser_->setFeature(xercesc::XMLUni::fgSAX2CoreNameSpaces, true);    // we need namespaces
+      parser_->setFeature(xercesc::XMLUni::fgSAX2CoreValidation, false);
+      parser_->setFeature(xercesc::XMLUni::fgXercesSchema, false);
+      parser_->setFeature(xercesc::XMLUni::fgXercesSchemaFullChecking, false);
+      parser_->setFeature(xercesc::XMLUni::fgXercesLoadExternalDTD, false);
+
+      parser_->setFeature(xercesc::XMLUni::fgSAX2CoreNameSpaces, true);
       parser_->setFeature(xercesc::XMLUni::fgSAX2CoreNameSpacePrefixes, false);
+      parser_->setFeature(xercesc::XMLUni::fgXercesCalculateSrcOfs, true);
+
+      // scanner without grammar
+      // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+      parser_->setProperty(xercesc::XMLUni::fgXercesScannerName, const_cast<XMLCh*>(xercesc::XMLUni::fgWFXMLScanner));
       // NOLINTEND(hicpp-no-array-decay)
 
-      log_.debug("Parser (no-validation) setup ok");
+      if (log_debug_) log_.debug("Parser (WFXMLScanner - no grammar) setup successful");
       return {};
     }
     catch (const xercesc::XMLException& e)
     {
-      auto err = error_info{processor_error::internal_error, fmt::format("Parser init: {}", x_str(e.getMessage()).to_string()), "", 0};
+      auto err =
+        error_info{processor_error::internal_error, fmt::format("Parser init failed: {}", x_str(e.getMessage()).to_string()), "", 0};
       log_.error(err.to_string());
       return std::unexpected(err);
     }
@@ -123,7 +120,7 @@ namespace fsp
       // Konfiguracija parserja
       // NOLINTBEGIN(hicpp-no-array-decay)
       vparser->setFeature(xercesc::XMLUni::fgSAX2CoreValidation, true);
-      vparser->setFeature(xercesc::XMLUni::fgXercesSchema, true);
+      vparser->setFeature(xercesc::XMLUni::fgXercesSchema, ! xsd_path.empty());
       vparser->setFeature(xercesc::XMLUni::fgXercesValidationErrorAsFatal, true);
       vparser->setFeature(xercesc::XMLUni::fgXercesUseCachedGrammarInParse, true);
       vparser->setFeature(xercesc::XMLUni::fgSAX2CoreNameSpaces, true);
@@ -280,12 +277,7 @@ namespace fsp
    * @param xsd_path filepath to the corresponding grammas (XSD)
    * @return void_result
    */
-  void_result xml_processor::process_file(const std::string& xml_path,
-                                          const std::string& xsd_path,
-                                          const gr_pool_t&   gp,
-                                          std::latch&        gp_latch,
-                                          std::atomic<bool>& gp_loaded,
-                                          bool               have_grammar)
+  void_result xml_processor::process_file(const std::string& xml_path, const std::string& xsd_path, const gr_pool_t& gp)
   {
     start_time_ = std::chrono::steady_clock::now();
     log_.info(fmt::format("XML file: '{}'", xml_path));
@@ -324,7 +316,7 @@ namespace fsp
         return std::unexpected(err);
       }
     }
-    return process_from_buffer(xml_mmap, xsd_mmap ? &*xsd_mmap : nullptr, gp, gp_latch, gp_loaded, have_grammar);
+    return process_from_buffer(xml_mmap, xsd_mmap ? &*xsd_mmap : nullptr, gp);
   }
 
   //   1. setup_parser_no_validation() — SAX parser brez XSD overhead-a
@@ -340,14 +332,9 @@ namespace fsp
   //   parser_->parse()  →  vrže izjemo → ujamemo v catch bloku spodaj
   //   cancel()          →  cancel_flag_ = true → workerji se ustavijo
   //   val_future.get()  →  vrnemo napako klicatelju
-  void_result xml_processor::process_from_buffer(mmap_file&         xml_mmap,
-                                                 mmap_file*         xsd_mmap,
-                                                 const gr_pool_t&   gp,
-                                                 std::latch&        gp_latch,
-                                                 std::atomic<bool>& gp_loaded,
-                                                 bool               have_grammar)
+  void_result xml_processor::process_from_buffer(mmap_file& xml_mmap, mmap_file* xsd_mmap, const gr_pool_t& gp)
   {
-    auto ps = setup_parser_no_validation(gp, gp_latch, gp_loaded, have_grammar);
+    auto ps = setup_parser_no_validation();
     if (! ps) return std::unexpected(ps.error());
 
     try
@@ -478,25 +465,25 @@ namespace fsp
   // // ============================================================================
   // // Convenience function
   // // ============================================================================
-  void xml_processor::process_one_file(const std::string&           xml_path,
-                                       const std::string&           xsd_path,
-                                       std::mutex&                  results_agg_mutex,
-                                       std::vector<segment_result>& all_results,
-                                       std::vector<segment_result>& all_errors,
-                                       std::atomic<bool>&           has_error,
-                                       std::optional<error_info>&   first_error,
-                                       const processor_config&      config,
-                                       const fsp_logger&            log, // Using auto to deduce the fsp::logger type
-                                       const gr_pool_t&             gp,
-                                       std::latch&                  gr_latch,
-                                       std::atomic<bool>&           gr_loaded,
-                                       bool                         have_grammar)
+  void xml_processor::process_one_file(const std::string&                  xml_path,
+                                       const std::string&                  xsd_path,
+                                       std::mutex&                         results_agg_mutex,
+                                       std::vector<segment_result>&        all_results,
+                                       std::vector<segment_result>&        all_errors,
+                                       std::atomic<bool>&                  has_error,
+                                       std::optional<error_info>&          first_error,
+                                       const processor_config&             config,
+                                       const fsp_logger&                   log, // Using auto to deduce the fsp::logger type
+                                       const gr_pool_t&                    gp,
+                                       [[maybe_unused]] std::latch&        gr_latch,
+                                       [[maybe_unused]] std::atomic<bool>& gr_loaded,
+                                       [[maybe_unused]] bool               have_grammar)
   {
     log.info(fmt::format("Processing file: '{}'", xml_path));
 
     // Each file gets its own processor instance to avoid state conflicts
     xml_processor file_proc(config, log.log_name());
-    auto          res = file_proc.process_file(xml_path, xsd_path, gp, gr_latch, gr_loaded, have_grammar);
+    auto          res = file_proc.process_file(xml_path, xsd_path, gp);
 
     if (! res)
     {

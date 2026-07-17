@@ -20,7 +20,6 @@
 #include "handler.hpp"
 #include "load_grammar.hpp"
 #include "logger.hpp"
-#include "logger_config.hpp"
 #include "mem_buf_holder.hpp"
 #include "mmap_file.hpp"
 #include "processor_config.hpp"
@@ -47,18 +46,8 @@ namespace fsp
     xml_processor& operator=(const xml_processor&) = delete;
     xml_processor(xml_processor&&)                 = delete;
     xml_processor& operator=(xml_processor&&)      = delete;
-    void_result    process_file(const std::string& xml_path,
-                                const std::string& xsd_path,
-                                const gr_pool_t&   gp,
-                                std::latch&        gp_latch,
-                                std::atomic<bool>& gp_loaded,
-                                bool               have_grammar);
-    void_result    process_from_buffer(mmap_file&         xml_mmap,
-                                       mmap_file*         xsd_mmap,
-                                       const gr_pool_t&   gp,
-                                       std::latch&        gp_latch,
-                                       std::atomic<bool>& gp_loaded,
-                                       bool               have_grammar);
+    void_result    process_file(const std::string& xml_path, const std::string& xsd_path, const gr_pool_t& gp);
+    void_result    process_from_buffer(mmap_file& xml_mmap, mmap_file* xsd_mmap, const gr_pool_t& gp);
     /** @brief Process multiple XML files in parallel using N workers.
      * Each worker processes files sequentially from the queue using process_file.
      * Results and errors are collected from all files.
@@ -98,7 +87,7 @@ namespace fsp
     vec_seg_result move_results();
     vec_seg_result move_errors();
   private: /// methods
-    void_result setup_parser_no_validation(const gr_pool_t& gp, std::latch& gp_latch, std::atomic<bool>& gp_loaded, bool have_grammar);
+    void_result setup_parser_no_validation();
     void_result start_workers();
     void        stop_workers();
     // Zažene validacijo v ločeni niti. Vrne future ki se razreši z
