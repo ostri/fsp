@@ -119,11 +119,11 @@ namespace fsp
       if (log_debug)
       {
         log_.debug(fmt::format("segment started: {}", seg.dump()));
-        log_.trace(fmt::format("{}", seg.dump_all(xml_mmap_.data(), 0)));
+        // log_.trace(fmt::format("{}", seg.dump_all(xml_mmap_.data(), 0)));
       }
-      auto view     = seg.view(xml_mmap_.data());
-      auto tmp_view = seg.subtree_str(view);
-      // auto r        = extract_xml_values(tmp_view, seg);
+      auto view     = seg.view(xml_mmap_.data()); // just segment contents
+      auto tmp_view = seg.subtree_str(view);      // contents + opening and closing tag
+      if (log_trace_) log_.trace(fmt::format("seg: {}: '{}'", seg.id(), tmp_view));
       auto r = sax_->exec(tmp_view, targets_.xpaths[seg.subtree_type()]);
 
       if (! r.empty())
