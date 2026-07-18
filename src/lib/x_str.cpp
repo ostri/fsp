@@ -111,7 +111,7 @@ namespace fsp
       t_name guard(utf8, deleter);
       if (utf8 == nullptr) [[unlikely]]
         return "";
-      cached_utf8_.assign(utf8);
+      cached_utf8_.assign(utf8, strlen(utf8));
       assert(! cached_utf8_.empty());
     }
     return cached_utf8_;
