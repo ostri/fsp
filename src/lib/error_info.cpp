@@ -2,11 +2,12 @@
 namespace fsp
 {
 
-  [[nodiscard]] error_info::error_info(processor_error code, std::string msg, std::string_view path, size_t line)
+  [[nodiscard]] error_info::error_info(processor_error code, std::string msg, std::string_view path, std::size_t line, std::size_t column)
   : code_(code)
   , message_(std::move(msg))
   , path_(path)
   , line_(line)
+  , column_(column)
   {
   }
 

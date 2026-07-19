@@ -12,7 +12,8 @@ namespace fsp
   // Error types for expected<T>
   enum class processor_error : std::uint8_t
   {
-    success = 0,
+    unknown = 0,
+    success,
     file_open_failed,
     mmap_failed,
     xsd_validation_failed,
@@ -27,16 +28,21 @@ namespace fsp
   class error_info
   {
   public:
-    error_info(processor_error code, std::string msg, std::string_view path, size_t line);
+    error_info() = default;
+    error_info(processor_error code, std::string msg, std::string_view path, std::size_t line, std::size_t column = 0);
     [[nodiscard]] std::string     to_string() const;
     [[nodiscard]] cstr_t          message() const;
     [[nodiscard]] processor_error code() const;
     [[nodiscard]] cstr_t          path() const;
-    [[nodiscard]] size_t          line() const;
+    [[nodiscard]] std::size_t     line() const;
+    [[nodiscard]] std::size_t     column() const;
   private:
-    processor_error code_;
+    processor_error code_{processor_error::unknown};
     std::string     message_;
     std::string     path_;
-    size_t          line_ = 0;
+    std::size_t     line_   = 0;
+    std::size_t     column_ = 0;
   };
+  //////////////////////////////////////////////////////////////////////////////////////
+  inline std::size_t error_info::column() const { return column_; };
 }; // namespace fsp
