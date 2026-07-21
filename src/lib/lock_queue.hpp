@@ -11,6 +11,7 @@ namespace fsp
   {
   public:
     void                      push(T&& s);                  //< add new element ot be processed to the queue
+    void                      push(const T& s);             //< add new element ot be processed to the queue
     bool                      pop(T& s);                    //< block till available element or finished
     void                      set_finished();               //< we finished processing
     [[nodiscard]] bool        is_finished() const noexcept; //< are we finished processing?
@@ -68,6 +69,15 @@ namespace fsp
     {
       std::lock_guard lock(mtx_);
       queue_.push(std::move(s));
+    }
+    cv_.notify_one();
+  }
+  template <class T>
+  void lock_queue<T>::push(const T& s)
+  {
+    {
+      std::lock_guard lock(mtx_);
+      queue_.push(s);
     }
     cv_.notify_one();
   }
