@@ -91,7 +91,7 @@ namespace fsp
     std::unique_lock lock(mtx_);
     cv_.wait(lock, [this] { return ! queue_.empty() || finished_; });
     if (queue_.empty() && finished_) return false;
-    s = queue_.front();
+    s = std::move(queue_.front()); // must be move and not copy (T can be move only type)
     queue_.pop();
     size_approx_.fetch_sub(1, std::memory_order_relaxed);
     return true;
