@@ -1,5 +1,6 @@
 #pragma once
 
+#include "doc_set_dscr.hpp"
 #include "stats.hpp"
 #include "logger.hpp"
 #include "processor_config.hpp"
@@ -27,10 +28,7 @@ namespace fsp
     [[nodiscard]] const vec_seg_result& get_errors() const;
     stats_t                             stats() const { return stats_; }
   private: // methods
-    void_result process_files_internal(const std::vector<std::string>& xml_paths,
-                                       const std::string&              xsd_path //,
-                                                                                // std::size_t                     num_parallel
-    );
+    void_result process_files_internal();
   private: // data
     // NOLINTBEGIN(cppcoreguidelines-avoid-const-or-ref-data-members)
     const s_clock          start_time_ = std::chrono::steady_clock::now();
@@ -43,6 +41,7 @@ namespace fsp
     vec_seg_result         results_;         // ok segment data
     vec_seg_result         errors_;          // segments that have semantic errors
     stats_t                stats_{};         // document processing statistics
+    doc_set_dscr           ds_dscr_{log_};   //< information about the xml documents to be processed
     const bool             log_trace_ = log_.active(fsp::lvl_enum::trace);
     const bool             log_debug_ = log_.active(fsp::lvl_enum::debug);
     const bool             log_info_  = log_.active(fsp::lvl_enum::info);
@@ -61,6 +60,7 @@ namespace fsp
   : log_(cfg.log_config)
   , cfg_(std::move(cfg))
   , parent_log_name_(std::move(parent_log_name))
+  , ds_dscr_(log_)
   { log_.make_log_name(parent_log_name_); }
 
   inline const vec_seg_result& process_docs::get_results() const

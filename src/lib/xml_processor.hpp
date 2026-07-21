@@ -16,6 +16,7 @@
 #include <xercesc/framework/MemBufInputSource.hpp>
 #include <xercesc/sax2/SAX2XMLReader.hpp>
 #include <xercesc/sax2/XMLReaderFactory.hpp>
+#include "doc_set_dscr.hpp"
 #include "error_info.hpp"
 #include "handler.hpp"
 #include "load_grammar.hpp"
@@ -68,8 +69,8 @@ namespace fsp
     //                                           const proc_data&     proc_data,
     //                                           std::size_t          num_workers = 0,
     //                                           const logger_config& log_cfg     = logger_config{});
-    static void    file_worker_task(lock_queue<std::string>&   file_queue,
-                                    const std::string&         xsd_path,
+    static void    file_worker_task(lock_queue<std::size_t>&   file_queue,
+                                    const doc_set_dscr&        ds_dscr,
                                     std::mutex&                results_agg_mutex,
                                     vec_seg_result&            all_results,
                                     vec_seg_result&            all_errors,
@@ -108,19 +109,19 @@ namespace fsp
                                                          const fsp_logger&  logger,
                                                          const std::string& parent_log_name);
 
-    static void process_one_file(const std::string&           xml_path,
-                                 const std::string&           xsd_path,
-                                 std::mutex&                  results_agg_mutex,
-                                 std::vector<segment_result>& all_results,
-                                 std::vector<segment_result>& all_errors,
-                                 std::atomic<bool>&           has_error,
-                                 std::optional<error_info>&   first_error,
-                                 const processor_config&      config,
-                                 const fsp_logger&            log,
-                                 const gr_pool_t&             gp,
-                                 std::latch&                  gr_latch,
-                                 std::atomic<bool>&           gr_loaded,
-                                 bool                         have_grammar);
+    static void process_one_file(const std::string&                  xml_path,
+                                 const doc_set_dscr&                 ds_dscr,
+                                 std::mutex&                         results_agg_mutex,
+                                 std::vector<segment_result>&        all_results,
+                                 std::vector<segment_result>&        all_errors,
+                                 std::atomic<bool>&                  has_error,
+                                 std::optional<error_info>&          first_error,
+                                 const processor_config&             config,
+                                 const fsp_logger&                   log, // Using auto to deduce the fsp::logger type
+                                 const gr_pool_t&                    gp,
+                                 [[maybe_unused]] std::latch&        gr_latch,
+                                 [[maybe_unused]] std::atomic<bool>& gr_loaded,
+                                 [[maybe_unused]] bool               have_grammar);
     void        save_stats();
     stats_t     stats() const { return stats_; }
   private: /// members
