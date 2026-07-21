@@ -4,6 +4,7 @@
 #include <condition_variable>
 #include <mutex>
 #include <queue>
+#include <optional>
 namespace fsp
 {
   template <class T>
@@ -17,14 +18,14 @@ namespace fsp
     [[nodiscard]] bool             is_finished() const noexcept; //< are we finished processing?
     [[nodiscard]] std::size_t      size() const;                 //< size of the waiting queue
     [[nodiscard]] std::optional<T> try_pop();                    //< non blocking pop try
-    [[nodiscard]] std::size_t      size_approx() const noexcept; //< lock-free hint, no mutex; used by role-picking hot path
+    [[nodiscard]] std::ptrdiff_t   size_approx() const noexcept; //< lock-free hint, no mutex; used by role-picking hot path
     [[nodiscard]] bool             drained() const noexcept;     //< finished AND empty -> permanently done, no more work will ever appear
   private:
-    std::queue<T>            queue_;           //< queue to store values
-    mutable std::mutex       mtx_;             //< mutex to protect the pop/push operations
-    std::condition_variable  cv_;              //< conditional variable
-    std::atomic<bool>        finished_{false}; //< are we finished with processing (no more new entries into queue)
-    std::atomic<std::size_t> size_approx_{0};  //< maintained alongside queue_ push/pop, read without locking mtx_
+    std::queue<T>               queue_;           //< queue to store values
+    mutable std::mutex          mtx_;             //< mutex to protect the pop/push operations
+    std::condition_variable     cv_;              //< conditional variable
+    std::atomic<bool>           finished_{false}; //< are we finished with processing (no more new entries into queue)
+    std::atomic<std::ptrdiff_t> size_approx_{0};  //< maintained alongside queue_ push/pop, read without locking mtx_
   };
   /// --- implementation ---
 
@@ -37,7 +38,7 @@ namespace fsp
    */
   template <class T>
   inline bool lock_queue<T>::is_finished() const noexcept
-  { return finished_.load(); }
+  { return finished_.load(std::memory_order_acquire); }
   /**
    * @brief how many elements we have in the queue
    *
@@ -62,8 +63,8 @@ namespace fsp
     {
       std::lock_guard lock(mtx_);
       queue_.push(std::move(s));
+      size_approx_.fetch_add(1, std::memory_order_relaxed);
     }
-    size_approx_.fetch_add(1, std::memory_order_relaxed);
     cv_.notify_one();
   }
   template <class T>
@@ -72,8 +73,8 @@ namespace fsp
     {
       std::lock_guard lock(mtx_);
       queue_.push(s);
+      size_approx_.fetch_add(1, std::memory_order_relaxed);
     }
-    size_approx_.fetch_add(1, std::memory_order_relaxed);
     cv_.notify_one();
   }
   /**
@@ -90,7 +91,7 @@ namespace fsp
     std::unique_lock lock(mtx_);
     cv_.wait(lock, [this] { return ! queue_.empty() || finished_; });
     if (queue_.empty() && finished_) return false;
-    s = std::move(queue_.front());
+    s = queue_.front();
     queue_.pop();
     size_approx_.fetch_sub(1, std::memory_order_relaxed);
     return true;
@@ -109,7 +110,6 @@ namespace fsp
     if (queue_.empty()) return std::nullopt; // queue is empty
     T value = std::move(queue_.front());
     queue_.pop();
-    lock.unlock();
     size_approx_.fetch_sub(1, std::memory_order_relaxed);
     return value; // return element from the queue
   }
@@ -127,8 +127,9 @@ namespace fsp
   // Cheap, racy hint of queue occupancy. Never takes mtx_, so many hybrid workers
   // can poll several queues in decide_role() without contending on each other's locks.
   // A stale read only ever causes a wasted try_pop() attempt, never incorrect data access.
+  // in rare conditions size_approx_ can be negative for short period of time
   template <class T>
-  inline std::size_t lock_queue<T>::size_approx() const noexcept
+  inline std::ptrdiff_t lock_queue<T>::size_approx() const noexcept
   { return size_approx_.load(std::memory_order_relaxed); }
 
   // True only once set_finished() was called AND the queue is empty: i.e. this source
@@ -137,8 +138,7 @@ namespace fsp
   template <class T>
   inline bool lock_queue<T>::drained() const noexcept
   {
-    if (! finished_.load(std::memory_order_acquire)) return false;
     std::lock_guard lock(mtx_);
-    return queue_.empty();
+    return finished_ && queue_.empty();
   }
 } // namespace fsp
