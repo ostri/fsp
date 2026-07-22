@@ -7,6 +7,7 @@
 #include "segment_result.hpp"
 #include "xerces_mgr.hpp"
 #include "xpath_helpers.hpp"
+#include "segment_pool.hpp"
 #include <utility>
 
 
@@ -42,6 +43,7 @@ namespace fsp
     vec_seg_result         errors_;          // segments that have semantic errors
     stats_t                stats_{};         // document processing statistics
     doc_set_dscr           ds_dscr_{log_};   //< information about the xml documents to be processed
+    segment_pool           pool_;            // segment pool NOLINT(readability-magic-numbers)
     const bool             log_trace_ = log_.active(fsp::lvl_enum::trace);
     const bool             log_debug_ = log_.active(fsp::lvl_enum::debug);
     const bool             log_info_  = log_.active(fsp::lvl_enum::info);
@@ -61,6 +63,7 @@ namespace fsp
   , cfg_(std::move(cfg))
   , parent_log_name_(std::move(parent_log_name))
   , ds_dscr_(log_)
+  , pool_(log_, 1024UL * 1024UL * 8UL) // NOLINT(readability-magic-numbers)
   { log_.make_log_name(parent_log_name_); }
 
   inline const vec_seg_result& process_docs::get_results() const

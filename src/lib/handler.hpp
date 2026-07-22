@@ -19,6 +19,7 @@
 #include "lock_queue.hpp"
 #include "x_str.hpp"
 #include "xml_segment.hpp"
+#include "segment_pool.hpp"
 
 namespace fsp
 {
@@ -37,7 +38,8 @@ namespace fsp
             segment_queue&                queue,
             const fsp_logger&             log,
             const xercesc::SAX2XMLReader* parser,
-            std::string_view              base_addr);
+            std::string_view              base_addr,
+            segment_pool&                 pool);
 
     // --- SAX2 ContentHandler ---
     void startPrefixMapping(const XMLCh* prefix, const XMLCh* uri) override;
@@ -131,16 +133,17 @@ namespace fsp
     // Inicializiran kot neveljaven (valid() == false) — brez validacije se ne
     // preveri nikoli in ne povzroča overhead-a.
     using valid_future = std::shared_future<std::optional<error_info>>; // validation future
-    valid_future val_future_;
-    std::size_t  element_counter_ = 0; // pooling counter check also "every"
-    str_XMLCh_t  buf_;                 // space for "make_open_tag" as XMLCh
-    const bool   log_trace_       = false;
-    const bool   log_debug_       = false;
-    const bool   log_info_        = false;
-    const bool   log_warn_        = false;
-    const bool   log_err_         = false;
-    const bool   log_crit_        = false;
-    int          max_xpath_depth_ = 0;
+    valid_future  val_future_;
+    std::size_t   element_counter_ = 0; // pooling counter check also "every"
+    str_XMLCh_t   buf_;                 // space for "make_open_tag" as XMLCh
+    segment_pool& pool_;                // segment pool
+    const bool    log_trace_       = false;
+    const bool    log_debug_       = false;
+    const bool    log_info_        = false;
+    const bool    log_warn_        = false;
+    const bool    log_err_         = false;
+    const bool    log_crit_        = false;
+    int           max_xpath_depth_ = 0;
   };
 
   inline std::size_t Handler::segments_found() const noexcept { return counter_; }

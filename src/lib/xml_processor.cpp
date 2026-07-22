@@ -23,14 +23,15 @@ namespace fsp
   // ============================================================================
   // Constructor / Destructor
   // ============================================================================
-  xml_processor::xml_processor(processor_config cfg)
-  : fsp::xml_processor(std::move(cfg), "main")
-  {
-  }
+  // xml_processor::xml_processor(const processor_config& cfg)
+  // : fsp::xml_processor(std::move(cfg), "main", {})
+  // {
+  // }
 
-  xml_processor::xml_processor(processor_config cfg, str_t parent_log_name)
+  xml_processor::xml_processor(processor_config cfg, str_t parent_log_name, segment_pool& pool)
   : log_(cfg.log_config)
   , config_(std::move(cfg))
+  , pool_(pool)
   , parent_log_name_(std::move(parent_log_name))
   {
     bool first_time = log_.log_name() == "unknown";
@@ -227,7 +228,11 @@ namespace fsp
     }
     if (active_mmap_ == nullptr)
     {
-      auto err = error_info{processor_error::internal_error, "mmap is null before 'start_workers()'", active_mmap_->path(), 0};
+      auto err = error_info{//
+                            processor_error::internal_error,
+                            "mmap is null before 'start_workers()'",
+                            nullptr != active_mmap_ ? active_mmap_->path() : "",
+                            0};
       log_.error(err.to_string());
       return std::unexpected(err);
     }
@@ -235,17 +240,19 @@ namespace fsp
     for (std::size_t i = 0; i < config_.num_workers; ++i)
     {
       str_t parent_name = log_.log_name();
-      workers_.emplace_back(xml_worker{seg_queue_, //
-                                       *active_mmap_,
-                                       results_,
-                                       errors_,
-                                       results_mutex_,
-                                       errors_mutex_,
-                                       //                                       cancel_flag_,
-                                       log_,
-                                       config_.targets,
-                                       parent_name},
-                            i);
+      workers_.emplace_back(
+        xml_worker{       //
+                   pool_, //
+                   *active_mmap_,
+                   results_,
+                   errors_,
+                   results_mutex_,
+                   errors_mutex_,
+                   //                                       cancel_flag_,
+                   log_,
+                   config_.targets,
+                   parent_name},
+        i);
     }
     log_.info(fmt::format("{} workers started.", config_.num_workers));
     return {};
@@ -256,7 +263,7 @@ namespace fsp
    */
   void xml_processor::stop_workers()
   {
-    seg_queue_.set_finished();
+    pool_.ready_queue_close();
     workers_.clear();
     active_mmap_ = nullptr;
     log_.info("All workers stopped.");
@@ -340,7 +347,7 @@ namespace fsp
 
     try
     {
-      handler_ = std::make_unique<Handler>(config_.targets, seg_queue_, log_, parser_.get(), xml_mmap.string_view());
+      handler_ = std::make_unique<Handler>(config_.targets, seg_queue_, log_, parser_.get(), xml_mmap.string_view(), pool_);
       parser_->setContentHandler(handler_.get());
       parser_->setErrorHandler(handler_.get());
     }
@@ -376,6 +383,7 @@ namespace fsp
 
       auto us = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count();
       if (log_info_) log_.info(fmt::format("SAX parsing finished. {} ms pending segments: {}", us, seg_queue_.size()));
+      pool_.ready_queue_close();
     }
     catch (const xercesc::SAXParseException& e)
     {
@@ -468,6 +476,7 @@ namespace fsp
   // // ============================================================================
   void xml_processor::process_one_file(const std::string&                  xml_path,
                                        const doc_set_dscr&                 ds_dscr,
+                                       segment_pool&                       pool,
                                        std::mutex&                         results_agg_mutex,
                                        std::vector<segment_result>&        all_results,
                                        std::vector<segment_result>&        all_errors,
@@ -483,7 +492,7 @@ namespace fsp
     log.info(fmt::format("Processing file: '{}'", xml_path));
     str_t xsd_path(ds_dscr.has_grammar() ? ds_dscr.grammar().path() : "");
     // Each file gets its own processor instance to avoid state conflicts
-    xml_processor file_proc(config, log.log_name());
+    xml_processor file_proc(config, log.log_name(), pool);
     auto          res = file_proc.process_file(xml_path, xsd_path, gp);
 
     if (! res)
@@ -519,6 +528,7 @@ namespace fsp
   // Helper static function for jthread execution
   void xml_processor::file_worker_task(lock_queue<std::size_t>&   file_queue,
                                        const doc_set_dscr&        ds_dscr,
+                                       segment_pool&              pool,
                                        std::mutex&                results_agg_mutex,
                                        vec_seg_result&            all_results,
                                        vec_seg_result&            all_errors,
@@ -543,7 +553,7 @@ namespace fsp
       else
       { // the queu was initally empty and we need to wait for first doc or a signal to exit the waiting
         auto start = std::chrono::steady_clock::now();
-        if (! file_queue.pop(xml_path_ndx)) break;
+        if (file_queue.pop(xml_path_ndx) != queue_status::active) break;
         auto end     = std::chrono::steady_clock::now();
         auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
         log.info(fmt::format("waiting time for new file {} ms.", elapsed));
@@ -551,6 +561,7 @@ namespace fsp
       xml_path = ds_dscr[xml_path_ndx].path();
       process_one_file(xml_path,
                        ds_dscr,
+                       pool,
                        results_agg_mutex,
                        all_results,
                        all_errors,

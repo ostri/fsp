@@ -27,18 +27,16 @@ namespace
 namespace fsp
 {
   using xml_char = std::unique_ptr<xmlChar, xml_deleter>;
-  xml_worker::xml_worker(segment_queue&   seg_queue,
-                         const mmap_file& xml_mmap,
-                         vec_seg_result&  results,
-                         vec_seg_result&  errors,
-                         std::mutex&      results_mutex,
-                         std::mutex&      errors_mutex,
-                         //               std::atomic<bool>& cancel_flag,
+  xml_worker::xml_worker(segment_pool&     pool,
+                         const mmap_file&  xml_mmap,
+                         vec_seg_result&   results,
+                         vec_seg_result&   errors,
+                         std::mutex&       results_mutex,
+                         std::mutex&       errors_mutex,
                          const fsp_logger& log,
                          const proc_data&  targets,
                          str_t             parent_log_name)
   : log_(log)
-  , seg_queue_(seg_queue)
   , xml_mmap_(xml_mmap)
   , results_(results)
   , errors_(errors)
@@ -47,6 +45,7 @@ namespace fsp
   , targets_(targets)
   , parent_log_name_(std::move(parent_log_name))
   , sax_(std::make_unique<segment_sax>(log_))
+  , pool_(pool)
   {
     reader_.reset(xmlReaderForMemory("", 0, "noname.xml", nullptr, reader_flags_));
     if (reader_.get() == nullptr) { throw std::runtime_error("Failed to initialize xmlTextReader"); }
@@ -68,12 +67,16 @@ namespace fsp
     thread_local vec_seg_result loc_res_ok;  // segments with ok result
     thread_local vec_seg_result loc_res_nak; // segments with nak result
 
-    xml_segment seg{};
-    // we are finishing only when producer says so,
-    // and we don't have any segment to process
-    while (! seg_queue_.is_finished() || seg_queue_.size() > 0)
+    while (true)
     {
-      if (! seg_queue_.pop(seg)) break; // there won't be any new segment in the queue => bail out
+      std::size_t idx = 0;
+      if (pool_.pop_segment_ndx(idx) != queue_status::active)
+      {
+        if (log_debug_) log_.debug("Worker: ready_queue finished, exiting");
+        break;
+      }
+
+      const xml_segment seg = pool_.retrieve_segment(idx); // LOKALNA KOPIJA!
       if (auto res = process_segment(seg))
       {
         if (loc_res_ok.size() + 1 == loc_res_ok.capacity()) loc_res_ok.reserve(loc_res_ok.size() * 2);
@@ -82,9 +85,11 @@ namespace fsp
       else
       {
         if (loc_res_nak.size() + 1 == loc_res_nak.capacity()) loc_res_nak.reserve(loc_res_nak.size() * 2);
-        loc_res_nak.emplace_back(std::move(*res));
+        loc_res_nak.emplace_back(std::move(*res)); // prilagodi glede na tvoj error tip
       }
-    } // while end
+
+      // pool_.release_slot(idx); // return slot for reuse
+    }
     if (log_debug_)
     {
       auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count();
@@ -112,6 +117,8 @@ namespace fsp
    */
   result<segment_result> xml_worker::process_segment(const xml_segment& seg)
   {
+    if (seg.subtree_type() < 0 || static_cast<std::size_t>(seg.subtree_type()) >= targets_.xpaths.size())
+      return std::unexpected(error_info{processor_error::internal_error, "invalid/empty segment passed to process_segment", "", 0});
     auto       t0        = std::chrono::steady_clock::now();
     const bool log_debug = log_.active(fsp::lvl_enum::debug);
     try

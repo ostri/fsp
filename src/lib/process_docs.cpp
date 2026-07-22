@@ -14,6 +14,8 @@ namespace fsp
     }
     for (const auto& file : xml_paths) ds_dscr_.add_document(file);
     ds_dscr_.set_grammar(xsd_path);
+    // constexpr const std::size_t kilo = 1024;
+    //  pool_.init(kilo * kilo);
     return process_files_internal();
   }
   void_result process_docs::process_files_internal()
@@ -77,6 +79,7 @@ namespace fsp
       file_workers.emplace_back(xml_processor::file_worker_task,
                                 std::ref(file_queue),
                                 std::cref(ds_dscr_),
+                                std::ref(pool_),
                                 std::ref(results_agg_mutex),
                                 std::ref(results_),
                                 std::ref(errors_),

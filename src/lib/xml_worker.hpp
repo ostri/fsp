@@ -9,6 +9,7 @@
 #include "xpath_helpers.hpp"
 #include "xpath_limits.hpp"
 #include "segment_sax.hpp"
+#include "segment_pool.hpp"
 #include <libxml/xmlreader.h>
 #include <stack>
 #include <stop_token>
@@ -45,7 +46,7 @@ namespace fsp
   {
   public:
     // Konstruktor sprejme vse potrebne podatke (kopije/reference kjer je smiselno)
-    xml_worker(segment_queue&    seg_queue,
+    xml_worker(segment_pool&     pool,
                const mmap_file&  xml_mmap,
                vec_seg_result&   results,
                vec_seg_result&   errors,
@@ -83,8 +84,8 @@ namespace fsp
   private:
     // --- worker context ---
     // NOLINTBEGIN(cppcoreguidelines-avoid-const-or-ref-data-members)
-    const fsp_logger&            log_;           //< logger
-    segment_queue&               seg_queue_;     //< segmetn queue
+    const fsp_logger& log_; //< logger
+    // segment_queue&               seg_queue_;     //< segmetn queue
     const mmap_file&             xml_mmap_;      //< mmap file with xml segment
     std::vector<segment_result>& results_;       //< result after parsing
     std::vector<segment_result>& errors_;        //< errors after parsing
@@ -113,7 +114,8 @@ namespace fsp
                                                      XML_PARSE_NODICT       // NOLINT(hicpp-signed-bitwise)
     );
     std::size_t                  segment_counter_ = 0;
-    std::unique_ptr<segment_sax> sax_; // sax parser
+    std::unique_ptr<segment_sax> sax_;  // sax parser
+    segment_pool&                pool_; // segment pool
     //  NOLINTEND(cppcoreguidelines-avoid-const-or-ref-data-members)
   };
 

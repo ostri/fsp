@@ -15,12 +15,14 @@ namespace fsp
                    segment_queue&                queue,
                    const fsp_logger&             log,
                    const xercesc::SAX2XMLReader* parser,
-                   std::string_view              base_addr)
+                   std::string_view              base_addr,
+                   segment_pool&                 pool)
   : targets_(targets) //
   , queue_(queue)     //
   , parser_(parser)
   , log_(log)       //
   , doc_(base_addr) //
+  , pool_(pool)     // segment pool
   , log_trace_(log_.active(lvl_enum::trace))
   , log_debug_(log_.active(lvl_enum::debug))
   , log_info_(log_.active(lvl_enum::info))
@@ -294,19 +296,16 @@ namespace fsp
       { // fragment is finished. wrap it up and send it to the workers
         std::size_t end_offset = parser_->getSrcOffset();
         std::size_t length     = end_offset - frag_start_offset_;
-        auto        seg        = xml_segment( //
-          counter_,
-          seg_type_,
-          frag_start_offset_,
-          length,
-          std::move(ns_),
-          std::move(attr_));
+        std::size_t idx        = pool_.acquire_slot();
+        pool_.set_segment(idx, xml_segment(counter_, seg_type_, frag_start_offset_, length, std::move(ns_), std::move(attr_)));
+        pool_.push_ready(idx);
         if (log_debug_) [[unlikely]]
         {
+          const auto& seg = pool_.retrieve_segment(idx);
           log_.debug(fmt::format("pushing to queue: {} {}", x_str(qname).to_string_view(), seg.dump()));
           log_.trace(fmt::format("{}", seg.dump_all(doc_)));
         }
-        queue_.push(std::move(seg));
+
         counter_++;
         frag_depth_ = -1; // we are outside of capturing
         seg_type_   = -1; // undefined segment type

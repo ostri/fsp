@@ -29,18 +29,19 @@
 #include "xpath_helpers.hpp"
 #include "parsing_util.hpp"
 #include "segment_result.hpp"
+#include "segment_pool.hpp"
 
 namespace fsp
 {
   using cstr_t            = std::string_view;
   using processing_result = std::expected<std::pair<std::vector<segment_result>, std::vector<segment_result>>, error_info>;
-  using segment_queue     = lock_queue<xml_segment>;
-  using s_clock           = std::chrono::time_point<std::chrono::steady_clock>;
+  // using segment_queue     = lock_queue<xml_segment>;
+  using s_clock = std::chrono::time_point<std::chrono::steady_clock>;
   class xml_processor
   {
   public:
-    explicit xml_processor(processor_config cfg);
-    xml_processor(processor_config cfg, str_t parent_log_name);
+    // explicit xml_processor(const processor_config& cfg);
+    xml_processor(processor_config cfg, str_t parent_log_name, segment_pool& pool);
     ~xml_processor();
 
     xml_processor(const xml_processor&)            = delete;
@@ -71,6 +72,7 @@ namespace fsp
     //                                           const logger_config& log_cfg     = logger_config{});
     static void    file_worker_task(lock_queue<std::size_t>&   file_queue,
                                     const doc_set_dscr&        ds_dscr,
+                                    segment_pool&              pool,
                                     std::mutex&                results_agg_mutex,
                                     vec_seg_result&            all_results,
                                     vec_seg_result&            all_errors,
@@ -111,6 +113,7 @@ namespace fsp
 
     static void process_one_file(const std::string&                  xml_path,
                                  const doc_set_dscr&                 ds_dscr,
+                                 segment_pool&                       pool,
                                  std::mutex&                         results_agg_mutex,
                                  std::vector<segment_result>&        all_results,
                                  std::vector<segment_result>&        all_errors,
@@ -128,6 +131,7 @@ namespace fsp
     const s_clock                           start_ = std::chrono::steady_clock::now();
     const fsp_logger                        log_; // logger must be created first and destructed last
     processor_config                        config_;
+    segment_pool&                           pool_; // pool of segments to be processed / are free
     std::unique_ptr<xercesc::SAX2XMLReader> parser_;
     std::unique_ptr<Handler>                handler_;
     segment_queue                           seg_queue_;

@@ -16,12 +16,8 @@ namespace fsp
                 int         subtree_type, // target index / subtree type
                 std::size_t offset,       // start from the beggining of the buffer
                 std::size_t length,       // length of this segment (whole xml subtree)
-                // str_XMLCh_t prefix,       // prefix to be added before the buffer (actual start of the
-                //                           // tag + inherited  ns)
-                str_XMLCh_t ns,   // set of ns as a string which belongs to top level tag
-                str_XMLCh_t attrs // set of attribute values which belongs to top level tag
-                                  // x_str       ln,    // localname of top tag
-                                  // x_str       uri    // uri of the top tag
+                str_XMLCh_t ns,           // set of ns as a string which belongs to top level tag
+                str_XMLCh_t attrs         // set of attribute values which belongs to top level tag
     );
     [[nodiscard]] std::string_view view(const std::byte* mmap_base = nullptr) const noexcept;
 
