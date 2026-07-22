@@ -24,7 +24,6 @@ namespace fsp
     doc_dscr& operator=(const doc_dscr&)                           = delete;
     doc_dscr(doc_dscr&&)                                           = default;
     doc_dscr&                                operator=(doc_dscr&&) = default;
-    void                                     open(const std::string& path);
     void                                     close() noexcept;
     [[nodiscard]] bool                       is_open() const noexcept;
     [[nodiscard]] bool                       empty() const noexcept;
@@ -45,6 +44,8 @@ namespace fsp
     [[nodiscard]] const mmap_file&           underlying() const noexcept;
     [[nodiscard]] doc_status                 status() const noexcept;
     void                                     set_status(doc_status status) noexcept;
+  private: //< methods
+    void open(const std::string& path);
   private:
     mmap_file  doc_;             // core document functionality
     doc_status status_{unknown}; // validation status of the document

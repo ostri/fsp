@@ -137,7 +137,8 @@ namespace fsp
     {
       if (! path.empty())
       {
-        grammar_.open(path);
+        // grammar_.open(path);
+        grammar_ = doc_dscr(path);
         log_.info(fmt::format("Grammar document set: '{}'", path));
         return true;
       }
