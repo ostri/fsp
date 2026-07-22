@@ -285,7 +285,7 @@ namespace fsp
    * @param xsd_path filepath to the corresponding grammas (XSD)
    * @return void_result
    */
-  void_result xml_processor::process_file(const std::string& xml_path, const std::string& xsd_path, const gr_pool_t& gp)
+  void_result xml_processor::process_file(const std::string& xml_path)
   {
     start_time_ = std::chrono::steady_clock::now();
     log_.info(fmt::format("XML file: '{}'", xml_path));
@@ -309,22 +309,22 @@ namespace fsp
       return std::unexpected(err);
     }
 
-    std::optional<fsp::mmap_file> xsd_mmap;
-    if (! xsd_path.empty() && config_.validate_against_xsd)
-    {
-      xsd_mmap.emplace();
-      try
-      {
-        xsd_mmap->open(xsd_path);
-      }
-      catch (const std::exception& e)
-      {
-        auto err = error_info{processor_error::file_open_failed, e.what(), xsd_path, 0};
-        log_.error(err.to_string());
-        return std::unexpected(err);
-      }
-    }
-    return process_from_buffer(xml_mmap, xsd_mmap ? &*xsd_mmap : nullptr, gp);
+    // std::optional<fsp::mmap_file> xsd_mmap;
+    // if (! xsd_path.empty() && config_.validate_against_xsd)
+    // {
+    //   xsd_mmap.emplace();
+    //   try
+    //   {
+    //     xsd_mmap->open(xsd_path);
+    //   }
+    //   catch (const std::exception& e)
+    //   {
+    //     auto err = error_info{processor_error::file_open_failed, e.what(), xsd_path, 0};
+    //     log_.error(err.to_string());
+    //     return std::unexpected(err);
+    //   }
+    // }
+    return process_from_buffer(xml_mmap);
   }
 
   //   1. setup_parser_no_validation() — SAX parser brez XSD overhead-a
@@ -340,7 +340,7 @@ namespace fsp
   //   parser_->parse()  →  vrže izjemo → ujamemo v catch bloku spodaj
   //   cancel()          →  cancel_flag_ = true → workerji se ustavijo
   //   val_future.get()  →  vrnemo napako klicatelju
-  void_result xml_processor::process_from_buffer(mmap_file& xml_mmap, mmap_file* xsd_mmap, const gr_pool_t& gp)
+  void_result xml_processor::process_from_buffer(mmap_file& xml_mmap)
   {
     auto ps = setup_parser_no_validation();
     if (! ps) return std::unexpected(ps.error());
@@ -358,17 +358,17 @@ namespace fsp
       return std::unexpected(err);
     }
     active_mmap_ = &xml_mmap;
-    // [DODANO] Zaženi validacijsko nit vzporedno s SAX parsingom.
-    // Če XSD ni podan, launch_validation_thread() vrne future ki je takoj
-    // razrešen z nullopt — handler polling bo vedno dobil "ok" in ne bo
-    // povzročal overhead-a (wait_for na already-ready future je trivial).
-    std::shared_future<std::optional<error_info>> val_future;
-    if (xsd_mmap != nullptr && config_.validate_against_xsd)
-    {
-      val_future = launch_validation_thread(xml_mmap.string_view(), gp, std::string(xsd_mmap->path()));
-      handler_->set_validation_future(val_future); // to receive signal, taht validation failed
-    }
-    bool validation_interrupted = false; // true: validation error; false: xml parsing error
+    // // [DODANO] Zaženi validacijsko nit vzporedno s SAX parsingom.
+    // // Če XSD ni podan, launch_validation_thread() vrne future ki je takoj
+    // // razrešen z nullopt — handler polling bo vedno dobil "ok" in ne bo
+    // // povzročal overhead-a (wait_for na already-ready future je trivial).
+    // std::shared_future<std::optional<error_info>> val_future;
+    // if (xsd_mmap != nullptr && config_.validate_against_xsd)
+    // {
+    //   val_future = launch_validation_thread(xml_mmap.string_view(), gp, std::string(xsd_mmap->path()));
+    //   handler_->set_validation_future(val_future); // to receive signal, taht validation failed
+    // }
+    //    bool validation_interrupted = false; // true: validation error; false: xml parsing error
     // starting workers
     auto ws = start_workers(); // validation is on critical path workers start last
     if (! ws) return std::unexpected(ws.error());
@@ -391,8 +391,8 @@ namespace fsp
       // parsinga ob zaznani validacijski napaki. Napaka je že v val_future —
       // ne logiramo tukaj, logirala jo je validacijska nit.
       // Nastavimo zastavico da spodaj ne logiramo lažne "parse" napake.
-      validation_interrupted = true;
-      auto err               = error_info{
+      // validation_interrupted = true;
+      auto err = error_info{
         processor_error::xsd_validation_failed, x_str(e.getMessage()).to_string(), "", static_cast<std::size_t>(e.getLineNumber())};
       log_.error(err.to_string());
     }
@@ -400,7 +400,7 @@ namespace fsp
     {
       // Prava napaka parsinga (ne validacijska) — canceliramo in vrnemo napako
       cancel();
-      if (val_future.valid()) val_future.wait(); // počakamo nit pred return
+      // if (val_future.valid()) val_future.wait(); // počakamo nit pred return
       workers_.clear();
       active_mmap_ = nullptr;
       auto err = error_info{processor_error::parse_failed, x_str(e.getMessage()).to_string(), "", static_cast<std::size_t>(e.getSrcLine())};
@@ -411,7 +411,7 @@ namespace fsp
     catch (const std::exception& e)
     {
       cancel();
-      if (val_future.valid()) val_future.wait();
+      // if (val_future.valid()) val_future.wait();
       workers_.clear();
       active_mmap_ = nullptr;
       auto err     = error_info{processor_error::parse_failed, e.what(), "", 0};
@@ -422,14 +422,14 @@ namespace fsp
     // upon exception in validation thread, we need to exit and cancel the workers.
     // unless we do this, the worker would continue until the queue is nonempty, which is
     // useless, since the result is going to be dropped anyway
-    if (validation_interrupted) cancel();
+    if (/*validation_interrupted*/ 0 == 1) cancel();
     else seg_queue_.set_finished();
 
     // std::this_thread::sleep_for(std::chrono::milliseconds(1)); // začasno
 
     log_.info(fmt::format("Before stopping workers - queue size: {}", seg_queue_.size()));
     // we need to wait the validation thread to finish before cleaning on our side
-    if (val_future.valid()) val_future.wait();
+    // if (val_future.valid()) val_future.wait();
     workers_.clear();
     active_mmap_ = nullptr;
     // [DODANO] Preverimo rezultat validacije.
@@ -437,12 +437,12 @@ namespace fsp
     //   - validacijska nit je že končala (val_future.wait() zgoraj)
     //   - shared_future get() ne uniči vrednosti (za razliko od unique future)
     //   - kličemo ga samo z glavne niti
-    if (val_future.valid())
-    {
-      auto val_result = val_future.get();
-      if (val_result.has_value()) // error was logged in validation thread, just signal it up
-        return std::unexpected(*val_result);
-    }
+    // if (val_future.valid())
+    // {
+    //   auto val_result = val_future.get();
+    //   if (val_result.has_value()) // error was logged in validation thread, just signal it up
+    //     return std::unexpected(*val_result);
+    // }
     success_ = true;
     return {};
   }
@@ -474,26 +474,23 @@ namespace fsp
   // // ============================================================================
   // // Convenience function
   // // ============================================================================
-  void xml_processor::process_one_doc(const std::string&                  xml_path,
-                                      const doc_set_dscr&                 ds_dscr,
-                                      segment_pool&                       pool,
-                                      std::mutex&                         results_agg_mutex,
-                                      std::vector<segment_result>&        all_results,
-                                      std::vector<segment_result>&        all_errors,
-                                      std::atomic<bool>&                  has_error,
-                                      std::optional<error_info>&          first_error,
-                                      const processor_config&             config,
-                                      const fsp_logger&                   log, // Using auto to deduce the fsp::logger type
-                                      const gr_pool_t&                    gp,
-                                      [[maybe_unused]] std::latch&        gr_latch,
-                                      [[maybe_unused]] std::atomic<bool>& gr_loaded,
-                                      [[maybe_unused]] bool               have_grammar)
+  void xml_processor::process_one_doc(const std::string&                   xml_path,
+                                      [[maybe_unused]] const doc_set_dscr& ds_dscr,
+                                      segment_pool&                        pool,
+                                      std::mutex&                          results_agg_mutex,
+                                      std::vector<segment_result>&         all_results,
+                                      std::vector<segment_result>&         all_errors,
+                                      std::atomic<bool>&                   has_error,
+                                      std::optional<error_info>&           first_error,
+                                      const processor_config&              config,
+                                      const fsp_logger&                    log // Using auto to deduce the fsp::logger type
+  )
   {
     log.info(fmt::format("Processing file: '{}'", xml_path));
-    str_t xsd_path(ds_dscr.has_grammar() ? ds_dscr.grammar().path() : "");
-    // Each file gets its own processor instance to avoid state conflicts
+    // str_t xsd_path(ds_dscr.has_grammar() ? ds_dscr.grammar().path() : "");
+    //  Each file gets its own processor instance to avoid state conflicts
     xml_processor file_proc(config, log.log_name(), pool);
-    auto          res = file_proc.process_file(xml_path, xsd_path, gp);
+    auto          res = file_proc.process_file(xml_path);
 
     if (! res)
     {
@@ -538,43 +535,26 @@ namespace fsp
                                  std::size_t                worker_idx,
                                  const std::string&         parent_log_name,
                                  const processor_config&    config,
-                                 const fsp_logger&          log,
-                                 const gr_pool_t&           gp,
-                                 std::latch&                gr_latch,
-                                 std::atomic<bool>&         gr_loaded,
-                                 bool                       has_grammar)
+                                 const fsp_logger&          log)
   {
     log.make_log_name(parent_log_name, fmt::format("doc<{:02}>", worker_idx));
     std::string xml_path;
     std::size_t xml_path_ndx;
-    while (true)
+    while (true) // loop the documents list
     {
       if (auto opt = doc_queue.try_pop()) { xml_path_ndx = opt.value(); }
       else
       { // the queu was initally empty and we need to wait for first doc or a signal to exit the waiting
         auto start = std::chrono::steady_clock::now();
-        if (doc_queue.pop(xml_path_ndx) != queue_status::active) break;
+        if (doc_queue.pop(xml_path_ndx) != queue_status::active) break; // finished or aborted
         auto end     = std::chrono::steady_clock::now();
-        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
-        log.info(fmt::format("waiting time for new file {} ms.", elapsed));
+        auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+        log.info(fmt::format("waiting time for new file {} µs.", elapsed));
       }
-      xml_path = ds_dscr[xml_path_ndx].path();
-      process_one_doc(xml_path,
-                      ds_dscr,
-                      pool,
-                      results_agg_mutex,
-                      all_results,
-                      all_errors,
-                      has_error,
-                      first_error,
-                      config,
-                      log,
-                      gp,
-                      gr_latch,
-                      gr_loaded,
-                      has_grammar);
+      xml_path = ds_dscr[xml_path_ndx].path(); // document to be processed
+      process_one_doc(xml_path, ds_dscr, pool, results_agg_mutex, all_results, all_errors, has_error, first_error, config, log);
     }
     ++file_processed;
+    if (doc_queue.is_aborted()) log.warn(fmt::format("doc_worker {}/{} aborted.", log.log_name(), worker_idx));
   }
-
 }; // namespace fsp

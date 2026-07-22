@@ -38,12 +38,12 @@ namespace fsp
     const processor_config cfg_;             //< framework configuration
     const str_t            parent_log_name_; //< parent name for logging
     mutable std::mutex     results_mutex_;   //< results mutex
-    mutable std::mutex     errors_mutex_;    // errors mutex
-    vec_seg_result         results_;         // ok segment data
-    vec_seg_result         errors_;          // segments that have semantic errors
-    stats_t                stats_{};         // document processing statistics
+    mutable std::mutex     errors_mutex_;    //< errors mutex
+    vec_seg_result         results_;         //< ok segment data
+    vec_seg_result         errors_;          //< segments that have semantic errors
+    stats_t                stats_{};         //< document processing statistics
     doc_set_dscr           ds_dscr_{log_};   //< information about the xml documents to be processed
-    segment_pool           pool_;            // segment pool NOLINT(readability-magic-numbers)
+    segment_pool           pool_;            //< segment pool
     const bool             log_trace_ = log_.active(fsp::lvl_enum::trace);
     const bool             log_debug_ = log_.active(fsp::lvl_enum::debug);
     const bool             log_info_  = log_.active(fsp::lvl_enum::info);

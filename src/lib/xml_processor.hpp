@@ -47,8 +47,8 @@ namespace fsp
     xml_processor& operator=(const xml_processor&) = delete;
     xml_processor(xml_processor&&)                 = delete;
     xml_processor& operator=(xml_processor&&)      = delete;
-    void_result    process_file(const std::string& xml_path, const std::string& xsd_path, const gr_pool_t& gp);
-    void_result    process_from_buffer(mmap_file& xml_mmap, mmap_file* xsd_mmap, const gr_pool_t& gp);
+    void_result    process_file(const std::string& xml_path);
+    void_result    process_from_buffer(mmap_file& xml_mmap);
     /** @brief Process multiple XML files in parallel using N workers.
      * Each worker processes files sequentially from the queue using process_file.
      * Results and errors are collected from all files.
@@ -76,11 +76,7 @@ namespace fsp
                                   std::size_t                worker_idx,
                                   const std::string&         parent_log_name,
                                   const processor_config&    config,
-                                  const fsp_logger&          log,
-                                  const gr_pool_t&           gp,
-                                  std::latch&                gr_latch,
-                                  std::atomic<bool>&         gr_loaded,
-                                  bool                       has_grammar);
+                                  const fsp_logger&          log);
     vec_seg_result     move_results();
     vec_seg_result     move_errors();
   private: /// methods
@@ -105,20 +101,17 @@ namespace fsp
                                                          const fsp_logger&  logger,
                                                          const std::string& parent_log_name);
 
-    static void process_one_doc(const std::string&                  xml_path,
-                                const doc_set_dscr&                 ds_dscr,
-                                segment_pool&                       pool,
-                                std::mutex&                         results_agg_mutex,
-                                std::vector<segment_result>&        all_results,
-                                std::vector<segment_result>&        all_errors,
-                                std::atomic<bool>&                  has_error,
-                                std::optional<error_info>&          first_error,
-                                const processor_config&             config,
-                                const fsp_logger&                   log, // Using auto to deduce the fsp::logger type
-                                const gr_pool_t&                    gp,
-                                [[maybe_unused]] std::latch&        gr_latch,
-                                [[maybe_unused]] std::atomic<bool>& gr_loaded,
-                                [[maybe_unused]] bool               have_grammar);
+    static void process_one_doc(const std::string&           xml_path,
+                                const doc_set_dscr&          ds_dscr,
+                                segment_pool&                pool,
+                                std::mutex&                  results_agg_mutex,
+                                std::vector<segment_result>& all_results,
+                                std::vector<segment_result>& all_errors,
+                                std::atomic<bool>&           has_error,
+                                std::optional<error_info>&   first_error,
+                                const processor_config&      config,
+                                const fsp_logger&            log // Using auto to deduce the fsp::logger type
+    );
     void        save_stats();
     stats_t     stats() const { return stats_; }
   private: /// members
@@ -148,7 +141,7 @@ namespace fsp
     stats_t                                 stats_; // processing statistics
   };
 
-  inline [[nodiscard]] bool xml_processor::is_successful() const { return success_.load(); }
+  inline bool xml_processor::is_successful() const { return success_.load(); }
 
   inline vec_seg_result xml_processor::move_results()
   {
