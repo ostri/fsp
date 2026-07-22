@@ -5,7 +5,7 @@
 namespace fsp
 {
   namespace fs = std::filesystem;
-  mmap_file::mmap_file(const std::string& path) { open(path); }
+  mmap_file::mmap_file(cstr_t path) { open(path); }
   mmap_file::mmap_file(mmap_file&& other) noexcept
   : data_(other.data_)
   , size_(other.size_)
@@ -33,10 +33,11 @@ namespace fsp
     return *this;
   }
   mmap_file::~mmap_file() { close(); }
-  void mmap_file::open(const std::string& path)
+  //  void mmap_file::open(const std::string& path)
+  void mmap_file::open(cstr_t path)
   {
     close();
-    fd_ = ::open(path.c_str(), O_RDONLY | O_CLOEXEC); // NOLINT(hicpp-vararg)
+    fd_ = ::open(std::string(path.data(), path.size()).data(), O_RDONLY | O_CLOEXEC); // NOLINT(hicpp-vararg)
     if (fd_ == -1)
     {
       fs::path absolute = fs::absolute(path).lexically_normal();

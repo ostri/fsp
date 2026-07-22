@@ -26,7 +26,6 @@
 #include "lock_queue.hpp"
 #include "stats.hpp"
 #include "xpath_helpers.hpp"
-#include "parsing_util.hpp"
 #include "segment_result.hpp"
 #include "segment_pool.hpp"
 
@@ -39,15 +38,15 @@ namespace fsp
   {
   public:
     // explicit xml_processor(const processor_config& cfg);
-    xml_processor(processor_config cfg, str_t parent_log_name, segment_pool& pool);
+    xml_processor(processor_config cfg, str_t parent_log_name, segment_pool& pool, doc_set_dscr& ds_dscr);
     ~xml_processor();
 
     xml_processor(const xml_processor&)            = delete;
     xml_processor& operator=(const xml_processor&) = delete;
     xml_processor(xml_processor&&)                 = delete;
     xml_processor& operator=(xml_processor&&)      = delete;
-    void_result    process_file(const std::string& xml_path);
-    void_result    process_from_buffer(mmap_file& xml_mmap);
+    //    void_result    process_file(std::size_t xml_path_ndx);
+    void_result process_from_buffer(std::size_t xml_path_ndx);
     /** @brief Process multiple XML files in parallel using N workers.
      * Each worker processes files sequentially from the queue using process_file.
      * Results and errors are collected from all files.
@@ -64,7 +63,7 @@ namespace fsp
     [[nodiscard]] bool is_successful() const;
     void               cancel();
     static void        doc_worker(lock_queue<std::size_t>&   doc_queue,
-                                  const doc_set_dscr&        ds_dscr,
+                                  doc_set_dscr&              ds_dscr,
                                   segment_pool&              pool,
                                   std::mutex&                results_agg_mutex,
                                   vec_seg_result&            all_results,
@@ -94,22 +93,22 @@ namespace fsp
     //   std::string      xsd_path                                             // path to the grammar file
     // );
 
-    static std::optional<error_info> validate_xml_worker(const cstr_t&      f_xml_data,
-                                                         const gr_pool_t&   gp,
-                                                         std::string        xsd_path,
-                                                         const fsp_logger&  logger,
-                                                         const std::string& parent_log_name);
+    // static std::optional<error_info> validate_xml_worker(const cstr_t&      f_xml_data,
+    //                                                      const gr_pool_t&   gp,
+    //                                                      std::string        xsd_path,
+    //                                                      const fsp_logger&  logger,
+    //                                                      const std::string& parent_log_name);
 
-    static void process_one_doc(std::size_t                          xml_path_ndx,
-                                [[maybe_unused]] const doc_set_dscr& ds_dscr,
-                                segment_pool&                        pool,
-                                std::mutex&                          results_agg_mutex,
-                                std::vector<segment_result>&         all_results,
-                                std::vector<segment_result>&         all_errors,
-                                std::atomic<bool>&                   has_error,
-                                std::optional<error_info>&           first_error,
-                                const processor_config&              config,
-                                const fsp_logger&                    log // Using auto to deduce the fsp::logger type
+    static void process_one_doc(std::size_t                    xml_path_ndx,
+                                [[maybe_unused]] doc_set_dscr& ds_dscr,
+                                segment_pool&                  pool,
+                                std::mutex&                    results_agg_mutex,
+                                std::vector<segment_result>&   all_results,
+                                std::vector<segment_result>&   all_errors,
+                                std::atomic<bool>&             has_error,
+                                std::optional<error_info>&     first_error,
+                                const processor_config&        config,
+                                const fsp_logger&              log // Using auto to deduce the fsp::logger type
     );
     void        save_stats();
     stats_t     stats() const { return stats_; }
@@ -117,7 +116,8 @@ namespace fsp
     const s_clock                           start_ = std::chrono::steady_clock::now();
     const fsp_logger                        log_; // logger must be created first and destructed last
     processor_config                        config_;
-    segment_pool&                           pool_; // pool of segments to be processed / are free
+    segment_pool&                           pool_;    // pool of segments to be processed / are free
+    doc_set_dscr&                           ds_dscr_; //< document description
     std::unique_ptr<xercesc::SAX2XMLReader> parser_;
     std::unique_ptr<Handler>                handler_;
     segment_queue                           seg_queue_;

@@ -73,7 +73,7 @@ namespace fsp
       // create file_worker_task thread
       doc_workers.emplace_back(xml_processor::doc_worker,
                                std::ref(doc_queue),
-                               std::cref(ds_dscr_),
+                               std::ref(ds_dscr_),
                                std::ref(pool_),
                                std::ref(results_agg_mutex),
                                std::ref(results_),

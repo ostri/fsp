@@ -27,10 +27,11 @@ namespace fsp
   // {
   // }
 
-  xml_processor::xml_processor(processor_config cfg, str_t parent_log_name, segment_pool& pool)
+  xml_processor::xml_processor(processor_config cfg, str_t parent_log_name, segment_pool& pool, doc_set_dscr& ds_dscr)
   : log_(cfg.log_config)
   , config_(std::move(cfg))
   , pool_(pool)
+  , ds_dscr_(ds_dscr)
   , parent_log_name_(std::move(parent_log_name))
   {
     bool first_time = log_.log_name() == "unknown";
@@ -99,87 +100,87 @@ namespace fsp
   // Validation thread
   // ============================================================================
   // Statična funkcija, ki izvaja validacijo
-  std::optional<error_info> xml_processor::validate_xml_worker(const cstr_t&      f_xml_data,
-                                                               const gr_pool_t&   gp,
-                                                               std::string        xsd_path,
-                                                               const fsp_logger&  logger,
-                                                               const std::string& parent_log_name)
-  {
-    auto        start = std::chrono::steady_clock::now();
-    const auto& log   = logger;
-    log.make_log_name(parent_log_name, "valid");
+  // std::optional<error_info> xml_processor::validate_xml_worker(const cstr_t&      f_xml_data,
+  //                                                              const gr_pool_t&   gp,
+  //                                                              std::string        xsd_path,
+  //                                                              const fsp_logger&  logger,
+  //                                                              const std::string& parent_log_name)
+  // {
+  //   auto        start = std::chrono::steady_clock::now();
+  //   const auto& log   = logger;
+  //   log.make_log_name(parent_log_name, "valid");
 
-    if (log.active(info)) log.info(fmt::format("Validation started. file: xsd:{}", xsd_path));
+  //   if (log.active(info)) log.info(fmt::format("Validation started. file: xsd:{}", xsd_path));
 
-    try
-    {
-      // Ustvarimo lasten parser, ker ni reentrant
-      std::unique_ptr<xercesc::SAX2XMLReader> vparser(xercesc::XMLReaderFactory::createXMLReader( //
-        xercesc::XMLPlatformUtils::fgMemoryManager,
-        gp.get()));
+  //   try
+  //   {
+  //     // Ustvarimo lasten parser, ker ni reentrant
+  //     std::unique_ptr<xercesc::SAX2XMLReader> vparser(xercesc::XMLReaderFactory::createXMLReader( //
+  //       xercesc::XMLPlatformUtils::fgMemoryManager,
+  //       gp.get()));
 
-      // Konfiguracija parserja
-      // NOLINTBEGIN(hicpp-no-array-decay)
-      vparser->setFeature(xercesc::XMLUni::fgSAX2CoreValidation, true);
-      vparser->setFeature(xercesc::XMLUni::fgXercesSchema, ! xsd_path.empty());
-      vparser->setFeature(xercesc::XMLUni::fgXercesValidationErrorAsFatal, true);
-      vparser->setFeature(xercesc::XMLUni::fgXercesUseCachedGrammarInParse, true);
-      vparser->setFeature(xercesc::XMLUni::fgSAX2CoreNameSpaces, true);
-      vparser->setFeature(xercesc::XMLUni::fgXercesSchemaFullChecking, false);
-      vparser->setFeature(xercesc::XMLUni::fgSAX2CoreNameSpacePrefixes, false);
-      vparser->setFeature(xercesc::XMLUni::fgXercesCalculateSrcOfs, false);
-      vparser->setFeature(xercesc::XMLUni::fgXercesCacheGrammarFromParse, false);
-      // NOLINTEND(hicpp-no-array-decay)
+  //     // Konfiguracija parserja
+  //     // NOLINTBEGIN(hicpp-no-array-decay)
+  //     vparser->setFeature(xercesc::XMLUni::fgSAX2CoreValidation, true);
+  //     vparser->setFeature(xercesc::XMLUni::fgXercesSchema, ! xsd_path.empty());
+  //     vparser->setFeature(xercesc::XMLUni::fgXercesValidationErrorAsFatal, true);
+  //     vparser->setFeature(xercesc::XMLUni::fgXercesUseCachedGrammarInParse, true);
+  //     vparser->setFeature(xercesc::XMLUni::fgSAX2CoreNameSpaces, true);
+  //     vparser->setFeature(xercesc::XMLUni::fgXercesSchemaFullChecking, false);
+  //     vparser->setFeature(xercesc::XMLUni::fgSAX2CoreNameSpacePrefixes, false);
+  //     vparser->setFeature(xercesc::XMLUni::fgXercesCalculateSrcOfs, false);
+  //     vparser->setFeature(xercesc::XMLUni::fgXercesCacheGrammarFromParse, false);
+  //     // NOLINTEND(hicpp-no-array-decay)
 
-      // Naložimo XSD shemo v parser
-      // mem_buf_holder xsd_holder(f_xsd_data.data(), f_xsd_data.size(), xsd_path, log);
-      // if (xsd_holder.source() != nullptr) vparser->loadGrammar(*xsd_holder.source(), xercesc::Grammar::SchemaGrammarType, true);
+  //     // Naložimo XSD shemo v parser
+  //     // mem_buf_holder xsd_holder(f_xsd_data.data(), f_xsd_data.size(), xsd_path, log);
+  //     // if (xsd_holder.source() != nullptr) vparser->loadGrammar(*xsd_holder.source(), xercesc::Grammar::SchemaGrammarType, true);
 
-      // Handler za napake, ki vrže izjemo
-      struct ThrowingErrorHandler : public xercesc::DefaultHandler
-      { // NOLINTBEGIN(hicpp-exception-baseclass)
-        void error(const xercesc::SAXParseException& e) override { throw e; }
-        void fatalError(const xercesc::SAXParseException& e) override { throw e; }
-        // NOLINTEND(hicpp-exception-baseclass)
-      } err_handler;
-      vparser->setErrorHandler(&err_handler);
+  //     // Handler za napake, ki vrže izjemo
+  //     struct ThrowingErrorHandler : public xercesc::DefaultHandler
+  //     { // NOLINTBEGIN(hicpp-exception-baseclass)
+  //       void error(const xercesc::SAXParseException& e) override { throw e; }
+  //       void fatalError(const xercesc::SAXParseException& e) override { throw e; }
+  //       // NOLINTEND(hicpp-exception-baseclass)
+  //     } err_handler;
+  //     vparser->setErrorHandler(&err_handler);
 
-      // Parsiranje XML
-      xercesc::MemBufInputSource src(
-        reinterpret_cast<const XMLByte*>(f_xml_data.data()), static_cast<XMLSize_t>(f_xml_data.size()), "xml_validation", false);
-      vparser->parse(src);
+  //     // Parsiranje XML
+  //     xercesc::MemBufInputSource src(
+  //       reinterpret_cast<const XMLByte*>(f_xml_data.data()), static_cast<XMLSize_t>(f_xml_data.size()), "xml_validation", false);
+  //     vparser->parse(src);
 
-      if (log.active(fsp::lvl_enum::info))
-      {
-        auto end      = std::chrono::steady_clock::now();
-        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
-        log.info(fmt::format("Validation finished in {} ms {} bytes.", duration.count(), f_xml_data.size()));
-      }
-      return std::nullopt; // ni napak
-    }
-    catch (const xercesc::SAXParseException& e)
-    {
-      auto err = error_info{
-        processor_error::xsd_validation_failed,
-        fmt::format("SAX validation error: {} (row:{} col:{})", x_str(e.getMessage()).to_string(), e.getLineNumber(), e.getColumnNumber()),
-        "",
-        static_cast<std::size_t>(e.getLineNumber())};
-      if (log.active(lvl_enum::err)) log.error(err.to_string());
-      return err;
-    }
-    catch (const xercesc::XMLException& e)
-    {
-      auto err = error_info{processor_error::xsd_validation_failed, fmt::format("XML error: {}", x_str(e.getMessage()).to_string()), "", 0};
-      if (log.active(lvl_enum::err)) log.error(err.to_string());
-      return err;
-    }
-    catch (...)
-    {
-      auto err = error_info{processor_error::internal_error, "Validation: unknown error", "", 0};
-      if (log.active(lvl_enum::err)) log.error(err.to_string());
-      return err;
-    }
-  }
+  //     if (log.active(fsp::lvl_enum::info))
+  //     {
+  //       auto end      = std::chrono::steady_clock::now();
+  //       auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+  //       log.info(fmt::format("Validation finished in {} ms {} bytes.", duration.count(), f_xml_data.size()));
+  //     }
+  //     return std::nullopt; // ni napak
+  //   }
+  //   catch (const xercesc::SAXParseException& e)
+  //   {
+  //     auto err = error_info{
+  //       processor_error::xsd_validation_failed,
+  //       fmt::format("SAX validation error: {} (row:{} col:{})", x_str(e.getMessage()).to_string(), e.getLineNumber(),
+  //       e.getColumnNumber()),
+  //       "",
+  //       static_cast<std::size_t>(e.getLineNumber())};
+  //     if (log.active(lvl_enum::err)) log.error(err.to_string());
+  //     return err;
+  //   }
+  //   catch (const xercesc::XMLException& e)
+  //   {
+  //     auto err = error_info{processor_error::xsd_validation_failed, fmt::format("XML error: {}", x_str(e.getMessage()).to_string()), "",
+  //     0}; if (log.active(lvl_enum::err)) log.error(err.to_string()); return err;
+  //   }
+  //   catch (...)
+  //   {
+  //     auto err = error_info{processor_error::internal_error, "Validation: unknown error", "", 0};
+  //     if (log.active(lvl_enum::err)) log.error(err.to_string());
+  //     return err;
+  //   }
+  // }
   // Zažene validacijo XML proti XSD v ločeni niti. Vrne shared_future ki se
   // razreši takoj ko validacija konča — bodisi z nullopt (ok) ali error_info
   // (prva napaka). shared_future (ne unique future) ker ga delita dve mesti:
@@ -277,54 +278,54 @@ namespace fsp
     for (auto& el : workers_) el.request_stop();
     seg_queue_.set_finished();
   }
-  /**
-   * @brief parse xml file
-   *
-   * @param xml_path filepath to the xml file
-   * @param xsd_path filepath to the corresponding grammas (XSD)
-   * @return void_result
-   */
-  void_result xml_processor::process_file(const std::string& xml_path)
-  {
-    start_time_ = std::chrono::steady_clock::now();
-    log_.info(fmt::format("XML file: '{}'", xml_path));
+  // /**
+  //  * @brief parse xml file
+  //  *
+  //  * @param xml_path filepath to the xml file
+  //  * @param xsd_path filepath to the corresponding grammas (XSD)
+  //  * @return void_result
+  //  */
+  // void_result xml_processor::process_file(std::size_t xml_path_ndx)
+  // {
+  //   start_time_   = std::chrono::steady_clock::now();
+  //   auto xml_path = ds_dscr_[xml_path_ndx].path();
+  //   log_.info(fmt::format("XML file: '{}'", xml_path));
 
-    fsp::mmap_file xml_mmap;
-    try
-    {
-      xml_mmap.open(xml_path);
-    }
-    catch (const std::exception& e)
-    {
-      auto err = error_info{processor_error::file_open_failed, e.what(), xml_path, 0};
-      log_.error(err.to_string());
-      return std::unexpected(err);
-    }
+  //   // fsp::mmap_file xml_mmap;
+  //   // try
+  //   // {
+  //   //   xml_mmap.open(xml_path);
+  //   // }
+  //   // catch (const std::exception& e)
+  //   // {
+  //   //   auto err = error_info{processor_error::file_open_failed, e.what(), xml_path, 0};
+  //   //   log_.error(err.to_string());
+  //   //   return std::unexpected(err);
+  //   // }
+  //   if (! ds_dscr_[xml_path_ndx].is_open())
+  //   {
+  //     auto err = error_info{processor_error::mmap_failed, fmt::format("mmap neuspešen: '{}'", xml_path), xml_path, 0};
+  //     log_.error(err.to_string());
+  //     return std::unexpected(err);
+  //   }
 
-    if (! xml_mmap.is_open() || xml_mmap.empty())
-    {
-      auto err = error_info{processor_error::mmap_failed, fmt::format("mmap neuspešen: '{}'", xml_path), xml_path, 0};
-      log_.error(err.to_string());
-      return std::unexpected(err);
-    }
-
-    // std::optional<fsp::mmap_file> xsd_mmap;
-    // if (! xsd_path.empty() && config_.validate_against_xsd)
-    // {
-    //   xsd_mmap.emplace();
-    //   try
-    //   {
-    //     xsd_mmap->open(xsd_path);
-    //   }
-    //   catch (const std::exception& e)
-    //   {
-    //     auto err = error_info{processor_error::file_open_failed, e.what(), xsd_path, 0};
-    //     log_.error(err.to_string());
-    //     return std::unexpected(err);
-    //   }
-    // }
-    return process_from_buffer(xml_mmap);
-  }
+  //   // std::optional<fsp::mmap_file> xsd_mmap;
+  //   // if (! xsd_path.empty() && config_.validate_against_xsd)
+  //   // {
+  //   //   xsd_mmap.emplace();
+  //   //   try
+  //   //   {
+  //   //     xsd_mmap->open(xsd_path);
+  //   //   }
+  //   //   catch (const std::exception& e)
+  //   //   {
+  //   //     auto err = error_info{processor_error::file_open_failed, e.what(), xsd_path, 0};
+  //   //     log_.error(err.to_string());
+  //   //     return std::unexpected(err);
+  //   //   }
+  //   // }
+  //   return process_from_buffer(xml_path_ndx);
+  // }
 
   //   1. setup_parser_no_validation() — SAX parser brez XSD overhead-a
   //   2. launch_validation_thread()   — validacija vzporedno v svoji niti
@@ -339,9 +340,10 @@ namespace fsp
   //   parser_->parse()  →  vrže izjemo → ujamemo v catch bloku spodaj
   //   cancel()          →  cancel_flag_ = true → workerji se ustavijo
   //   val_future.get()  →  vrnemo napako klicatelju
-  void_result xml_processor::process_from_buffer(mmap_file& xml_mmap)
+  void_result xml_processor::process_from_buffer(std::size_t xml_path_ndx)
   {
-    auto ps = setup_parser_no_validation();
+    auto& xml_mmap = ds_dscr_[xml_path_ndx].mmf();
+    auto  ps       = setup_parser_no_validation();
     if (! ps) return std::unexpected(ps.error());
 
     try
@@ -473,24 +475,23 @@ namespace fsp
   // // ============================================================================
   // // Convenience function
   // // ============================================================================
-  void xml_processor::process_one_doc(std::size_t                          xml_path_ndx,
-                                      [[maybe_unused]] const doc_set_dscr& ds_dscr,
-                                      segment_pool&                        pool,
-                                      std::mutex&                          results_agg_mutex,
-                                      std::vector<segment_result>&         all_results,
-                                      std::vector<segment_result>&         all_errors,
-                                      std::atomic<bool>&                   has_error,
-                                      std::optional<error_info>&           first_error,
-                                      const processor_config&              config,
-                                      const fsp_logger&                    log // Using auto to deduce the fsp::logger type
+  void xml_processor::process_one_doc(std::size_t                    xml_path_ndx,
+                                      [[maybe_unused]] doc_set_dscr& ds_dscr,
+                                      segment_pool&                  pool,
+                                      std::mutex&                    results_agg_mutex,
+                                      std::vector<segment_result>&   all_results,
+                                      std::vector<segment_result>&   all_errors,
+                                      std::atomic<bool>&             has_error,
+                                      std::optional<error_info>&     first_error,
+                                      const processor_config&        config,
+                                      const fsp_logger&              log // Using auto to deduce the fsp::logger type
   )
   {
     const auto xml_path = ds_dscr[xml_path_ndx].path();
     log.info(fmt::format("Processing file: '{}'", xml_path));
-    // str_t xsd_path(ds_dscr.has_grammar() ? ds_dscr.grammar().path() : "");
     //  Each file gets its own processor instance to avoid state conflicts
-    xml_processor file_proc(config, log.log_name(), pool);
-    auto          res = file_proc.process_file(std::string(xml_path)); // FIME OS3 use file index instead
+    xml_processor file_proc(config, log.log_name(), pool, ds_dscr);
+    auto          res = file_proc.process_from_buffer(xml_path_ndx); // FIME OS3 use file index instead
 
     if (! res)
     {
@@ -524,7 +525,7 @@ namespace fsp
   }
   // Helper static function for jthread execution
   void xml_processor::doc_worker(lock_queue<std::size_t>&   doc_queue,
-                                 const doc_set_dscr&        ds_dscr,
+                                 doc_set_dscr&              ds_dscr,
                                  segment_pool&              pool,
                                  std::mutex&                results_agg_mutex,
                                  vec_seg_result&            all_results,
@@ -544,7 +545,7 @@ namespace fsp
     {
       if (auto opt = doc_queue.try_pop()) { xml_path_ndx = opt.value(); }
       else
-      { // the queu was initally empty and we need to wait for first doc or a signal to exit the waiting
+      { // the queue was initally empty and we need to wait for first doc or a signal to exit the waiting
         auto start = std::chrono::steady_clock::now();
         if (doc_queue.pop(xml_path_ndx) != queue_status::active) break; // finished or aborted
         auto end     = std::chrono::steady_clock::now();

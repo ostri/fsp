@@ -41,7 +41,8 @@ namespace fsp
     [[nodiscard]] std::span<const std::byte> subspan(size_t offset, size_t count) const;
     void                                     prefetch(size_t offset, size_t count = mmap_file::prefetch_size) const noexcept;
     [[nodiscard]] explicit                   operator bool() const noexcept;
-    [[nodiscard]] const mmap_file&           underlying() const noexcept;
+    [[nodiscard]] const mmap_file&           mmf() const noexcept;
+    mmap_file&                               mmf() noexcept;
     [[nodiscard]] doc_status                 status() const noexcept;
     void                                     set_status(doc_status status) noexcept;
   private: //< methods
@@ -90,7 +91,8 @@ namespace fsp
   // Prefetch support
   inline void doc_dscr::prefetch(size_t offset, size_t count) const noexcept { doc_.prefetch(offset, count); }
   // Access to underlying mmap_file (for advanced use)
-  inline const mmap_file& doc_dscr::underlying() const noexcept { return doc_; }
+  inline const mmap_file& doc_dscr::mmf() const noexcept { return doc_; }
+  inline mmap_file&       doc_dscr::mmf() noexcept { return doc_; }
   inline doc_dscr::       operator bool() const noexcept { return doc_.is_open(); }
   inline doc_status       doc_dscr::status() const noexcept { return status_; }
   inline void             doc_dscr::set_status(doc_status status) noexcept { status_ = status; }

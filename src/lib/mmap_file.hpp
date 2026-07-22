@@ -11,6 +11,7 @@
 
 namespace fsp
 {
+  using cstr_t = std::string_view;
 
   class mmap_file
   {
@@ -28,13 +29,13 @@ namespace fsp
 
     mmap_file() = default;
 
-    explicit mmap_file(const std::string& path);
+    explicit mmap_file(cstr_t path);
     mmap_file(const mmap_file&)            = delete;
     mmap_file& operator=(const mmap_file&) = delete;
     mmap_file(mmap_file&& other) noexcept;
     mmap_file& operator=(mmap_file&& other) noexcept;
     ~mmap_file();
-    void                                   open(const std::string& path);
+    void                                   open(cstr_t path);
     void                                   close() noexcept;
     [[nodiscard]] std::string_view         string_view() const;
     [[nodiscard]] mmap_file::const_pointer data() const noexcept;
