@@ -115,8 +115,6 @@ namespace fsp
    */
   result<segment_result> xml_worker::process_segment(const xml_segment& seg)
   {
-    if (seg.subtree_type() < 0 || static_cast<std::size_t>(seg.subtree_type()) >= targets_.xpaths.size())
-      return std::unexpected(error_info{processor_error::internal_error, "invalid/empty segment passed to process_segment", "", 0});
     auto       t0        = std::chrono::steady_clock::now();
     const bool log_debug = log_.active(fsp::lvl_enum::debug);
     try
@@ -168,7 +166,6 @@ namespace fsp
   {
     if (log_debug_) // -2 to align with start element
     {
-      // if (indent.size() < depth * 2) indent.assign(depth * 2 * 2, pad);
       log_.debug(fmt::format("seg:{:5} {}/{}", seg.id(), indent(), tree_stack_.top().node.tag()));
     }
     tree_stack_.pop();
@@ -216,7 +213,7 @@ namespace fsp
 
     ++segment_counter_;
 
-    // Poskusimo ponovno uporabiti obstoječi reader
+    // using existing reader
     int ret = xmlReaderNewMemory(reader_.get(), xml_buf.data(), static_cast<int>(xml_buf.size()), "noname.xml", nullptr, reader_flags_);
 
     if (ret == 0)
@@ -226,13 +223,6 @@ namespace fsp
       xmlTextReaderSetParserProp(reader_.get(), XML_PARSER_DEFAULTATTRS, 0);
       xmlTextReaderSetParserProp(reader_.get(), XML_PARSER_VALIDATE, 0);
       xmlTextReaderSetParserProp(reader_.get(), XML_PARSER_SUBST_ENTITIES, 0);
-
-      // // Periodični popolni reset (vsakih N segmentov)
-      // if (segment_counter_ % 10000 == 0)
-      // {
-      //   log_.debug(fmt::format("Periodic full reader recreation at segment {}", segment_counter_));
-      //   reader_.reset(xmlReaderForMemory(xml_buf.data(), static_cast<int>(xml_buf.size()), "noname.xml", nullptr, reader_flags_));
-      // }
       return true;
     }
 
@@ -321,20 +311,6 @@ namespace fsp
   }
   result<segment_result> xml_worker::extract_xml_values(cstr_t xml_buf, const xml_segment& seg)
   {
-    // NOLINTBEGIN(hicpp-signed-bitwise)
-    // auto flags = (          // XML_PARSE_NODICT |    // keep old dict
-    //   XML_PARSE_NOCDATA |   // no CDATA as text
-    //   XML_PARSE_NOERROR |   // no errors; it is already perfomraed by xerces
-    //   XML_PARSE_NOWARNING | // no wrtnings
-    //   XML_PARSE_NOBLANKS |  // we can skip the spaces
-    //   XML_PARSE_NONET |     // no need to have acces to net
-    //                         // XML_PARSE_NODTD |      // no DTD validation
-    //   // XML_PARSE_NOXINCLUDE | // no XInclude processing
-    //   XML_PARSE_NSCLEAN | // namespace-e cleanup (less program memory)
-    //   // XML_PARSE_NOWRAP |     // no additional wrappers
-    //   XML_PARSE_IGNORE_ENC // utf-8 encoding assumed
-    // );
-    // NOLINTEND(hicpp-signed-bitwise)
     if (! reset_reader(xml_buf)) { throw std::runtime_error("Failed to reset reader for new segment"); }
 
     if (reader_)
@@ -357,8 +333,7 @@ namespace fsp
     return loop(seg, xpaths, limits);
   }
   std::expected<pp_result, err_result> xml_worker::process_and_prune_node( //
-    const xpath_set& xpaths,
-    // std::stack<stack_struct>& stack,
+    const xpath_set&    xpaths,
     const xpath_limits& limits_vec,
     segment_result&     seg_result)
   {
@@ -395,7 +370,6 @@ namespace fsp
     /// - the tag name is bigger than any available tag name in the list of xpaths we are searching for
     auto first = limits.first();
     auto last  = limits.last();
-    // if (log_trace) log.trace(fmt::format("{}", xpaths.dump()));
     for (auto cnt = first; cnt <= last; ++cnt)
     {                                          // compare with all possible options on xpath[depth]
       if (! limits.available()[cnt]) continue; // It has been removed in earlier iterations
@@ -452,31 +426,22 @@ namespace fsp
     const xmlChar* ln                   = BAD_CAST local_name.c_str();
     int                          status = 0;
 
-    // 1. Pravilna izbira funkcije glede na prisotnost imenskega prostora
-    if (namespace_uri.empty())
+    if (namespace_uri.empty()) // attributes with default prefix/uri
     {
-      // Za standardne atribute brez prefiksa (npr. Ccy="EUR")
-      status = xmlTextReaderMoveToAttribute(reader_.get(), ln);
+      status = xmlTextReaderMoveToAttribute(reader_.get(), ln); // e.g. Ccy="EUR"
     }
     else
-    {
-      // Za atribute z imenskim prostorom (npr. ns:Ccy="EUR")
+    { // attriute with ns (e.g. ns:Ccy="EUR")
       const xmlChar* ns = BAD_CAST namespace_uri.c_str();
       status            = xmlTextReaderMoveToAttributeNs(reader_.get(), ln, ns);
     }
-
-    // 2. Branje vrednosti, če je bil atribut najden
     if (status == 1)
-    {
+    { // read the attribute value is attribute is found
       const xmlChar* val = xmlTextReaderConstValue(reader_.get());
       std::string    result(val != nullptr ? reinterpret_cast<const char*>(val) : "");
-
-      // 3. Obvezno vrnemo fokus bralnika nazaj na trenutni element!
-      xmlTextReaderMoveToElement(reader_.get());
-
+      xmlTextReaderMoveToElement(reader_.get()); // return focus to current element
       return result;
     }
-
     return std::nullopt;
   }
   std::string xml_worker::process_attribute(const xml_attr& xp) const

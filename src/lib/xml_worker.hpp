@@ -63,8 +63,7 @@ namespace fsp
     result<segment_result>               process_segment(const xml_segment& seg);
     result<segment_result>               extract_xml_values(cstr_t xml_buf, const xml_segment& seg);
     std::expected<pp_result, err_result> process_and_prune_node( //
-      const xpath_set& xpaths,
-      // std::stack<stack_struct>& stack,
+      const xpath_set&    xpaths,
       const xpath_limits& limits_vec,
       segment_result&     seg_result);
     int                                  process_positive_xpath_element( //
@@ -84,14 +83,12 @@ namespace fsp
   private:
     // --- worker context ---
     // NOLINTBEGIN(cppcoreguidelines-avoid-const-or-ref-data-members)
-    const fsp_logger& log_; //< logger
-    // segment_queue&               seg_queue_;     //< segmetn queue
+    const fsp_logger&            log_;           //< logger
     const mmap_file&             xml_mmap_;      //< mmap file with xml segment
     std::vector<segment_result>& results_;       //< result after parsing
     std::vector<segment_result>& errors_;        //< errors after parsing
     std::mutex&                  results_mutex_; //< mutex to lock results
     std::mutex&                  errors_mutex_;  //< mutex to lock erros
-                                                 //    std::atomic<bool>&           cancel_flag_;   //< are we interupted?
     const proc_data&             targets_;       //< targets to be processed
     UniqueXmlTextReader          reader_;        //< libxml2 reader
     const bool                   log_trace_ = log_.active(fsp::lvl_enum::trace);
