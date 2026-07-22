@@ -474,20 +474,20 @@ namespace fsp
   // // ============================================================================
   // // Convenience function
   // // ============================================================================
-  void xml_processor::process_one_file(const std::string&                  xml_path,
-                                       const doc_set_dscr&                 ds_dscr,
-                                       segment_pool&                       pool,
-                                       std::mutex&                         results_agg_mutex,
-                                       std::vector<segment_result>&        all_results,
-                                       std::vector<segment_result>&        all_errors,
-                                       std::atomic<bool>&                  has_error,
-                                       std::optional<error_info>&          first_error,
-                                       const processor_config&             config,
-                                       const fsp_logger&                   log, // Using auto to deduce the fsp::logger type
-                                       const gr_pool_t&                    gp,
-                                       [[maybe_unused]] std::latch&        gr_latch,
-                                       [[maybe_unused]] std::atomic<bool>& gr_loaded,
-                                       [[maybe_unused]] bool               have_grammar)
+  void xml_processor::process_one_doc(const std::string&                  xml_path,
+                                      const doc_set_dscr&                 ds_dscr,
+                                      segment_pool&                       pool,
+                                      std::mutex&                         results_agg_mutex,
+                                      std::vector<segment_result>&        all_results,
+                                      std::vector<segment_result>&        all_errors,
+                                      std::atomic<bool>&                  has_error,
+                                      std::optional<error_info>&          first_error,
+                                      const processor_config&             config,
+                                      const fsp_logger&                   log, // Using auto to deduce the fsp::logger type
+                                      const gr_pool_t&                    gp,
+                                      [[maybe_unused]] std::latch&        gr_latch,
+                                      [[maybe_unused]] std::atomic<bool>& gr_loaded,
+                                      [[maybe_unused]] bool               have_grammar)
   {
     log.info(fmt::format("Processing file: '{}'", xml_path));
     str_t xsd_path(ds_dscr.has_grammar() ? ds_dscr.grammar().path() : "");
@@ -526,93 +526,53 @@ namespace fsp
     }
   }
   // Helper static function for jthread execution
-  void xml_processor::file_worker_task(lock_queue<std::size_t>&   file_queue,
-                                       const doc_set_dscr&        ds_dscr,
-                                       segment_pool&              pool,
-                                       std::mutex&                results_agg_mutex,
-                                       vec_seg_result&            all_results,
-                                       vec_seg_result&            all_errors,
-                                       std::atomic<std::size_t>&  file_processed,
-                                       std::atomic<bool>&         has_error,
-                                       std::optional<error_info>& first_error,
-                                       std::size_t                worker_idx,
-                                       const std::string&         parent_log_name,
-                                       const processor_config&    config,
-                                       const fsp_logger&          log,
-                                       const gr_pool_t&           gp,
-                                       std::latch&                gr_latch,
-                                       std::atomic<bool>&         gr_loaded,
-                                       bool                       has_grammar)
+  void xml_processor::doc_worker(lock_queue<std::size_t>&   doc_queue,
+                                 const doc_set_dscr&        ds_dscr,
+                                 segment_pool&              pool,
+                                 std::mutex&                results_agg_mutex,
+                                 vec_seg_result&            all_results,
+                                 vec_seg_result&            all_errors,
+                                 std::atomic<std::size_t>&  file_processed,
+                                 std::atomic<bool>&         has_error,
+                                 std::optional<error_info>& first_error,
+                                 std::size_t                worker_idx,
+                                 const std::string&         parent_log_name,
+                                 const processor_config&    config,
+                                 const fsp_logger&          log,
+                                 const gr_pool_t&           gp,
+                                 std::latch&                gr_latch,
+                                 std::atomic<bool>&         gr_loaded,
+                                 bool                       has_grammar)
   {
     log.make_log_name(parent_log_name, fmt::format("doc<{:02}>", worker_idx));
     std::string xml_path;
     std::size_t xml_path_ndx;
     while (true)
     {
-      if (auto opt = file_queue.try_pop()) { xml_path_ndx = opt.value(); }
+      if (auto opt = doc_queue.try_pop()) { xml_path_ndx = opt.value(); }
       else
       { // the queu was initally empty and we need to wait for first doc or a signal to exit the waiting
         auto start = std::chrono::steady_clock::now();
-        if (file_queue.pop(xml_path_ndx) != queue_status::active) break;
+        if (doc_queue.pop(xml_path_ndx) != queue_status::active) break;
         auto end     = std::chrono::steady_clock::now();
         auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
         log.info(fmt::format("waiting time for new file {} ms.", elapsed));
       }
       xml_path = ds_dscr[xml_path_ndx].path();
-      process_one_file(xml_path,
-                       ds_dscr,
-                       pool,
-                       results_agg_mutex,
-                       all_results,
-                       all_errors,
-                       has_error,
-                       first_error,
-                       config,
-                       log,
-                       gp,
-                       gr_latch,
-                       gr_loaded,
-                       has_grammar);
-      // if (auto opt = file_queue.try_pop())
-      //   process_one_file(*opt,
-      //                    xsd_path,
-      //                    results_agg_mutex,
-      //                    all_results,
-      //                    all_errors,
-      //                    has_error,
-      //                    first_error,
-      //                    config,
-      //                    log,
-      //                    gp,
-      //                    gr_latch,
-      //                    gr_loaded,
-      //                    has_grammar);
-      // else
-      // {
-      //   {
-      //     if (file_queue.is_finished()) break; // end of job
-      //     auto start = std::chrono::steady_clock::now();
-      //     if (file_queue.pop(xml_path)) // new item arrived after while
-      //     {
-      //       auto end     = std::chrono::steady_clock::now();
-      //       auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
-      //       log.info(fmt::format("waiting time for new file {} ms.", elapsed));
-      //       process_one_file(xml_path,
-      //                        xsd_path,
-      //                        results_agg_mutex,
-      //                        all_results,
-      //                        all_errors,
-      //                        has_error,
-      //                        first_error,
-      //                        config,
-      //                        log,
-      //                        gp,
-      //                        gr_latch,
-      //                        gr_loaded,
-      //                        has_grammar);
-      //     }
-      //     else break; // processing finished
-      //   }
+      process_one_doc(xml_path,
+                      ds_dscr,
+                      pool,
+                      results_agg_mutex,
+                      all_results,
+                      all_errors,
+                      has_error,
+                      first_error,
+                      config,
+                      log,
+                      gp,
+                      gr_latch,
+                      gr_loaded,
+                      has_grammar);
     }
     ++file_processed;
   }

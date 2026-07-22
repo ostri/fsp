@@ -14,8 +14,6 @@ namespace fsp
     }
     for (const auto& file : xml_paths) ds_dscr_.add_document(file);
     ds_dscr_.set_grammar(xsd_path);
-    // constexpr const std::size_t kilo = 1024;
-    //  pool_.init(kilo * kilo);
     return process_files_internal();
   }
   void_result process_docs::process_files_internal()
@@ -50,23 +48,23 @@ namespace fsp
       "Processing {} XML files with {} parallel workers. XSD: {}", xml_paths.size(), num_parallel, ds_dscr_.empty() ? "none" : xsd_path));
 
     // Queue for file paths
-    lock_queue<std::size_t> file_queue;
+    lock_queue<std::size_t> doc_queue;
     for (auto ndx = 0UL; ndx < xml_paths.size(); ndx++)
     {
-      file_queue.push(ndx); // copy
+      doc_queue.push(ndx); // copy
     }
-    file_queue.set_finished(); // after all files are communicated we need to signal that this is all
+    doc_queue.set_finished(); // after all files are communicated we need to signal that this is all
     // otherwise program hangs on thread join
-    std::vector<std::jthread>   file_workers;
+    std::vector<std::jthread>   doc_workers;
     std::mutex                  results_agg_mutex;
     std::vector<segment_result> all_results;
     std::vector<segment_result> all_errors;
-    std::atomic<std::size_t>    file_processed{0};
+    std::atomic<std::size_t>    doc_processed{0};
     std::atomic<bool>           has_error{false};
     std::optional<error_info>   first_error;
 
     // Start workers
-    file_workers.reserve(num_parallel);
+    doc_workers.reserve(num_parallel);
     if (has_grammar)
     {
       gp_latch.wait(); // wait till the grammar is loaded
@@ -76,28 +74,28 @@ namespace fsp
     {
       auto log_name = log_.log_name();
       // create file_worker_task thread
-      file_workers.emplace_back(xml_processor::file_worker_task,
-                                std::ref(file_queue),
-                                std::cref(ds_dscr_),
-                                std::ref(pool_),
-                                std::ref(results_agg_mutex),
-                                std::ref(results_),
-                                std::ref(errors_),
-                                std::ref(file_processed),
-                                std::ref(has_error),
-                                std::ref(first_error),
-                                i,
-                                log_name,
-                                std::cref(cfg_),
-                                std::cref(log_),
-                                std::cref(gp),
-                                std::ref(gp_latch),
-                                std::ref(gp_loaded),
-                                has_grammar);
+      doc_workers.emplace_back(xml_processor::doc_worker,
+                               std::ref(doc_queue),
+                               std::cref(ds_dscr_),
+                               std::ref(pool_),
+                               std::ref(results_agg_mutex),
+                               std::ref(results_),
+                               std::ref(errors_),
+                               std::ref(doc_processed),
+                               std::ref(has_error),
+                               std::ref(first_error),
+                               i,
+                               log_name,
+                               std::cref(cfg_),
+                               std::cref(log_),
+                               std::cref(gp),
+                               std::ref(gp_latch),
+                               std::ref(gp_loaded),
+                               has_grammar);
     }
 
     // Wait for all workers
-    for (auto& w : file_workers)
+    for (auto& w : doc_workers)
       if (w.joinable()) w.join();
 
     if (has_error && first_error)
@@ -107,7 +105,7 @@ namespace fsp
     }
     auto sec  = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start_time_).count();
     auto diff = static_cast<double>(sec) / 1000.0; // NOLINT(readability-magic-numbers)
-    log_.info(fmt::format("Processed {} files successfully in {:.3f} sec.", file_processed.load(), diff));
+    log_.info(fmt::format("Processed {} files successfully in {:.3f} sec.", doc_processed.load(), diff));
     if (has_grammar) gp.reset();
     return {};
   }

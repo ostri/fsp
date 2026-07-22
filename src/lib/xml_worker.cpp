@@ -87,8 +87,6 @@ namespace fsp
         if (loc_res_nak.size() + 1 == loc_res_nak.capacity()) loc_res_nak.reserve(loc_res_nak.size() * 2);
         loc_res_nak.emplace_back(std::move(*res)); // prilagodi glede na tvoj error tip
       }
-
-      // pool_.release_slot(idx); // return slot for reuse
     }
     if (log_debug_)
     {
