@@ -6,7 +6,6 @@
 #include <spdlog/pattern_formatter.h>
 #include <string>
 #include <vector>
-#include <future>
 #include <optional>
 #include <fmt/format.h>
 #include <magic_enum.hpp>
@@ -88,12 +87,12 @@ namespace fsp
     // teče vzporedno s SAX parsingom. Če XSD ni podan, future se takoj razreši
     // z nullopt da ostala koda ne rabi ločevati med "validacija vklopljena" in
     // "validacija izklopljena".
-    std::shared_future<std::optional<error_info>> launch_validation_thread( //
-                                                                            //
-      const cstr_t&    f_xml_data,                                          // xml file contents
-      const gr_pool_t& gp,                                                  // grammar pool
-      std::string      xsd_path                                             // path to the grammar file
-    );
+    // std::shared_future<std::optional<error_info>> launch_validation_thread( //
+    //                                                                         //
+    //   const cstr_t&    f_xml_data,                                          // xml file contents
+    //   const gr_pool_t& gp,                                                  // grammar pool
+    //   std::string      xsd_path                                             // path to the grammar file
+    // );
 
     static std::optional<error_info> validate_xml_worker(const cstr_t&      f_xml_data,
                                                          const gr_pool_t&   gp,
@@ -101,16 +100,16 @@ namespace fsp
                                                          const fsp_logger&  logger,
                                                          const std::string& parent_log_name);
 
-    static void process_one_doc(const std::string&           xml_path,
-                                const doc_set_dscr&          ds_dscr,
-                                segment_pool&                pool,
-                                std::mutex&                  results_agg_mutex,
-                                std::vector<segment_result>& all_results,
-                                std::vector<segment_result>& all_errors,
-                                std::atomic<bool>&           has_error,
-                                std::optional<error_info>&   first_error,
-                                const processor_config&      config,
-                                const fsp_logger&            log // Using auto to deduce the fsp::logger type
+    static void process_one_doc(std::size_t                          xml_path_ndx,
+                                [[maybe_unused]] const doc_set_dscr& ds_dscr,
+                                segment_pool&                        pool,
+                                std::mutex&                          results_agg_mutex,
+                                std::vector<segment_result>&         all_results,
+                                std::vector<segment_result>&         all_errors,
+                                std::atomic<bool>&                   has_error,
+                                std::optional<error_info>&           first_error,
+                                const processor_config&              config,
+                                const fsp_logger&                    log // Using auto to deduce the fsp::logger type
     );
     void        save_stats();
     stats_t     stats() const { return stats_; }

@@ -6,7 +6,6 @@
 #include "xpath_helpers.hpp"
 #include <chrono>
 #include <fmt/format.h>
-#include <functional>
 #include <magic_enum.hpp>
 #include <spdlog/spdlog.h>
 #include <thread>
@@ -192,29 +191,29 @@ namespace fsp
   // ki jih potrebuje, saj mmap ostaja živeti v klicatelju (process_from_buffer),
   // a nit ne sme imeti surovih referenc nanj (lifetime ni garantiran).
   // xml_data/xsd_data sta raw pointer-ja na mmap ki živita dlje od niti — ok.
-  std::shared_future<std::optional<error_info>> xml_processor::launch_validation_thread( //
-    const cstr_t&    f_xml_data,
-    const gr_pool_t& gp,      // xml file contents
-    std::string      xsd_path // path to the grammar file
-  )
-  {
-    // Kopiramo podatke za nit
-    auto xml_data = f_xml_data; // kopija
-    // auto xsd_data = f_xsd_data; // kopija
-    auto path = std::move(xsd_path);
+  // std::shared_future<std::optional<error_info>> xml_processor::launch_validation_thread( //
+  //   const cstr_t&    f_xml_data,
+  //   const gr_pool_t& gp,      // xml file contents
+  //   std::string      xsd_path // path to the grammar file
+  // )
+  // {
+  //   // Kopiramo podatke za nit
+  //   auto xml_data = f_xml_data; // kopija
+  //   // auto xsd_data = f_xsd_data; // kopija
+  //   auto path = std::move(xsd_path);
 
-    // Ustvarimo async nalogo s statično funkcijo
-    auto future = std::async(std::launch::async,
-                             validate_xml_worker,
-                             xml_data,                   // must be by value
-                             std::cref(gp),              // referenca na kopijo
-                             std::move(path),            // premaknemo path
-                             std::cref(log_),            // referenca na logger
-                             std::cref(parent_log_name_) // referenca na parent log name
-    );
-    // Vrnemo shared_future
-    return future.share();
-  }
+  //   // Ustvarimo async nalogo s statično funkcijo
+  //   auto future = std::async(std::launch::async,
+  //                            validate_xml_worker,
+  //                            xml_data,                   // must be by value
+  //                            std::cref(gp),              // referenca na kopijo
+  //                            std::move(path),            // premaknemo path
+  //                            std::cref(log_),            // referenca na logger
+  //                            std::cref(parent_log_name_) // referenca na parent log name
+  //   );
+  //   // Vrnemo shared_future
+  //   return future.share();
+  // }
 
   void_result xml_processor::start_workers()
   {
@@ -474,7 +473,7 @@ namespace fsp
   // // ============================================================================
   // // Convenience function
   // // ============================================================================
-  void xml_processor::process_one_doc(const std::string&                   xml_path,
+  void xml_processor::process_one_doc(std::size_t                          xml_path_ndx,
                                       [[maybe_unused]] const doc_set_dscr& ds_dscr,
                                       segment_pool&                        pool,
                                       std::mutex&                          results_agg_mutex,
@@ -486,11 +485,12 @@ namespace fsp
                                       const fsp_logger&                    log // Using auto to deduce the fsp::logger type
   )
   {
+    const auto xml_path = ds_dscr[xml_path_ndx].path();
     log.info(fmt::format("Processing file: '{}'", xml_path));
     // str_t xsd_path(ds_dscr.has_grammar() ? ds_dscr.grammar().path() : "");
     //  Each file gets its own processor instance to avoid state conflicts
     xml_processor file_proc(config, log.log_name(), pool);
-    auto          res = file_proc.process_file(xml_path);
+    auto          res = file_proc.process_file(std::string(xml_path)); // FIME OS3 use file index instead
 
     if (! res)
     {
@@ -552,7 +552,7 @@ namespace fsp
         log.info(fmt::format("waiting time for new file {} µs.", elapsed));
       }
       xml_path = ds_dscr[xml_path_ndx].path(); // document to be processed
-      process_one_doc(xml_path, ds_dscr, pool, results_agg_mutex, all_results, all_errors, has_error, first_error, config, log);
+      process_one_doc(xml_path_ndx, ds_dscr, pool, results_agg_mutex, all_results, all_errors, has_error, first_error, config, log);
     }
     ++file_processed;
     if (doc_queue.is_aborted()) log.warn(fmt::format("doc_worker {}/{} aborted.", log.log_name(), worker_idx));
