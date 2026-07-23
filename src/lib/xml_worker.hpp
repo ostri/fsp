@@ -1,6 +1,7 @@
 #pragma once
 
 #include "lock_queue.hpp"
+#include "parsing_util.hpp"
 #include "segment_result.hpp"
 #include "xml_node.hpp"
 #include "logger.hpp"
