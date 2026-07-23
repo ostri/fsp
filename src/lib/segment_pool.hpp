@@ -16,8 +16,8 @@ namespace fsp
   public:
     // segment_pool();
     explicit segment_pool(const fsp_logger& log, std::size_t no_of_slots);
-    void                      init(std::size_t capacity = 1024UL * 1024UL * 8UL); // NOLINT(readability-magic-numbers)
-    std::size_t               acquire_slot();                                     // get free slot (blocks if none)
+    void                      init(std::size_t capacity = 1024UL * 1024UL); // NOLINT(readability-magic-numbers)
+    std::size_t               acquire_slot();                               // get free slot (blocks if none)
     void                      push_ready(std::size_t idx);
     auto                      try_pop_ready();
     [[nodiscard]] std::size_t size() const noexcept;
@@ -30,7 +30,7 @@ namespace fsp
     queue_status pop_segment_ndx(std::size_t& ndx) { return ready_queue_.pop(ndx); }
     void         set_segment(std::size_t ndx, const xml_segment& seg);
     void         set_result(std::size_t ndx, const segment_result& seg_r);
-    xml_segment  retrieve_segment(std::size_t idx);
+    xml_segment  retrieve_segment(std::size_t ndx);
     std::size_t  ready_queue_size() const { return ready_queue_.size(); }
   private:
     const fsp_logger&           log_;
@@ -91,13 +91,23 @@ namespace fsp
    * @param idx index of the segment in the segment pool
    * @return xml_segment&
    */
-  inline xml_segment segment_pool::retrieve_segment(std::size_t idx)
+  inline xml_segment segment_pool::retrieve_segment(std::size_t ndx)
   {
-    results_[idx]   = segment_result{0, -1}; // FIXME ostri check whether we need to have segmetns and results in parallel
-    xml_segment seg = std::move(segments_.at(idx));
-    free_queue_.push(idx);
+    results_[ndx] = segment_result{0, -1}; // FIXME ostri check whether we need to have segmetns and results in parallel
+                                           //    log_.debug(fmt::format("retrieve before: idx: {} {}", ndx, segments_[ndx].dump()));
+    xml_segment seg(segments_.at(ndx));    // std::move(segments_.at(idx));
+    if (seg.subtree_type() < 0 || seg.length() == 0)
+      log_.critical(fmt::format("Retrieved invalid segment from slot {} {})", ndx, seg.dump()));
+    //    log_.debug(fmt::format("retrieve after:  idx: {} {}", ndx, seg.dump()));
+    //    segments_.at(ndx) = xml_segment{}; // default prazen
+    free_queue_.push(ndx);
     return seg; // with move the segment slot is also reinitiaized
   }
-  inline void segment_pool::set_segment(std::size_t ndx, const xml_segment& seg) { segments_.at(ndx) = seg; }
+  inline void segment_pool::set_segment(std::size_t ndx, const xml_segment& seg)
+  {
+    //    log_.debug(fmt::format("before set segment: ndx: {} {}", ndx, seg.dump()));
+    segments_.at(ndx) = seg;
+    //    log_.debug(fmt::format("after set segment:  ndx: {} {}", ndx, segments_[ndx].dump()));
+  }
   inline void segment_pool::set_result(std::size_t ndx, const segment_result& seg_r) { results_.at(ndx) = seg_r; }
 } // namespace fsp

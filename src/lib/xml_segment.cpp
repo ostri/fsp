@@ -1,4 +1,5 @@
 #include "xml_segment.hpp"
+
 #include <utility>
 
 namespace fsp
@@ -137,20 +138,26 @@ namespace fsp
     result.push_back('>');
     // --- xml element content ---
     result.append(tree_content);
-    // --- xml element closing tag
-    result.append("</");
-    result.append(qname);
-    result.push_back('>');
+    // --- xml element closing tag is already at the end of tree_content
+
     return result;
   }
   [[nodiscard]] std::string xml_segment::dump(int offs) const
   {
-    std::string str = fmt::format("{}id: {} subtree type: {} offset: {} length: {}", //
-                                  std::string(offs, ' '),
-                                  id_,
-                                  subtree_type_,
-                                  offset_,
-                                  length_);
+    x_str       ns(ns_);
+    x_str       attrs(attrs_);
+    auto        leading = std::string(offs, ' ');
+    std::string str     = fmt::format( //
+      R"({0}id: {1} subtree type: {2} offset: {3} length: {4}
+{0}ns:    '{5}'
+{0}attrs: '{6}')",
+      leading,
+      id_,
+      subtree_type_,
+      offset_,
+      length_,
+      ns.to_string_view(),
+      attrs.to_string_view());
     return str;
   }
   [[nodiscard]] std::string xml_segment::dump_all(std::string_view base, int offs) const //
@@ -168,4 +175,43 @@ namespace fsp
                        subtree_str(view(mmap_base)));
   }
   std::size_t xml_segment::offset() const { return offset_; }
+  xml_segment::xml_segment(const xml_segment& other) = default;
+
+  xml_segment::xml_segment(xml_segment&& other) noexcept
+  : id_(other.id_)
+  , subtree_type_(other.subtree_type_)
+  , offset_(other.offset_)
+  , length_(other.length_)
+  , ns_(std::move(other.ns_))
+  , attrs_(std::move(other.attrs_))
+  {
+  }
+
+  xml_segment& xml_segment::operator=(const xml_segment& other)
+  {
+    if (this != &other)
+    {
+      id_           = other.id_;
+      subtree_type_ = other.subtree_type_;
+      offset_       = other.offset_;
+      length_       = other.length_;
+      ns_           = other.ns_;
+      attrs_        = other.attrs_;
+    }
+    return *this;
+  }
+
+  xml_segment& xml_segment::operator=(xml_segment&& other) noexcept
+  {
+    if (this != &other)
+    {
+      id_           = other.id_;
+      subtree_type_ = other.subtree_type_;
+      offset_       = other.offset_;
+      length_       = other.length_;
+      ns_           = std::move(other.ns_);
+      attrs_        = std::move(other.attrs_);
+    }
+    return *this;
+  }
 } // namespace fsp

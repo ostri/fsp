@@ -11,7 +11,6 @@
 #include <span>
 #include <bit>
 #include <cstdint>
-#include <iostream>
 namespace fsp
 {
   using cstr_t = std::string_view;
@@ -39,7 +38,8 @@ namespace fsp
     bool                                  log_info_  = log_.active(lvl_enum::info);
     bool                                  log_warn_  = log_.active(lvl_enum::warn);
     bool                                  log_error_ = log_.active(lvl_enum::err);
-    bool log_crit_ = log_.active(lvl_enum::crit); // NOLINTEND(misc-non-private-member-variables-in-classes)
+    bool                                  log_crit_  = log_.active(lvl_enum::crit);
+    // NOLINTEND(misc-non-private-member-variables-in-classes)
 
     explicit sax_ctx(const fsp_logger& log);
     void reset_for_reuse(const xpath_set& t);
@@ -121,8 +121,13 @@ namespace fsp
     handler_.startElementNs = &on_start;
     handler_.endElementNs   = &on_end;
     handler_.characters     = &on_chars;
-    std::cerr << ">>> SAX handler registered: startElementNs = " << reinterpret_cast<void*>(handler_.startElementNs) << '\n';
-    ctxt_ = xmlCreatePushParserCtxt(&handler_, &ctx_, nullptr, 0, nullptr);
+    ctxt_                   = xmlCreatePushParserCtxt(&handler_, &ctx_, nullptr, 0, nullptr);
+    if (ctxt_ == nullptr) [[unlikely]]
+    {
+      const auto* const msg = "internal: [CTOR] FAILED to create push parser context!";
+      log_.critical(msg);
+      throw std::runtime_error(msg);
+    }
     // NOLINTNEXTLINE(hicpp-signed-bitwise)
     xmlCtxtUseOptions(ctxt_, XML_PARSE_NOERROR | XML_PARSE_NOWARNING | XML_PARSE_NONET);
     ctx_.ctxt = ctxt_;
@@ -143,17 +148,15 @@ namespace fsp
   inline segment_sax::result_t segment_sax::exec(std::string_view xml_data, const xpath_set& targets)
   {
     ctx_.reset_for_reuse(targets);
-    // xmlCtxtResetPush perserves allocated internal structures (dict, ns tabele ...)
-    // and only set new xml document to be parsed.
     xmlCtxtResetPush(ctxt_, xml_data.data(), static_cast<int>(xml_data.size()), nullptr, nullptr);
-    xmlClearParserCtxt(ctxt_);
-    xmlCtxtUseOptions(ctxt_, XML_PARSE_NOERROR | XML_PARSE_NOWARNING | XML_PARSE_NONET | XML_PARSE_NSCLEAN); // NOLINT(hicpp-signed-bitwise)
+    xmlCtxtUseOptions(ctxt_,
+                      XML_PARSE_NOERROR | XML_PARSE_NOWARNING | XML_PARSE_NONET); // NOLINT(hicpp-signed-bitwise)
     ctx_.ctxt = ctxt_; // xmlCtxtResetPush can change internal structures. realign.
     xmlParseChunk(ctxt_, xml_data.data(), static_cast<int>(xml_data.size()), 1);
     if (log_debug_)
     {
       auto  ndx = 0UL;
-      str_t msg = "\n";
+      str_t msg = "values:\n";
       for (auto& result : ctx_.results)
       {
         str_t msg_el;
@@ -165,11 +168,10 @@ namespace fsp
         // remove leading " ,"
         if (msg_el.size() > 2) msg_el = msg_el.substr(2, msg_el.size() - 2);
         msg += fmt::format("{:15} : [{}]\n", (*ctx_.targets)[ndx++].name(), msg_el);
-        log_.trace(msg);
       }
       log_.debug(msg);
     }
-    return ctx_.results; // brez move — caller mora podatke porabiti/kopirati pred naslednjim exec(
+    return ctx_.results;
   }
 
   // Pomožna funkcija za iteracijo čez nastavljene bite
@@ -239,7 +241,6 @@ namespace fsp
                                     int /*nb_defaulted*/,
                                     const xmlChar** attributes)
   {
-    std::cerr << "on_start called! *****************************'" << localname << "'\n";
     auto* ctx = static_cast<sax_ctx*>(user_data);
     if (ctx->stop_parsing) [[unlikely]]
       return;
@@ -247,7 +248,7 @@ namespace fsp
     cstr_t      safe_uri = resolve_uri(prefix, URI, nb_namespaces, namespaces);
     if (ctx->log_trace_)
     {
-      ctx->log_.trace(fmt::format("-->tag: '{}' uri: '{}' prefix: '{}'",
+      ctx->log_.trace(fmt::format("on_start: {:15} uri: {} prefix: {}",
                                   safe_tag,
                                   safe_uri,
                                   prefix != nullptr ? reinterpret_cast<const char*>(prefix) : "(no prefix)"));

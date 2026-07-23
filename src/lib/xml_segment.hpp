@@ -19,6 +19,12 @@ namespace fsp
                 str_XMLCh_t ns,           // set of ns as a string which belongs to top level tag
                 str_XMLCh_t attrs         // set of attribute values which belongs to top level tag
     );
+    ~xml_segment() = default;
+    xml_segment(const xml_segment&);
+    xml_segment(xml_segment&&) noexcept;
+    xml_segment& operator=(const xml_segment&);
+    xml_segment& operator=(xml_segment&&) noexcept;
+
     [[nodiscard]] std::string_view view(const std::byte* mmap_base = nullptr) const noexcept;
 
     [[nodiscard]] bool        empty() const noexcept;
@@ -27,21 +33,20 @@ namespace fsp
     [[nodiscard]] std::size_t offset() const;
     [[nodiscard]] std::size_t length() const;
     // [[nodiscard]] str_XMLCh_t prefix() const;
-    [[nodiscard]] std::string subtree_str(std::string_view tree_content) const;
-    [[nodiscard]] std::string dump(int offs = 0) const;
-    [[nodiscard]] std::string dump_all(std::string_view base, int offs = 0) const;
-    [[nodiscard]] std::string dump_all(const std::byte* mmap_base = nullptr, int offs = 0) const;
-    [[nodiscard]] cstr_t      extract_qname_from_offset(std::string_view base) const;
+    [[nodiscard]] std::string        subtree_str(std::string_view tree_content) const;
+    [[nodiscard]] std::string        dump(int offs = 0) const;
+    [[nodiscard]] std::string        dump_all(std::string_view base, int offs = 0) const;
+    [[nodiscard]] std::string        dump_all(const std::byte* mmap_base = nullptr, int offs = 0) const;
+    [[nodiscard]] cstr_t             extract_qname_from_offset(std::string_view base) const;
+    [[nodiscard]] const str_XMLCh_t& ns_raw() const noexcept { return ns_; }
+    [[nodiscard]] const str_XMLCh_t& attrs_raw() const noexcept { return attrs_; }
   private:
     std::size_t id_           = 0;  // unique id of the segmetn
     int         subtree_type_ = -1; // subtree type, used later for data extraction (index of the xpath rule)
     std::size_t offset_       = 0;  // byte offset inside the buffer (segment starts at buffer[offset])
     std::size_t length_       = 0;  // length of the subtree / segmetn in bytes
-    // str_XMLCh_t prefix_;            // opening tag with inherited namespaces, tag namespaces and tag attributes
-    str_XMLCh_t ns_;    // namespaces and attribute values of the top tag
-    str_XMLCh_t attrs_; // namespaces and attribute values of the top tag
-    // x_str       ln_;    // top tag localname
-    // x_str       uri_;   // top tag uri
+    str_XMLCh_t ns_;                // namespaces values of the top tag (utf-16)
+    str_XMLCh_t attrs_;             // attribute values of the top tag (utf-16)
   };
 
 } // namespace fsp

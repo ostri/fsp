@@ -252,7 +252,9 @@ namespace fsp
 
         if (log_trace_) [[unlikely]]
         {
-          log_.trace(fmt::format("tag:'{}' ns:'{}' offset:{} ns list:'{}' attr list: '{}'",
+          log_.trace(fmt::format(R"(tag:'{}' ns:'{}' offset:{}
+  ns:'{}'
+  attr: '{}')",
                                  x_str(localname).to_string_view(),
                                  x_str(uri).to_string_view(),
                                  frag_start_offset_,
@@ -296,16 +298,15 @@ namespace fsp
         std::size_t end_offset = parser_->getSrcOffset();
         std::size_t length     = end_offset - frag_start_offset_;
         std::size_t idx        = pool_.acquire_slot();
-        pool_.set_segment(idx, xml_segment(counter_, seg_type_, frag_start_offset_, length, std::move(ns_), std::move(attr_)));
-        pool_.push_ready(idx);
+        auto        seg        = xml_segment(counter_++, seg_type_, frag_start_offset_, length, ns_, attr_);
         if (log_debug_) [[unlikely]]
         {
-          const auto& seg = pool_.retrieve_segment(idx);
-          log_.debug(fmt::format("pushing to queue: {} {}", x_str(qname).to_string_view(), seg.dump()));
+          log_.debug(fmt::format("pushing to queue: '{}' '{}'", x_str(localname).to_string_view(), seg.dump()));
           log_.trace(fmt::format("{}", seg.dump_all(doc_)));
         }
+        pool_.set_segment(idx, seg);
+        pool_.push_ready(idx);
 
-        counter_++;
         frag_depth_ = -1; // we are outside of capturing
         seg_type_   = -1; // undefined segment type
         // restore old active xpath mask

@@ -1,4 +1,5 @@
 #include "xml_worker.hpp"
+#include "parsing_util.hpp"
 #include "segment_result.hpp"
 #include "x_str.hpp"
 #include "xpath_helpers.hpp"
@@ -116,13 +117,12 @@ namespace fsp
   result<segment_result> xml_worker::process_segment(const xml_segment& seg)
   {
     auto t0 = std::chrono::steady_clock::now();
-    // const bool log_debug = log_.active(fsp::lvl_enum::debug);
     try
     {
-      if (log_debug_) { log_.debug(fmt::format("segment started: {}", seg.dump())); }
+      if (log_debug_) { log_.debug(fmt::format("process segment: {}", seg.dump())); }
       auto view     = seg.view(xml_mmap_.data()); // just segment contents
       auto tmp_view = seg.subtree_str(view);      // contents + opening and closing tag
-      if (log_trace_) log_.trace(fmt::format("seg: {}: '{}'", seg.id(), tmp_view));
+      if (log_trace_) log_.trace(fmt::format("seg: {}: finalized doc:\n'{}'", seg.id(), tmp_view));
       auto r = sax_->exec(tmp_view, targets_.xpaths[seg.subtree_type()]);
 
       if (! r.empty())
@@ -194,7 +194,7 @@ namespace fsp
       if (log_debug_)
       {
         log_.debug(
-          fmt::format("++seg:{:5} {}name: {} tag:'{}' value: {}", seg.id(), indent(), value_ndx_, tree_stack_.top().node.tag(), value));
+          fmt::format("++seg:{:5} {}name: {} tag: {} value: {}", seg.id(), indent(), value_ndx_, tree_stack_.top().node.tag(), value));
       }
     }
     else if (log_debug_) { log_.debug(fmt::format("--seg:{:5} {} tag: {} no value", seg.id(), indent(), tree_stack_.top().node.tag())); }
