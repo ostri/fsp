@@ -101,15 +101,15 @@ namespace fsp
     mutable std::mutex                      errors_mutex_;
     std::atomic<bool>                       success_{false};
     std::vector<std::jthread>               workers_;
-    s_clock                                 start_time_;
-    str_t                                   parent_log_name_;
-    bool                                    log_trace_ = log_.active(lvl_enum::trace);
-    bool                                    log_debug_ = log_.active(lvl_enum::debug);
-    bool                                    log_info_  = log_.active(lvl_enum::info);
-    bool                                    log_warn_  = log_.active(lvl_enum::warn);
-    bool                                    log_error_ = log_.active(lvl_enum::err);
-    bool                                    log_crit_  = log_.active(lvl_enum::crit);
-    stats_t                                 stats_; // processing statistics
+    // s_clock                                 start_time_;
+    str_t   parent_log_name_;
+    bool    log_trace_ = log_.active(lvl_enum::trace);
+    bool    log_debug_ = log_.active(lvl_enum::debug);
+    bool    log_info_  = log_.active(lvl_enum::info);
+    bool    log_warn_  = log_.active(lvl_enum::warn);
+    bool    log_error_ = log_.active(lvl_enum::err);
+    bool    log_crit_  = log_.active(lvl_enum::crit);
+    stats_t stats_; // processing statistics
   };
   /////////////////////////////////////////////////////////////////////////////////////////////
   inline bool           xml_processor::is_successful() const { return success_.load(); }

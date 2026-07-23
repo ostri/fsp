@@ -240,7 +240,7 @@ namespace fsp
   }
   void xml_processor::save_stats()
   {
-    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start_time_).count();
+    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start_).count();
     stats_  = stats_t{
       .successful_doc      = 0,
       .failed_doc          = 0,
