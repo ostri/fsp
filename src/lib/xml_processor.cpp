@@ -311,7 +311,7 @@ namespace fsp
                                  const processor_config&    config,
                                  const fsp_logger&          log)
   {
-    log.make_log_name(parent_log_name, fmt::format("doc<{:02}>", worker_idx));
+    log.make_log_name(parent_log_name, fmt::format("doc-{:02}", worker_idx));
     std::size_t   doc_ndx;
     xml_processor doc(config, parent_log_name, seg_pool, ds_dscr);
     while (true) // loop the documents list
