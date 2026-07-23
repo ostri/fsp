@@ -31,6 +31,21 @@ namespace fsp
     std::expected<T, queue_status> try_pop();
     [[nodiscard]] std::ptrdiff_t   size_approx() const noexcept; //< lock-free hint, no mutex; used by role-picking hot path
     [[nodiscard]] bool             drained() const noexcept;     //< finished AND empty -> permanently done, no more work will ever appear
+    template <std::ranges::input_range R>
+    void push_range(R&& range)
+    {
+      std::size_t count = 0;
+      {
+        std::lock_guard lock(mtx_);
+        for (auto&& item : std::forward<R>(range))
+        {
+          q_.push(std::forward<decltype(item)>(item));
+          ++count;
+        }
+        size_approx_.fetch_add(static_cast<std::ptrdiff_t>(count), std::memory_order_relaxed);
+      }
+      if (count > 0) { cv_.notify_all(); }
+    }
   private:
     std::queue<T>               q_;              //< queue to store values
     mutable std::mutex          mtx_;            //< mutex to protect the pop/push operations

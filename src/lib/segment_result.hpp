@@ -14,15 +14,14 @@ namespace fsp
   struct segment_result
   {
   public:
+    segment_result() = default;
     segment_result(std::size_t seg_id, int seg_type);
     segment_result(std::size_t seg_id, int seg_type, xpath_result values);
     [[nodiscard]] std::size_t         seg_id() const;
     [[nodiscard]] int                 seg_type() const;
     [[nodiscard]] const xpath_result& values() const;
     xpath_result&                     values();
-    // [[nodiscard]] cstr_t              values(cstr_t key) const;
-    // [[nodiscard]] cstr_t              values(std::size_t key, std::size_t ndx = 0) const;
-    std::string dump(int offs = 0);
+    std::string                       dump(int offs = 0);
   private:
     std::size_t  seg_id_   = 0;  // unique id of the segment
     int          seg_type_ = -1; // xpath index that was used to partiion the xml to get this subtree
