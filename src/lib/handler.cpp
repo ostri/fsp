@@ -183,33 +183,33 @@ namespace fsp
   // ============================================================================
   // Helper inline methods (add declarations to handler.hpp)
   // ============================================================================
-  inline void Handler::check_validation_status()
-  {
-    // [DODANO] Polling preverjanje validacijske napake iz vzporedne niti.
-    // Izvede se vsakih 1024 elementov (bitna maska je cenejša od modulo).
-    // wait_for(0) je neblokirajoč — vrne immediately z deferred/timeout/ready.
-    // Ob napaki vržemo SAXParseException: to je edini način za prekinitev
-    // Xerces SAX parsinga iz ContentHandler callbacka. Izjema se propagira
-    // skozi parser_->parse() in jo ujame process_from_buffer().
-    constexpr const auto every = 524287U - 1U; // 2**15
-    if ((element_counter_++ & every) == 0 && val_future_.valid())
-    {
-      if (val_future_.wait_for(std::chrono::seconds(0)) == std::future_status::ready)
-      {
-        const auto& val_result = val_future_.get();
-        if (val_result.has_value())
-        {
-          if (log_debug_) [[unlikely]]
-            log_.debug("Handler: validacijska napaka zaznana, prekinjam SAX parsing.");
-          // Vržemo SAXParseException — Xerces jo ujame interno in ustavi parsing.
-          // Sporočilo prenesemo naprej; row/col ni znan na tej točki (0,0).
-          // TODO: ostri - ostri - preveri kako prenesemo informacijo
-          // NOLINTNEXTLINE(hicpp-exception-baseclass, cert-err60-cpp)
-          throw xercesc::SAXParseException(x_str(val_result->message()).c_str(), nullptr, nullptr, 0, 0);
-        }
-      }
-    }
-  }
+  // inline void Handler::check_validation_status()
+  // {
+  //   // [DODANO] Polling preverjanje validacijske napake iz vzporedne niti.
+  //   // Izvede se vsakih 1024 elementov (bitna maska je cenejša od modulo).
+  //   // wait_for(0) je neblokirajoč — vrne immediately z deferred/timeout/ready.
+  //   // Ob napaki vržemo SAXParseException: to je edini način za prekinitev
+  //   // Xerces SAX parsinga iz ContentHandler callbacka. Izjema se propagira
+  //   // skozi parser_->parse() in jo ujame process_from_buffer().
+  //   constexpr const auto every = 524287U - 1U; // 2**15
+  //   if ((element_counter_++ & every) == 0 && val_future_.valid())
+  //   {
+  //     if (val_future_.wait_for(std::chrono::seconds(0)) == std::future_status::ready)
+  //     {
+  //       const auto& val_result = val_future_.get();
+  //       if (val_result.has_value())
+  //       {
+  //         if (log_debug_) [[unlikely]]
+  //           log_.debug("Handler: validacijska napaka zaznana, prekinjam SAX parsing.");
+  //         // Vržemo SAXParseException — Xerces jo ujame interno in ustavi parsing.
+  //         // Sporočilo prenesemo naprej; row/col ni znan na tej točki (0,0).
+  //         // TODO: ostri - ostri - preveri kako prenesemo informacijo
+  //         // NOLINTNEXTLINE(hicpp-exception-baseclass, cert-err60-cpp)
+  //         throw xercesc::SAXParseException(x_str(val_result->message()).c_str(), nullptr, nullptr, 0, 0);
+  //       }
+  //     }
+  //   }
+  // }
 
   inline void Handler::check_xpath_matches( //
     const XMLCh* uri,
@@ -272,7 +272,7 @@ namespace fsp
                              [[maybe_unused]] const XMLCh* qname,
                              const xercesc::Attributes&    attrs)
   {
-    check_validation_status();
+    // check_validation_status();
     open_ns_scope();
     doc_depth_++;
     if (log_debug_) [[unlikely]]

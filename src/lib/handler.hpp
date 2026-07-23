@@ -63,7 +63,7 @@ namespace fsp
   private: // methods
     [[noreturn]] void logic_error(const char* msg) const;
     // --- helper methods ---------
-    void check_validation_status();
+    // void check_validation_status();
     void check_xpath_matches(const XMLCh* uri,
                              const XMLCh* localname,
                              //                             const XMLCh*               qname, // it is not used to make it faster
