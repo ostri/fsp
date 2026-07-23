@@ -264,8 +264,8 @@ namespace fsp
     const auto xml_path = ds_dscr_[doc_ndx_].path();
     log_.info(fmt::format("Processing file: '{}'", xml_path));
     //  Each file gets its own processor instance to avoid state conflicts
-    xml_processor file_proc(cfg_, log_.log_name(), seg_pool_, ds_dscr_);
-    auto          res = file_proc.process_from_buffer(doc_ndx_);
+    // xml_processor file_proc(cfg_, log_.log_name(), seg_pool_, ds_dscr_);
+    auto res = process_from_buffer(doc_ndx_);
     if (! res)
     {
       auto err = res.error();
@@ -281,19 +281,19 @@ namespace fsp
     }
     else
     {
-      file_proc.save_stats(); // save current stratistics
-      auto fr = file_proc.move_results();
-      auto fe = file_proc.move_errors();
+      save_stats(); // save current stratistics
+      auto fr = move_results();
+      auto fe = move_errors();
       {
         std::lock_guard<std::mutex> lock(results_agg_mutex);
         all_results.append_range(fr | std::views::as_rvalue);
         all_errors.append_range(fe | std::views::as_rvalue);
       }
-      auto stats = file_proc.stats();
+      auto tmp_stats = stats();
       log_.info(fmt::format("File '{}' success (ok: {} err:{})", //
                             xml_path,
-                            stats.successful_segments,
-                            stats.failed_segments));
+                            tmp_stats.successful_segments,
+                            tmp_stats.failed_segments));
     }
   }
   // Helper static function for jthread execution
