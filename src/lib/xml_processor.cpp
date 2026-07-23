@@ -94,125 +94,6 @@ namespace fsp
       return std::unexpected(err);
     }
   }
-  // ============================================================================
-  // Validation thread
-  // ============================================================================
-  // Statična funkcija, ki izvaja validacijo
-  // std::optional<error_info> xml_processor::validate_xml_worker(const cstr_t&      f_xml_data,
-  //                                                              const gr_pool_t&   gp,
-  //                                                              std::string        xsd_path,
-  //                                                              const fsp_logger&  logger,
-  //                                                              const std::string& parent_log_name)
-  // {
-  //   auto        start = std::chrono::steady_clock::now();
-  //   const auto& log   = logger;
-  //   log.make_log_name(parent_log_name, "valid");
-
-  //   if (log.active(info)) log.info(fmt::format("Validation started. file: xsd:{}", xsd_path));
-
-  //   try
-  //   {
-  //     // Ustvarimo lasten parser, ker ni reentrant
-  //     std::unique_ptr<xercesc::SAX2XMLReader> vparser(xercesc::XMLReaderFactory::createXMLReader( //
-  //       xercesc::XMLPlatformUtils::fgMemoryManager,
-  //       gp.get()));
-
-  //     // Konfiguracija parserja
-  //     // NOLINTBEGIN(hicpp-no-array-decay)
-  //     vparser->setFeature(xercesc::XMLUni::fgSAX2CoreValidation, true);
-  //     vparser->setFeature(xercesc::XMLUni::fgXercesSchema, ! xsd_path.empty());
-  //     vparser->setFeature(xercesc::XMLUni::fgXercesValidationErrorAsFatal, true);
-  //     vparser->setFeature(xercesc::XMLUni::fgXercesUseCachedGrammarInParse, true);
-  //     vparser->setFeature(xercesc::XMLUni::fgSAX2CoreNameSpaces, true);
-  //     vparser->setFeature(xercesc::XMLUni::fgXercesSchemaFullChecking, false);
-  //     vparser->setFeature(xercesc::XMLUni::fgSAX2CoreNameSpacePrefixes, false);
-  //     vparser->setFeature(xercesc::XMLUni::fgXercesCalculateSrcOfs, false);
-  //     vparser->setFeature(xercesc::XMLUni::fgXercesCacheGrammarFromParse, false);
-  //     // NOLINTEND(hicpp-no-array-decay)
-
-  //     // Naložimo XSD shemo v parser
-  //     // mem_buf_holder xsd_holder(f_xsd_data.data(), f_xsd_data.size(), xsd_path, log);
-  //     // if (xsd_holder.source() != nullptr) vparser->loadGrammar(*xsd_holder.source(), xercesc::Grammar::SchemaGrammarType, true);
-
-  //     // Handler za napake, ki vrže izjemo
-  //     struct ThrowingErrorHandler : public xercesc::DefaultHandler
-  //     { // NOLINTBEGIN(hicpp-exception-baseclass)
-  //       void error(const xercesc::SAXParseException& e) override { throw e; }
-  //       void fatalError(const xercesc::SAXParseException& e) override { throw e; }
-  //       // NOLINTEND(hicpp-exception-baseclass)
-  //     } err_handler;
-  //     vparser->setErrorHandler(&err_handler);
-
-  //     // Parsiranje XML
-  //     xercesc::MemBufInputSource src(
-  //       reinterpret_cast<const XMLByte*>(f_xml_data.data()), static_cast<XMLSize_t>(f_xml_data.size()), "xml_validation", false);
-  //     vparser->parse(src);
-
-  //     if (log.active(fsp::lvl_enum::info))
-  //     {
-  //       auto end      = std::chrono::steady_clock::now();
-  //       auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
-  //       log.info(fmt::format("Validation finished in {} ms {} bytes.", duration.count(), f_xml_data.size()));
-  //     }
-  //     return std::nullopt; // ni napak
-  //   }
-  //   catch (const xercesc::SAXParseException& e)
-  //   {
-  //     auto err = error_info{
-  //       processor_error::xsd_validation_failed,
-  //       fmt::format("SAX validation error: {} (row:{} col:{})", x_str(e.getMessage()).to_string(), e.getLineNumber(),
-  //       e.getColumnNumber()),
-  //       "",
-  //       static_cast<std::size_t>(e.getLineNumber())};
-  //     if (log.active(lvl_enum::err)) log.error(err.to_string());
-  //     return err;
-  //   }
-  //   catch (const xercesc::XMLException& e)
-  //   {
-  //     auto err = error_info{processor_error::xsd_validation_failed, fmt::format("XML error: {}", x_str(e.getMessage()).to_string()), "",
-  //     0}; if (log.active(lvl_enum::err)) log.error(err.to_string()); return err;
-  //   }
-  //   catch (...)
-  //   {
-  //     auto err = error_info{processor_error::internal_error, "Validation: unknown error", "", 0};
-  //     if (log.active(lvl_enum::err)) log.error(err.to_string());
-  //     return err;
-  //   }
-  // }
-  // Zažene validacijo XML proti XSD v ločeni niti. Vrne shared_future ki se
-  // razreši takoj ko validacija konča — bodisi z nullopt (ok) ali error_info
-  // (prva napaka). shared_future (ne unique future) ker ga delita dve mesti:
-  //   1. Handler::startElement() — polling z wait_for(0)
-  //   2. process_from_buffer()   — get() po koncu parsinga
-  // Oba klica sta na isti niti (glavna nit), zato ni race conditiona na get().
-  //
-  // Parametri so kopirani po vrednosti — nit mora imeti lastništvo nad podatki
-  // ki jih potrebuje, saj mmap ostaja živeti v klicatelju (process_from_buffer),
-  // a nit ne sme imeti surovih referenc nanj (lifetime ni garantiran).
-  // xml_data/xsd_data sta raw pointer-ja na mmap ki živita dlje od niti — ok.
-  // std::shared_future<std::optional<error_info>> xml_processor::launch_validation_thread( //
-  //   const cstr_t&    f_xml_data,
-  //   const gr_pool_t& gp,      // xml file contents
-  //   std::string      xsd_path // path to the grammar file
-  // )
-  // {
-  //   // Kopiramo podatke za nit
-  //   auto xml_data = f_xml_data; // kopija
-  //   // auto xsd_data = f_xsd_data; // kopija
-  //   auto path = std::move(xsd_path);
-
-  //   // Ustvarimo async nalogo s statično funkcijo
-  //   auto future = std::async(std::launch::async,
-  //                            validate_xml_worker,
-  //                            xml_data,                   // must be by value
-  //                            std::cref(gp),              // referenca na kopijo
-  //                            std::move(path),            // premaknemo path
-  //                            std::cref(log_),            // referenca na logger
-  //                            std::cref(parent_log_name_) // referenca na parent log name
-  //   );
-  //   // Vrnemo shared_future
-  //   return future.share();
-  // }
 
   void_result xml_processor::start_workers()
   {
@@ -262,7 +143,6 @@ namespace fsp
   {
     seg_pool_.ready_queue_close();
     workers_.clear();
-    // active_mmap_ = nullptr;
     log_.info("All workers stopped.");
   }
   /**
@@ -271,73 +151,10 @@ namespace fsp
    */
   void xml_processor::cancel()
   {
-    // cancel_flag_ = true;
     for (auto& el : workers_) el.request_stop();
-    // seg_queue_.set_finished();
     seg_pool_.ready_queue_close();
   }
-  // /**
-  //  * @brief parse xml file
-  //  *
-  //  * @param xml_path filepath to the xml file
-  //  * @param xsd_path filepath to the corresponding grammas (XSD)
-  //  * @return void_result
-  //  */
-  // void_result xml_processor::process_file(std::size_t xml_path_ndx)
-  // {
-  //   start_time_   = std::chrono::steady_clock::now();
-  //   auto xml_path = ds_dscr_[xml_path_ndx].path();
-  //   log_.info(fmt::format("XML file: '{}'", xml_path));
 
-  //   // fsp::mmap_file xml_mmap;
-  //   // try
-  //   // {
-  //   //   xml_mmap.open(xml_path);
-  //   // }
-  //   // catch (const std::exception& e)
-  //   // {
-  //   //   auto err = error_info{processor_error::file_open_failed, e.what(), xml_path, 0};
-  //   //   log_.error(err.to_string());
-  //   //   return std::unexpected(err);
-  //   // }
-  //   if (! ds_dscr_[xml_path_ndx].is_open())
-  //   {
-  //     auto err = error_info{processor_error::mmap_failed, fmt::format("mmap neuspešen: '{}'", xml_path), xml_path, 0};
-  //     log_.error(err.to_string());
-  //     return std::unexpected(err);
-  //   }
-
-  //   // std::optional<fsp::mmap_file> xsd_mmap;
-  //   // if (! xsd_path.empty() && config_.validate_against_xsd)
-  //   // {
-  //   //   xsd_mmap.emplace();
-  //   //   try
-  //   //   {
-  //   //     xsd_mmap->open(xsd_path);
-  //   //   }
-  //   //   catch (const std::exception& e)
-  //   //   {
-  //   //     auto err = error_info{processor_error::file_open_failed, e.what(), xsd_path, 0};
-  //   //     log_.error(err.to_string());
-  //   //     return std::unexpected(err);
-  //   //   }
-  //   // }
-  //   return process_from_buffer(xml_path_ndx);
-  // }
-
-  //   1. setup_parser_no_validation() — SAX parser brez XSD overhead-a
-  //   2. launch_validation_thread()   — validacija vzporedno v svoji niti
-  //   3. handler_->set_validation_future() — handler dobi shared_future za
-  //      polling; ob napaki vrže SAXParseException ki prekine parser_->parse()
-  //   4. parser_->parse() — teče vzporedno z validacijsko nitjo (~16s)
-  //   5. Po koncu parsinga: cancel() + join workerjev + get() na future
-  //
-  // Potek ob validacijski napaki:
-  //   validacijska nit  →  promise.set_value(err)
-  //   handler polling   →  wait_for(0) == ready → throw SAXParseException
-  //   parser_->parse()  →  vrže izjemo → ujamemo v catch bloku spodaj
-  //   cancel()          →  cancel_flag_ = true → workerji se ustavijo
-  //   val_future.get()  →  vrnemo napako klicatelju
   void_result xml_processor::process_from_buffer(std::size_t xml_path_ndx)
   {
     auto& xml_mmap = ds_dscr_[xml_path_ndx].mmf();
@@ -360,19 +177,6 @@ namespace fsp
       log_.error(err.to_string());
       return std::unexpected(err);
     }
-    // active_mmap_ = &xml_mmap;
-    //  // [DODANO] Zaženi validacijsko nit vzporedno s SAX parsingom.
-    //  // Če XSD ni podan, launch_validation_thread() vrne future ki je takoj
-    //  // razrešen z nullopt — handler polling bo vedno dobil "ok" in ne bo
-    //  // povzročal overhead-a (wait_for na already-ready future je trivial).
-    //  std::shared_future<std::optional<error_info>> val_future;
-    //  if (xsd_mmap != nullptr && config_.validate_against_xsd)
-    //  {
-    //    val_future = launch_validation_thread(xml_mmap.string_view(), gp, std::string(xsd_mmap->path()));
-    //    handler_->set_validation_future(val_future); // to receive signal, taht validation failed
-    //  }
-    //     bool validation_interrupted = false; // true: validation error; false: xml parsing error
-    //  starting workers
     auto ws = start_workers(); // validation is on critical path workers start last
     if (! ws) return std::unexpected(ws.error());
     try
@@ -385,69 +189,39 @@ namespace fsp
       save_stats();
 
       auto us = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count();
-      //      if (log_info_) log_.info(fmt::format("SAX parsing finished. {} ms pending segments: {}", us, seg_queue_.size()));
       if (log_info_) log_.info(fmt::format("SAX parsing finished. {} ms pending segments: {}", us, seg_pool_.ready_queue_size()));
       seg_pool_.ready_queue_close();
     }
-    catch (const xercesc::SAXParseException& e)
-    {
-      // [DODANO] Handler je vrgel SAXParseException kot signal za prekinitev
-      // parsinga ob zaznani validacijski napaki. Napaka je že v val_future —
-      // ne logiramo tukaj, logirala jo je validacijska nit.
-      // Nastavimo zastavico da spodaj ne logiramo lažne "parse" napake.
-      // validation_interrupted = true;
-      auto err = error_info{
-        processor_error::xsd_validation_failed, x_str(e.getMessage()).to_string(), "", static_cast<std::size_t>(e.getLineNumber())};
-      log_.error(err.to_string());
-    }
+    // catch (const xercesc::SAXParseException& e)
+    // {
+    //   // [DODANO] Handler je vrgel SAXParseException kot signal za prekinitev
+    //   // parsinga ob zaznani validacijski napaki. Napaka je že v val_future —
+    //   // ne logiramo tukaj, logirala jo je validacijska nit.
+    //   // Nastavimo zastavico da spodaj ne logiramo lažne "parse" napake.
+    //   // validation_interrupted = true;
+    //   auto err = error_info{
+    //     processor_error::xsd_validation_failed, x_str(e.getMessage()).to_string(), "", static_cast<std::size_t>(e.getLineNumber())};
+    //   log_.error(err.to_string());
+    // }
     catch (const xercesc::XMLException& e)
     {
       // Prava napaka parsinga (ne validacijska) — canceliramo in vrnemo napako
       cancel();
-      // if (val_future.valid()) val_future.wait(); // počakamo nit pred return
       workers_.clear();
-      // active_mmap_ = nullptr;
       auto err = error_info{processor_error::parse_failed, x_str(e.getMessage()).to_string(), "", static_cast<std::size_t>(e.getSrcLine())};
       log_.error(err.to_string());
-
       return std::unexpected(err);
     }
     catch (const std::exception& e)
     {
       cancel();
-      // if (val_future.valid()) val_future.wait();
       workers_.clear();
-      // active_mmap_ = nullptr;
       auto err = error_info{processor_error::parse_failed, e.what(), "", 0};
       log_.error(err.to_string());
       return std::unexpected(err);
     }
-
-    // upon exception in validation thread, we need to exit and cancel the workers.
-    // unless we do this, the worker would continue until the queue is nonempty, which is
-    // useless, since the result is going to be dropped anyway
-    if (/*validation_interrupted*/ 0 == 1) cancel();
-    //    else seg_queue_.set_finished();
-    else seg_pool_.ready_queue_close();
-
-    // std::this_thread::sleep_for(std::chrono::milliseconds(1)); // začasno
-
-    log_.info(fmt::format("Before stopping workers - queue size: {}", seg_pool_.ready_queue_size()));
-    // we need to wait the validation thread to finish before cleaning on our side
-    // if (val_future.valid()) val_future.wait();
+    seg_pool_.ready_queue_close();
     workers_.clear();
-    // active_mmap_ = nullptr;
-    //  [DODANO] Preverimo rezultat validacije.
-    //  get() na shared_future je varen ker:
-    //    - validacijska nit je že končala (val_future.wait() zgoraj)
-    //    - shared_future get() ne uniči vrednosti (za razliko od unique future)
-    //    - kličemo ga samo z glavne niti
-    //  if (val_future.valid())
-    //  {
-    //    auto val_result = val_future.get();
-    //    if (val_result.has_value()) // error was logged in validation thread, just signal it up
-    //      return std::unexpected(*val_result);
-    //  }
     success_ = true;
     return {};
   }
