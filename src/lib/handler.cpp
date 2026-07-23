@@ -14,14 +14,14 @@ namespace fsp
   Handler::Handler(proc_data&                    targets,
                    const fsp_logger&             log,
                    const xercesc::SAX2XMLReader* parser,
-                   std::string_view              base_addr,
+                   std::string_view              doc,
                    segment_pool&                 pool)
   : targets_(targets) //
                       //  , queue_(queue)     //
   , parser_(parser)
-  , log_(log)       //
-  , doc_(base_addr) //
-  , pool_(pool)     // segment pool
+  , log_(log)   //
+  , doc_(doc)   //
+  , pool_(pool) // segment pool
   , log_trace_(log_.active(lvl_enum::trace))
   , log_debug_(log_.active(lvl_enum::debug))
   , log_info_(log_.active(lvl_enum::info))
@@ -244,10 +244,10 @@ namespace fsp
       if (((new_active & (1ULL << i)) != 0U) && (doc_depth_ == static_cast<int>(rule_lengths_[i])))
       {
         rebuild_ns_decl_for_current_level(); // we have first hit. we should recalculate the the ns string
-        frag_depth_        = 0;
-        seg_type_          = static_cast<int>(i);
-        frag_start_offset_ = parser_->getSrcOffset();
+        frag_depth_ = 0;
+        seg_type_   = static_cast<int>(i);
         if (! ns_stack_.empty()) ns_ = ns_stack_.back().ns_decl;
+        frag_start_offset_ = parser_->getSrcOffset();
         if (attrs.getLength() > 0) attr_ = attr_values_str(attrs);
 
         if (log_trace_) [[unlikely]]

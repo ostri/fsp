@@ -34,11 +34,7 @@ namespace fsp
   class Handler : public xercesc::DefaultHandler
   {
   public:
-    Handler(proc_data&                    targets,
-            const fsp_logger&             log,
-            const xercesc::SAX2XMLReader* parser,
-            std::string_view              base_addr,
-            segment_pool&                 pool);
+    Handler(proc_data& targets, const fsp_logger& log, const xercesc::SAX2XMLReader* parser, std::string_view doc, segment_pool& pool);
     // --- SAX2 ContentHandler ---
     void startPrefixMapping(const XMLCh* prefix, const XMLCh* uri) override;
     void startElement(const XMLCh* uri, const XMLCh* localname, const XMLCh* qname, const xercesc::Attributes& attrs) override;
@@ -53,7 +49,7 @@ namespace fsp
     void fatalError(const xercesc::SAXParseException& e) override;
 
     [[nodiscard]] std::size_t segments_found() const noexcept;
-    [[nodiscard]] cstr_t      doc() const;
+    //[[nodiscard]] cstr_t      doc() const;
     // // [DODANO] Injicira shared_future iz xml_processor::process_from_buffer.
     // // Handler ga polling preverja v startElement() in ob napaki vrže
     // // SAXParseException, ki jo Xerces uporabi kot signal za prekinitev parsinga.
@@ -120,10 +116,10 @@ namespace fsp
     // segment_queue& queue_;       // NOLINT(cppcoreguidelines-avoid-const-or-ref-data-members)
     std::size_t counter_ = 0; // counter to obtain unique segment id within the file
 
-    const xercesc::SAX2XMLReader* parser_; // reference to parser; for getSrcOffs
+    const xercesc::SAX2XMLReader* parser_; // reference to parser; only for getSrcOffs
     const fsp_logger&             log_;    // logger NOLINT(cppcoreguidelines-avoid-const-or-ref-data-members)
     cstr_t                        doc_;    // xml document mapped as string view over mmap file
-    str_XMLCh_t                   ns_;     // current and inherited namespaces as string (for current segmetn)
+    str_XMLCh_t                   ns_;     // current and inherited namespaces as string (for current segment)
     str_XMLCh_t                   attr_;   // current tag attributes as a string (for current segment)
 
     // [DODANO] Shared future na katerega validacijska nit postavi napako (ali nullopt).
@@ -145,7 +141,7 @@ namespace fsp
   };
 
   inline std::size_t Handler::segments_found() const noexcept { return counter_; }
-  inline cstr_t      Handler::doc() const { return doc_; }
-  // inline void        Handler::set_validation_future(std::shared_future<std::optional<error_info>> f) { val_future_ = std::move(f); }
+  // inline cstr_t      Handler::doc() const { return doc_; }
+  //  inline void        Handler::set_validation_future(std::shared_future<std::optional<error_info>> f) { val_future_ = std::move(f); }
 
 } // namespace fsp
