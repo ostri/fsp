@@ -35,12 +35,10 @@ namespace fsp
   {
   public:
     Handler(proc_data&                    targets,
-            segment_queue&                queue,
             const fsp_logger&             log,
             const xercesc::SAX2XMLReader* parser,
             std::string_view              base_addr,
             segment_pool&                 pool);
-
     // --- SAX2 ContentHandler ---
     void startPrefixMapping(const XMLCh* prefix, const XMLCh* uri) override;
     void startElement(const XMLCh* uri, const XMLCh* localname, const XMLCh* qname, const xercesc::Attributes& attrs) override;
@@ -119,8 +117,8 @@ namespace fsp
 
     // --- Output ---
     // queue of segments that is filled by handler and emptied by workers
-    segment_queue& queue_;       // NOLINT(cppcoreguidelines-avoid-const-or-ref-data-members)
-    std::size_t    counter_ = 0; // counter to obtain unique segment id within the file
+    // segment_queue& queue_;       // NOLINT(cppcoreguidelines-avoid-const-or-ref-data-members)
+    std::size_t counter_ = 0; // counter to obtain unique segment id within the file
 
     const xercesc::SAX2XMLReader* parser_; // reference to parser; for getSrcOffs
     const fsp_logger&             log_;    // logger NOLINT(cppcoreguidelines-avoid-const-or-ref-data-members)

@@ -29,8 +29,8 @@ namespace fsp
 
   xml_processor::xml_processor(processor_config cfg, str_t parent_log_name, segment_pool& pool, doc_set_dscr& ds_dscr)
   : log_(cfg.log_config)
-  , config_(std::move(cfg))
-  , pool_(pool)
+  , cfg_(std::move(cfg))
+  , seg_pool_(pool)
   , ds_dscr_(ds_dscr)
   , parent_log_name_(std::move(parent_log_name))
   {
@@ -40,12 +40,10 @@ namespace fsp
       std::string_view build_type;
       if constexpr (is_release()) build_type = "release";
       else build_type = "debug";
-      if (config_.num_workers == 0) config_.num_workers = std::thread::hardware_concurrency();
-      if (config_.num_workers == 0) config_.num_workers = 1; // if statement above fails
-      log_.info(fmt::format("XML Processor: started: build type: {} -> {} workers, validation: {}",
-                            build_type,
-                            config_.num_workers,
-                            config_.validate_against_xsd));
+      if (cfg_.num_workers == 0) cfg_.num_workers = std::thread::hardware_concurrency();
+      if (cfg_.num_workers == 0) cfg_.num_workers = 1; // if statement above fails
+      log_.info(fmt::format(
+        "XML Processor: started: build type: {} -> {} workers, validation: {}", build_type, cfg_.num_workers, cfg_.validate_against_xsd));
     }
   }
   xml_processor::~xml_processor()
@@ -226,35 +224,34 @@ namespace fsp
       std::lock_guard lock(errors_mutex_);
       errors_.clear();
     }
-    if (active_mmap_ == nullptr)
+    if (! active_mmap().is_open())
     {
       auto err = error_info{//
                             processor_error::internal_error,
-                            "mmap is null before 'start_workers()'",
-                            nullptr != active_mmap_ ? active_mmap_->path() : "",
+                            "mmap is not opened 'start_workers()'",
+                            "",
                             0};
       log_.error(err.to_string());
       return std::unexpected(err);
     }
 
-    for (std::size_t i = 0; i < config_.num_workers; ++i)
+    for (std::size_t i = 0; i < cfg_.num_workers; ++i)
     {
       str_t parent_name = log_.log_name();
       workers_.emplace_back(
-        xml_worker{       //
-                   pool_, //
-                   *active_mmap_,
+        xml_worker{           //
+                   seg_pool_, //
+                   active_mmap(),
                    results_,
                    errors_,
                    results_mutex_,
                    errors_mutex_,
-                   //                                       cancel_flag_,
                    log_,
-                   config_.targets,
+                   cfg_.targets,
                    parent_name},
         i);
     }
-    log_.info(fmt::format("{} workers started.", config_.num_workers));
+    log_.info(fmt::format("{} workers started.", cfg_.num_workers));
     return {};
   }
   /**
@@ -263,9 +260,9 @@ namespace fsp
    */
   void xml_processor::stop_workers()
   {
-    pool_.ready_queue_close();
+    seg_pool_.ready_queue_close();
     workers_.clear();
-    active_mmap_ = nullptr;
+    // active_mmap_ = nullptr;
     log_.info("All workers stopped.");
   }
   /**
@@ -276,7 +273,8 @@ namespace fsp
   {
     // cancel_flag_ = true;
     for (auto& el : workers_) el.request_stop();
-    seg_queue_.set_finished();
+    // seg_queue_.set_finished();
+    seg_pool_.ready_queue_close();
   }
   // /**
   //  * @brief parse xml file
@@ -348,7 +346,11 @@ namespace fsp
 
     try
     {
-      handler_ = std::make_unique<Handler>(config_.targets, seg_queue_, log_, parser_.get(), xml_mmap.string_view(), pool_);
+      handler_ = std::make_unique<Handler>(cfg_.targets, //
+                                           log_,
+                                           parser_.get(),
+                                           xml_mmap.string_view(),
+                                           seg_pool_);
       parser_->setContentHandler(handler_.get());
       parser_->setErrorHandler(handler_.get());
     }
@@ -358,19 +360,19 @@ namespace fsp
       log_.error(err.to_string());
       return std::unexpected(err);
     }
-    active_mmap_ = &xml_mmap;
-    // // [DODANO] Zaženi validacijsko nit vzporedno s SAX parsingom.
-    // // Če XSD ni podan, launch_validation_thread() vrne future ki je takoj
-    // // razrešen z nullopt — handler polling bo vedno dobil "ok" in ne bo
-    // // povzročal overhead-a (wait_for na already-ready future je trivial).
-    // std::shared_future<std::optional<error_info>> val_future;
-    // if (xsd_mmap != nullptr && config_.validate_against_xsd)
-    // {
-    //   val_future = launch_validation_thread(xml_mmap.string_view(), gp, std::string(xsd_mmap->path()));
-    //   handler_->set_validation_future(val_future); // to receive signal, taht validation failed
-    // }
-    //    bool validation_interrupted = false; // true: validation error; false: xml parsing error
-    // starting workers
+    // active_mmap_ = &xml_mmap;
+    //  // [DODANO] Zaženi validacijsko nit vzporedno s SAX parsingom.
+    //  // Če XSD ni podan, launch_validation_thread() vrne future ki je takoj
+    //  // razrešen z nullopt — handler polling bo vedno dobil "ok" in ne bo
+    //  // povzročal overhead-a (wait_for na already-ready future je trivial).
+    //  std::shared_future<std::optional<error_info>> val_future;
+    //  if (xsd_mmap != nullptr && config_.validate_against_xsd)
+    //  {
+    //    val_future = launch_validation_thread(xml_mmap.string_view(), gp, std::string(xsd_mmap->path()));
+    //    handler_->set_validation_future(val_future); // to receive signal, taht validation failed
+    //  }
+    //     bool validation_interrupted = false; // true: validation error; false: xml parsing error
+    //  starting workers
     auto ws = start_workers(); // validation is on critical path workers start last
     if (! ws) return std::unexpected(ws.error());
     try
@@ -383,8 +385,9 @@ namespace fsp
       save_stats();
 
       auto us = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count();
-      if (log_info_) log_.info(fmt::format("SAX parsing finished. {} ms pending segments: {}", us, seg_queue_.size()));
-      pool_.ready_queue_close();
+      //      if (log_info_) log_.info(fmt::format("SAX parsing finished. {} ms pending segments: {}", us, seg_queue_.size()));
+      if (log_info_) log_.info(fmt::format("SAX parsing finished. {} ms pending segments: {}", us, seg_pool_.ready_queue_size()));
+      seg_pool_.ready_queue_close();
     }
     catch (const xercesc::SAXParseException& e)
     {
@@ -403,7 +406,7 @@ namespace fsp
       cancel();
       // if (val_future.valid()) val_future.wait(); // počakamo nit pred return
       workers_.clear();
-      active_mmap_ = nullptr;
+      // active_mmap_ = nullptr;
       auto err = error_info{processor_error::parse_failed, x_str(e.getMessage()).to_string(), "", static_cast<std::size_t>(e.getSrcLine())};
       log_.error(err.to_string());
 
@@ -414,8 +417,8 @@ namespace fsp
       cancel();
       // if (val_future.valid()) val_future.wait();
       workers_.clear();
-      active_mmap_ = nullptr;
-      auto err     = error_info{processor_error::parse_failed, e.what(), "", 0};
+      // active_mmap_ = nullptr;
+      auto err = error_info{processor_error::parse_failed, e.what(), "", 0};
       log_.error(err.to_string());
       return std::unexpected(err);
     }
@@ -424,26 +427,27 @@ namespace fsp
     // unless we do this, the worker would continue until the queue is nonempty, which is
     // useless, since the result is going to be dropped anyway
     if (/*validation_interrupted*/ 0 == 1) cancel();
-    else seg_queue_.set_finished();
+    //    else seg_queue_.set_finished();
+    else seg_pool_.ready_queue_close();
 
     // std::this_thread::sleep_for(std::chrono::milliseconds(1)); // začasno
 
-    log_.info(fmt::format("Before stopping workers - queue size: {}", seg_queue_.size()));
+    log_.info(fmt::format("Before stopping workers - queue size: {}", seg_pool_.ready_queue_size()));
     // we need to wait the validation thread to finish before cleaning on our side
     // if (val_future.valid()) val_future.wait();
     workers_.clear();
-    active_mmap_ = nullptr;
-    // [DODANO] Preverimo rezultat validacije.
-    // get() na shared_future je varen ker:
-    //   - validacijska nit je že končala (val_future.wait() zgoraj)
-    //   - shared_future get() ne uniči vrednosti (za razliko od unique future)
-    //   - kličemo ga samo z glavne niti
-    // if (val_future.valid())
-    // {
-    //   auto val_result = val_future.get();
-    //   if (val_result.has_value()) // error was logged in validation thread, just signal it up
-    //     return std::unexpected(*val_result);
-    // }
+    // active_mmap_ = nullptr;
+    //  [DODANO] Preverimo rezultat validacije.
+    //  get() na shared_future je varen ker:
+    //    - validacijska nit je že končala (val_future.wait() zgoraj)
+    //    - shared_future get() ne uniči vrednosti (za razliko od unique future)
+    //    - kličemo ga samo z glavne niti
+    //  if (val_future.valid())
+    //  {
+    //    auto val_result = val_future.get();
+    //    if (val_result.has_value()) // error was logged in validation thread, just signal it up
+    //      return std::unexpected(*val_result);
+    //  }
     success_ = true;
     return {};
   }
@@ -468,31 +472,26 @@ namespace fsp
       .failed_doc          = 0,
       .successful_segments = results_.size(), // processed_count_,
       .failed_segments     = errors_.size(),  // error_count_,
-      .active_workers      = workers_.size() > 0 ? workers_.size() : config_.num_workers,
+      .active_workers      = workers_.size() > 0 ? workers_.size() : cfg_.num_workers,
       .processing_time_ms  = static_cast<double>(ms),
     };
   }
   // // ============================================================================
   // // Convenience function
   // // ============================================================================
-  void xml_processor::process_one_doc(std::size_t                    xml_path_ndx,
-                                      [[maybe_unused]] doc_set_dscr& ds_dscr,
-                                      segment_pool&                  pool,
-                                      std::mutex&                    results_agg_mutex,
-                                      std::vector<segment_result>&   all_results,
-                                      std::vector<segment_result>&   all_errors,
-                                      std::atomic<bool>&             has_error,
-                                      std::optional<error_info>&     first_error,
-                                      const processor_config&        config,
-                                      const fsp_logger&              log // Using auto to deduce the fsp::logger type
-  )
+  void xml_processor::process_one_doc(std::size_t                  doc_ndx,
+                                      std::mutex&                  results_agg_mutex,
+                                      std::vector<segment_result>& all_results,
+                                      std::vector<segment_result>& all_errors,
+                                      std::atomic<bool>&           has_error,
+                                      std::optional<error_info>&   first_error)
   {
-    const auto xml_path = ds_dscr[xml_path_ndx].path();
-    log.info(fmt::format("Processing file: '{}'", xml_path));
+    doc_ndx_            = doc_ndx;
+    const auto xml_path = ds_dscr_[doc_ndx_].path();
+    log_.info(fmt::format("Processing file: '{}'", xml_path));
     //  Each file gets its own processor instance to avoid state conflicts
-    xml_processor file_proc(config, log.log_name(), pool, ds_dscr);
-    auto          res = file_proc.process_from_buffer(xml_path_ndx); // FIME OS3 use file index instead
-
+    xml_processor file_proc(cfg_, log_.log_name(), seg_pool_, ds_dscr_);
+    auto          res = file_proc.process_from_buffer(doc_ndx_);
     if (! res)
     {
       auto err = res.error();
@@ -504,7 +503,7 @@ namespace fsp
           first_error = err;
         }
       }
-      log.error(fmt::format("File {} failed: {}", xml_path, err.to_string()));
+      log_.error(fmt::format("File {} failed: {}", xml_path, err.to_string()));
     }
     else
     {
@@ -517,16 +516,16 @@ namespace fsp
         all_errors.append_range(fe | std::views::as_rvalue);
       }
       auto stats = file_proc.stats();
-      log.info(fmt::format("File '{}' success (ok: {} err:{})", //
-                           xml_path,
-                           stats.successful_segments,
-                           stats.failed_segments));
+      log_.info(fmt::format("File '{}' success (ok: {} err:{})", //
+                            xml_path,
+                            stats.successful_segments,
+                            stats.failed_segments));
     }
   }
   // Helper static function for jthread execution
   void xml_processor::doc_worker(lock_queue<std::size_t>&   doc_queue,
                                  doc_set_dscr&              ds_dscr,
-                                 segment_pool&              pool,
+                                 segment_pool&              seg_pool,
                                  std::mutex&                results_agg_mutex,
                                  vec_seg_result&            all_results,
                                  vec_seg_result&            all_errors,
@@ -539,21 +538,20 @@ namespace fsp
                                  const fsp_logger&          log)
   {
     log.make_log_name(parent_log_name, fmt::format("doc<{:02}>", worker_idx));
-    std::string xml_path;
-    std::size_t xml_path_ndx;
+    std::size_t   doc_ndx;
+    xml_processor doc(config, parent_log_name, seg_pool, ds_dscr);
     while (true) // loop the documents list
     {
-      if (auto opt = doc_queue.try_pop()) { xml_path_ndx = opt.value(); }
+      if (auto opt = doc_queue.try_pop()) { doc_ndx = opt.value(); }
       else
       { // the queue was initally empty and we need to wait for first doc or a signal to exit the waiting
         auto start = std::chrono::steady_clock::now();
-        if (doc_queue.pop(xml_path_ndx) != queue_status::active) break; // finished or aborted
+        if (doc_queue.pop(doc_ndx) != queue_status::active) break; // finished or aborted
         auto end     = std::chrono::steady_clock::now();
         auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
         log.info(fmt::format("waiting time for new file {} µs.", elapsed));
       }
-      xml_path = ds_dscr[xml_path_ndx].path(); // document to be processed
-      process_one_doc(xml_path_ndx, ds_dscr, pool, results_agg_mutex, all_results, all_errors, has_error, first_error, config, log);
+      doc.process_one_doc(doc_ndx, results_agg_mutex, all_results, all_errors, has_error, first_error);
     }
     ++file_processed;
     if (doc_queue.is_aborted()) log.warn(fmt::format("doc_worker {}/{} aborted.", log.log_name(), worker_idx));

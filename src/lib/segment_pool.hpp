@@ -31,6 +31,7 @@ namespace fsp
     void         set_segment(std::size_t ndx, const xml_segment& seg);
     void         set_result(std::size_t ndx, const segment_result& seg_r);
     xml_segment  retrieve_segment(std::size_t idx);
+    std::size_t  ready_queue_size() const { return ready_queue_.size(); }
   private:
     const fsp_logger&           log_;
     std::vector<xml_segment>    segments_;

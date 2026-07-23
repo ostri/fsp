@@ -20,8 +20,6 @@
 #include "handler.hpp"
 #include "load_grammar.hpp"
 #include "logger.hpp"
-#include "mem_buf_holder.hpp"
-#include "mmap_file.hpp"
 #include "processor_config.hpp"
 #include "lock_queue.hpp"
 #include "stats.hpp"
@@ -45,8 +43,7 @@ namespace fsp
     xml_processor& operator=(const xml_processor&) = delete;
     xml_processor(xml_processor&&)                 = delete;
     xml_processor& operator=(xml_processor&&)      = delete;
-    //    void_result    process_file(std::size_t xml_path_ndx);
-    void_result process_from_buffer(std::size_t xml_path_ndx);
+    void_result    process_from_buffer(std::size_t xml_path_ndx);
     /** @brief Process multiple XML files in parallel using N workers.
      * Each worker processes files sequentially from the queue using process_file.
      * Results and errors are collected from all files.
@@ -59,68 +56,45 @@ namespace fsp
     void_result process_files(const std::vector<std::string>& xml_paths, const std::string& xsd_path = "", std::size_t num_parallel = 0);
     [[nodiscard]] const vec_seg_result& get_results() const;
     [[nodiscard]] const vec_seg_result& get_errors() const;
-
-    [[nodiscard]] bool is_successful() const;
-    void               cancel();
-    static void        doc_worker(lock_queue<std::size_t>&   doc_queue,
-                                  doc_set_dscr&              ds_dscr,
-                                  segment_pool&              pool,
-                                  std::mutex&                results_agg_mutex,
-                                  vec_seg_result&            all_results,
-                                  vec_seg_result&            all_errors,
-                                  std::atomic<std::size_t>&  file_processed,
-                                  std::atomic<bool>&         has_error,
-                                  std::optional<error_info>& first_error,
-                                  std::size_t                worker_idx,
-                                  const std::string&         parent_log_name,
-                                  const processor_config&    config,
-                                  const fsp_logger&          log);
-    vec_seg_result     move_results();
-    vec_seg_result     move_errors();
+    [[nodiscard]] bool                  is_successful() const;
+    void                                cancel();
+    static void                         doc_worker(lock_queue<std::size_t>&   doc_queue,
+                                                   doc_set_dscr&              ds_dscr,
+                                                   segment_pool&              pool,
+                                                   std::mutex&                results_agg_mutex,
+                                                   vec_seg_result&            all_results,
+                                                   vec_seg_result&            all_errors,
+                                                   std::atomic<std::size_t>&  file_processed,
+                                                   std::atomic<bool>&         has_error,
+                                                   std::optional<error_info>& first_error,
+                                                   std::size_t                worker_idx,
+                                                   const std::string&         parent_log_name,
+                                                   const processor_config&    config,
+                                                   const fsp_logger&          log);
+    vec_seg_result                      move_results();
+    vec_seg_result                      move_errors();
   private: /// methods
     void_result setup_parser_no_validation();
     void_result start_workers();
     void        stop_workers();
-    // Zažene validacijo v ločeni niti. Vrne future ki se razreši z
-    // nullopt (ok) ali error_info (napaka). Klic je neblokirajočen — validacija
-    // teče vzporedno s SAX parsingom. Če XSD ni podan, future se takoj razreši
-    // z nullopt da ostala koda ne rabi ločevati med "validacija vklopljena" in
-    // "validacija izklopljena".
-    // std::shared_future<std::optional<error_info>> launch_validation_thread( //
-    //                                                                         //
-    //   const cstr_t&    f_xml_data,                                          // xml file contents
-    //   const gr_pool_t& gp,                                                  // grammar pool
-    //   std::string      xsd_path                                             // path to the grammar file
-    // );
-
-    // static std::optional<error_info> validate_xml_worker(const cstr_t&      f_xml_data,
-    //                                                      const gr_pool_t&   gp,
-    //                                                      std::string        xsd_path,
-    //                                                      const fsp_logger&  logger,
-    //                                                      const std::string& parent_log_name);
-
-    static void process_one_doc(std::size_t                    xml_path_ndx,
-                                [[maybe_unused]] doc_set_dscr& ds_dscr,
-                                segment_pool&                  pool,
-                                std::mutex&                    results_agg_mutex,
-                                std::vector<segment_result>&   all_results,
-                                std::vector<segment_result>&   all_errors,
-                                std::atomic<bool>&             has_error,
-                                std::optional<error_info>&     first_error,
-                                const processor_config&        config,
-                                const fsp_logger&              log // Using auto to deduce the fsp::logger type
-    );
+    void        process_one_doc(std::size_t                  doc_ndx,
+                                std::mutex&                  results_agg_mutex,
+                                std::vector<segment_result>& all_results,
+                                std::vector<segment_result>& all_errors,
+                                std::atomic<bool>&           has_error,
+                                std::optional<error_info>&   first_error);
     void        save_stats();
-    stats_t     stats() const { return stats_; }
+    stats_t     stats() const;
+    const auto& active_mmap() const { return ds_dscr_[doc_ndx_].mmf(); }
   private: /// members
     const s_clock                           start_ = std::chrono::steady_clock::now();
-    const fsp_logger                        log_; // logger must be created first and destructed last
-    processor_config                        config_;
-    segment_pool&                           pool_;    // pool of segments to be processed / are free
-    doc_set_dscr&                           ds_dscr_; //< document description
+    const fsp_logger                        log_;       //< logger must be created first and destructed last
+    processor_config                        cfg_;       //< processor configuration
+    segment_pool&                           seg_pool_;  //< pool of segments to be processed / are free
+    doc_set_dscr&                           ds_dscr_;   //< document description
+    std::size_t                             doc_ndx_{}; //< index of the document within the ds_dscr_ structure
     std::unique_ptr<xercesc::SAX2XMLReader> parser_;
     std::unique_ptr<Handler>                handler_;
-    segment_queue                           seg_queue_;
     vec_seg_result                          results_;
     vec_seg_result                          errors_;
     mutable std::mutex                      results_mutex_;
@@ -128,31 +102,28 @@ namespace fsp
     std::atomic<bool>                       success_{false};
     std::vector<std::jthread>               workers_;
     s_clock                                 start_time_;
-    std::unique_ptr<mem_buf_holder>         xsd_holder_;
-    const fsp::mmap_file*                   active_mmap_ = nullptr; // reference to mmap file (needed by workers)
     str_t                                   parent_log_name_;
-    const bool                              log_trace_ = log_.active(lvl_enum::trace);
-    const bool                              log_debug_ = log_.active(lvl_enum::debug);
-    const bool                              log_info_  = log_.active(lvl_enum::info);
-    const bool                              log_warn_  = log_.active(lvl_enum::warn);
-    const bool                              log_error_ = log_.active(lvl_enum::err);
-    const bool                              log_crit_  = log_.active(lvl_enum::crit);
+    bool                                    log_trace_ = log_.active(lvl_enum::trace);
+    bool                                    log_debug_ = log_.active(lvl_enum::debug);
+    bool                                    log_info_  = log_.active(lvl_enum::info);
+    bool                                    log_warn_  = log_.active(lvl_enum::warn);
+    bool                                    log_error_ = log_.active(lvl_enum::err);
+    bool                                    log_crit_  = log_.active(lvl_enum::crit);
     stats_t                                 stats_; // processing statistics
   };
-
-  inline bool xml_processor::is_successful() const { return success_.load(); }
-
+  /////////////////////////////////////////////////////////////////////////////////////////////
+  inline bool           xml_processor::is_successful() const { return success_.load(); }
   inline vec_seg_result xml_processor::move_results()
   {
     std::lock_guard lock(results_mutex_);
     return std::move(results_);
   }
-
   inline vec_seg_result xml_processor::move_errors()
   {
     std::lock_guard lock(errors_mutex_);
     return std::move(errors_);
   }
+  inline stats_t xml_processor::stats() const { return stats_; }
 } // namespace fsp
 
 namespace magic_enum::customize

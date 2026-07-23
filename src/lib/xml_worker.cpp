@@ -115,15 +115,11 @@ namespace fsp
    */
   result<segment_result> xml_worker::process_segment(const xml_segment& seg)
   {
-    auto       t0        = std::chrono::steady_clock::now();
-    const bool log_debug = log_.active(fsp::lvl_enum::debug);
+    auto t0 = std::chrono::steady_clock::now();
+    // const bool log_debug = log_.active(fsp::lvl_enum::debug);
     try
     {
-      if (log_debug)
-      {
-        log_.debug(fmt::format("segment started: {}", seg.dump()));
-        // log_.trace(fmt::format("{}", seg.dump_all(xml_mmap_.data(), 0)));
-      }
+      if (log_debug_) { log_.debug(fmt::format("segment started: {}", seg.dump())); }
       auto view     = seg.view(xml_mmap_.data()); // just segment contents
       auto tmp_view = seg.subtree_str(view);      // contents + opening and closing tag
       if (log_trace_) log_.trace(fmt::format("seg: {}: '{}'", seg.id(), tmp_view));
@@ -132,14 +128,13 @@ namespace fsp
       if (! r.empty())
       {
         auto us = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - t0).count();
-        if (log_debug)
+        if (log_debug_)
         {
-          log_.debug(fmt::format("Segment '{}' DOM processing finished '{}'µs (offset={}, len={})", //
+          log_.debug(fmt::format("Segment '{}' SAX processing finished '{}'µs (offset={}, len={})", //
                                  seg.id(),
                                  us,
                                  seg.offset(),
                                  seg.length()));
-          // log_.trace(fmt::format("{}", r->dump()));
         }
         segment_result res(seg.id(), seg.subtree_type(), r);
         return res;
@@ -150,15 +145,18 @@ namespace fsp
         fmt::format("Error extracting xpath values: {}", "krneki"),
         "",
         0UL);
-      if (log_.active(fsp::lvl_enum::warn)) log_.warn(fmt::format("Segment {}: {} :: ", seg.id(), "krneki"));
+      if (log_warn_) log_.warn(fmt::format("Segment {}: {} :: ", seg.id(), "krneki"));
       return std::unexpected(err);
     }
     catch (const std::exception& e)
     {
-      // res.success       = false;
-      auto error_message = fmt::format("Exception in segment {}: '{}'", seg.id(), e.what());
-      log_.error(fmt::format("{}", error_message));
-      throw;
+      error_info err( //
+        processor_error::internal_error,
+        fmt::format("Exception in segment {}: '{}'", seg.id(), e.what()),
+        "",
+        0UL);
+      if (log_error_) log_.error(err.message());
+      return std::unexpected(err);
     }
   }
   //////////////////////////////////////////////////////////////////////
@@ -199,23 +197,14 @@ namespace fsp
           fmt::format("++seg:{:5} {}name: {} tag:'{}' value: {}", seg.id(), indent(), value_ndx_, tree_stack_.top().node.tag(), value));
       }
     }
-    else if (log_debug_)
-    {
-      // if (indent.size() < depth * 2) indent.assign(depth * 2 * 2, pad);
-      log_.debug(fmt::format("--seg:{:5} {} tag: {} no value", seg.id(), indent(), tree_stack_.top().node.tag()));
-    }
+    else if (log_debug_) { log_.debug(fmt::format("--seg:{:5} {} tag: {} no value", seg.id(), indent(), tree_stack_.top().node.tag())); }
   }
-  // === V xml_worker.cpp ===
-
   bool xml_worker::reset_reader(cstr_t xml_buf)
   {
     if (! reader_) { return false; }
-
     ++segment_counter_;
-
     // using existing reader
     int ret = xmlReaderNewMemory(reader_.get(), xml_buf.data(), static_cast<int>(xml_buf.size()), "noname.xml", nullptr, reader_flags_);
-
     if (ret == 0)
     {
       // Uspešno smo zamenjali vsebino
@@ -225,18 +214,14 @@ namespace fsp
       xmlTextReaderSetParserProp(reader_.get(), XML_PARSER_SUBST_ENTITIES, 0);
       return true;
     }
-
-    // Fallback - popolna ponovna kreacija
+    // Fallback - full new creation
     log_.warn("xmlReaderNewMemory reuse failed, doing full recreation");
     reader_.reset(xmlReaderForMemory(xml_buf.data(), static_cast<int>(xml_buf.size()), "noname.xml", nullptr, reader_flags_));
-
     if (! reader_) { throw std::runtime_error("Failed to create xmlTextReader"); }
-
     xmlTextReaderSetParserProp(reader_.get(), XML_PARSER_LOADDTD, 0);
     xmlTextReaderSetParserProp(reader_.get(), XML_PARSER_DEFAULTATTRS, 0);
     xmlTextReaderSetParserProp(reader_.get(), XML_PARSER_VALIDATE, 0);
     xmlTextReaderSetParserProp(reader_.get(), XML_PARSER_SUBST_ENTITIES, 0);
-
     return true;
   }
   bool xml_worker::open_tag(int& read_status, const xml_segment& seg, const auto& xpaths, const auto& limits, auto& res)

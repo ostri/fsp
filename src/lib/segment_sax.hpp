@@ -11,10 +11,10 @@
 #include <span>
 #include <bit>
 #include <cstdint>
-
+#include <iostream>
 namespace fsp
 {
-
+  using cstr_t = std::string_view;
   struct xml_path_el
   { // NOLINTBEGIN(misc-non-private-member-variables-in-classes)
     std::string_view uri;
@@ -25,6 +25,7 @@ namespace fsp
 
   struct sax_ctx
   {                                                // NOLINTBEGIN(misc-non-private-member-variables-in-classes)
+    const fsp_logger&                     log_;    // NOLINT(cppcoreguidelines-avoid-const-or-ref-data-members)
     std::shared_ptr<xpath_set>            targets; // NOLINT(cppcoreguidelines-avoid-const-or-ref-data-members)
     std::vector<xml_path_el>              path_stack;
     std::vector<std::vector<std::string>> results;
@@ -33,9 +34,14 @@ namespace fsp
     int                                   active_target_idx = -1;
     xmlParserCtxtPtr                      ctxt              = nullptr; // to stop the parser
     std::string                           current_buffer;              // for temporary tag values
-    // NOLINTEND(misc-non-private-member-variables-in-classes)
+    bool                                  log_trace_ = log_.active(lvl_enum::trace);
+    bool                                  log_debug_ = log_.active(lvl_enum::debug);
+    bool                                  log_info_  = log_.active(lvl_enum::info);
+    bool                                  log_warn_  = log_.active(lvl_enum::warn);
+    bool                                  log_error_ = log_.active(lvl_enum::err);
+    bool log_crit_ = log_.active(lvl_enum::crit); // NOLINTEND(misc-non-private-member-variables-in-classes)
 
-    explicit sax_ctx();
+    explicit sax_ctx(const fsp_logger& log);
     void reset_for_reuse(const xpath_set& t);
   };
 
@@ -53,25 +59,26 @@ namespace fsp
     segment_sax::result_t exec(std::string_view xml_data, const xpath_set& targets);
   private:
     template <typename F>
-    static void for_each_set_bit(std::uint64_t bits, F&& func); //< oteration over bits set
-    static void process_attributes(sax_ctx* ctx, int nb_attributes, const xmlChar** attributes, std::uint64_t attr_bits);
-    static void process_elements(sax_ctx* ctx, std::uint64_t elem_bits);
-    static void on_start(void*                            user_data,
-                         const xmlChar*                   localname,
-                         [[maybe_unused]] const xmlChar*  prefix,
-                         const xmlChar*                   URI,
-                         [[maybe_unused]] int             nb_namespaces,
-                         [[maybe_unused]] const xmlChar** namespaces,
-                         [[maybe_unused]] int             nb_attributes,
-                         [[maybe_unused]] int             nb_defaulted,
-                         [[maybe_unused]] const xmlChar** attributes);
-    static void on_chars(void* user_data, const xmlChar* ch, int len);
-    static void on_end(void* user_data, //
-                       const xmlChar* /*localname*/,
-                       const xmlChar* /*prefix*/,
-                       const xmlChar* /*URI*/);
-    static void check_stop_condition(sax_ctx* ctx);
-    static bool is_path_match(const std::vector<xml_path_el>& stack, const xml_attr& attr);
+    static void   for_each_set_bit(std::uint64_t bits, F&& func); //< oteration over bits set
+    static void   process_attributes(sax_ctx* ctx, int nb_attributes, const xmlChar** attributes, std::uint64_t attr_bits);
+    static void   process_elements(sax_ctx* ctx, std::uint64_t elem_bits);
+    static void   on_start(void*           user_data,
+                           const xmlChar*  localname,
+                           const xmlChar*  prefix,
+                           const xmlChar*  URI,
+                           int             nb_namespaces,
+                           const xmlChar** namespaces,
+                           int             nb_attributes,
+                           int             nb_defaulted,
+                           const xmlChar** attributes);
+    static void   on_chars(void* user_data, const xmlChar* ch, int len);
+    static void   on_end(void* user_data, //
+                         const xmlChar* /*localname*/,
+                         const xmlChar* /*prefix*/,
+                         const xmlChar* /*URI*/);
+    static void   check_stop_condition(sax_ctx* ctx);
+    static bool   is_path_match(const std::vector<xml_path_el>& stack, const xml_attr& attr);
+    static cstr_t resolve_uri(const xmlChar* prefix, const xmlChar* URI, int nb_namespaces, const xmlChar** namespaces);
   private:
     const fsp_logger& log_;            //< logger
     xmlSAXHandler     handler_{};      // sax parser handler
@@ -85,7 +92,8 @@ namespace fsp
     const bool        log_crit_  = log_.active(fsp::lvl_enum::crit);
   };
 
-  inline sax_ctx::sax_ctx()
+  inline sax_ctx::sax_ctx(const fsp_logger& log)
+  : log_(log)
   {
     static const int buf_size = 1024;
     current_buffer.reserve(buf_size);
@@ -106,12 +114,14 @@ namespace fsp
 
   inline segment_sax::segment_sax(const fsp_logger& log)
   : log_(log)
+  , ctx_(log)
+
   {
     handler_.initialized    = XML_SAX2_MAGIC;
     handler_.startElementNs = &on_start;
     handler_.endElementNs   = &on_end;
     handler_.characters     = &on_chars;
-
+    std::cerr << ">>> SAX handler registered: startElementNs = " << reinterpret_cast<void*>(handler_.startElementNs) << '\n';
     ctxt_ = xmlCreatePushParserCtxt(&handler_, &ctx_, nullptr, 0, nullptr);
     // NOLINTNEXTLINE(hicpp-signed-bitwise)
     xmlCtxtUseOptions(ctxt_, XML_PARSE_NOERROR | XML_PARSE_NOWARNING | XML_PARSE_NONET);
@@ -136,8 +146,9 @@ namespace fsp
     // xmlCtxtResetPush perserves allocated internal structures (dict, ns tabele ...)
     // and only set new xml document to be parsed.
     xmlCtxtResetPush(ctxt_, xml_data.data(), static_cast<int>(xml_data.size()), nullptr, nullptr);
-    xmlCtxtUseOptions(ctxt_, XML_PARSE_NOERROR | XML_PARSE_NOWARNING | XML_PARSE_NONET); // NOLINT(hicpp-signed-bitwise)
-    ctx_.ctxt = ctxt_; // xmlCtxtResetPush lahko premakne notranje kazalce, ponovno poveži
+    xmlClearParserCtxt(ctxt_);
+    xmlCtxtUseOptions(ctxt_, XML_PARSE_NOERROR | XML_PARSE_NOWARNING | XML_PARSE_NONET | XML_PARSE_NSCLEAN); // NOLINT(hicpp-signed-bitwise)
+    ctx_.ctxt = ctxt_; // xmlCtxtResetPush can change internal structures. realign.
     xmlParseChunk(ctxt_, xml_data.data(), static_cast<int>(xml_data.size()), 1);
     if (log_debug_)
     {
@@ -151,7 +162,10 @@ namespace fsp
           msg_el.append(" ,");
           msg_el.append(el);
         }
-        msg += fmt::format("{:15} : [{}]\n", (*ctx_.targets)[ndx++].name(), msg_el.substr(2, msg_el.size() - 2));
+        // remove leading " ,"
+        if (msg_el.size() > 2) msg_el = msg_el.substr(2, msg_el.size() - 2);
+        msg += fmt::format("{:15} : [{}]\n", (*ctx_.targets)[ndx++].name(), msg_el);
+        log_.trace(msg);
       }
       log_.debug(msg);
     }
@@ -215,21 +229,29 @@ namespace fsp
                      });
   }
 
-  inline void segment_sax::on_start(void*                            user_data,
-                                    const xmlChar*                   localname,
-                                    [[maybe_unused]] const xmlChar*  prefix,
-                                    const xmlChar*                   URI,
-                                    [[maybe_unused]] int             nb_namespaces,
-                                    [[maybe_unused]] const xmlChar** namespaces,
-                                    [[maybe_unused]] int             nb_attributes,
-                                    [[maybe_unused]] int             nb_defaulted,
-                                    [[maybe_unused]] const xmlChar** attributes)
+  inline void segment_sax::on_start(void*           user_data,
+                                    const xmlChar*  localname,
+                                    const xmlChar*  prefix,
+                                    const xmlChar*  URI,
+                                    int             nb_namespaces,
+                                    const xmlChar** namespaces,
+                                    int             nb_attributes,
+                                    int /*nb_defaulted*/,
+                                    const xmlChar** attributes)
   {
+    std::cerr << "on_start called! *****************************'" << localname << "'\n";
     auto* ctx = static_cast<sax_ctx*>(user_data);
     if (ctx->stop_parsing) [[unlikely]]
       return;
     const auto* safe_tag = reinterpret_cast<const char*>(localname);
-    const auto* safe_uri = URI != nullptr ? reinterpret_cast<const char*>(URI) : "";
+    cstr_t      safe_uri = resolve_uri(prefix, URI, nb_namespaces, namespaces);
+    if (ctx->log_trace_)
+    {
+      ctx->log_.trace(fmt::format("-->tag: '{}' uri: '{}' prefix: '{}'",
+                                  safe_tag,
+                                  safe_uri,
+                                  prefix != nullptr ? reinterpret_cast<const char*>(prefix) : "(no prefix)"));
+    }
     ctx->path_stack.push_back({.uri = safe_uri, .tag = safe_tag});
 
     const auto depth = ctx->path_stack.size();
@@ -311,5 +333,32 @@ namespace fsp
       if (s.tag != t.tag || s.uri != t.ns) return false;
     }
     return true;
+  }
+
+  inline cstr_t segment_sax::resolve_uri( //
+    const xmlChar*  prefix,
+    const xmlChar*  URI,
+    int             nb_namespaces,
+    const xmlChar** namespaces)
+  {
+    if (URI != nullptr && *URI != '\0') { return reinterpret_cast<const char*>(URI); } // URI exists
+    if (nb_namespaces <= 0 || namespaces == nullptr) { return ""; }                    // no namespaces provided
+    const char* prefix_str = nullptr != prefix ? reinterpret_cast<const char*>(prefix) : nullptr;
+    for (int i = 0; i < nb_namespaces; ++i) // search namespace declarations
+    {
+      // NOLINTBEGIN(cppcoreguidelines-pro-bounds-pointer-arithmetic)
+      const xmlChar* ns_prefix = namespaces[static_cast<ptrdiff_t>(i * 2)];
+      const xmlChar* ns_uri    = namespaces[i * 2 + 1];
+      // NOLINTEND(cppcoreguidelines-pro-bounds-pointer-arithmetic)
+      //  Default namespace (no prefix)
+      if (prefix == nullptr && ns_prefix == nullptr) { return ns_uri != nullptr ? reinterpret_cast<const char*>(ns_uri) : ""; }
+      // Prefix match
+      if (prefix_str != nullptr && ns_prefix != nullptr && std::strcmp(prefix_str, reinterpret_cast<const char*>(ns_prefix)) == 0)
+      {
+        return ns_uri != nullptr ? reinterpret_cast<const char*>(ns_uri) : "";
+      }
+    }
+
+    return "";
   }
 } // namespace fsp

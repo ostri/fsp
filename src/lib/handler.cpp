@@ -12,13 +12,12 @@ namespace fsp
   // Konstrukcija
   // ============================================================================
   Handler::Handler(proc_data&                    targets,
-                   segment_queue&                queue,
                    const fsp_logger&             log,
                    const xercesc::SAX2XMLReader* parser,
                    std::string_view              base_addr,
                    segment_pool&                 pool)
   : targets_(targets) //
-  , queue_(queue)     //
+                      //  , queue_(queue)     //
   , parser_(parser)
   , log_(log)       //
   , doc_(base_addr) //
