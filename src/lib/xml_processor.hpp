@@ -43,7 +43,7 @@ namespace fsp
     xml_processor& operator=(const xml_processor&) = delete;
     xml_processor(xml_processor&&)                 = delete;
     xml_processor& operator=(xml_processor&&)      = delete;
-    void_result    process_from_buffer(std::size_t xml_path_ndx);
+    void_result    process_one_doc_from_buffer(std::size_t xml_path_ndx);
     /** @brief Process multiple XML files in parallel using N workers.
      * Each worker processes files sequentially from the queue using process_file.
      * Results and errors are collected from all files.
@@ -73,6 +73,7 @@ namespace fsp
                                                    const fsp_logger&          log);
     vec_seg_result                      move_results();
     vec_seg_result                      move_errors();
+    void_result                         init_parser_and_handler();
   private: /// methods
     void_result setup_parser_no_validation();
     void_result start_workers();

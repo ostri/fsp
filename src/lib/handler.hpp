@@ -49,13 +49,8 @@ namespace fsp
     void fatalError(const xercesc::SAXParseException& e) override;
 
     [[nodiscard]] std::size_t segments_found() const noexcept;
-    //[[nodiscard]] cstr_t      doc() const;
-    // // [DODANO] Injicira shared_future iz xml_processor::process_from_buffer.
-    // // Handler ga polling preverja v startElement() in ob napaki vrže
-    // // SAXParseException, ki jo Xerces uporabi kot signal za prekinitev parsinga.
-    // // shared_future (ne future) ker get() ne sme biti destructive — handler ga
-    // // lahko preveri večkrat (polling), xml_processor pa pokliče get() na koncu.
-    // void set_validation_future(std::shared_future<std::optional<error_info>> f);
+    void                      set_doc(cstr_t doc);
+    [[nodiscard]] cstr_t      doc() const;
   private: // methods
     [[noreturn]] void logic_error(const char* msg) const;
     // --- helper methods ---------
@@ -141,7 +136,8 @@ namespace fsp
   };
 
   inline std::size_t Handler::segments_found() const noexcept { return counter_; }
-  // inline cstr_t      Handler::doc() const { return doc_; }
+  inline void        Handler::set_doc(cstr_t doc) { doc_ = doc; }
+  inline cstr_t      Handler::doc() const { return doc_; }
   //  inline void        Handler::set_validation_future(std::shared_future<std::optional<error_info>> f) { val_future_ = std::move(f); }
 
 } // namespace fsp

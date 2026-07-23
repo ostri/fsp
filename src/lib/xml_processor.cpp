@@ -155,42 +155,14 @@ namespace fsp
     seg_pool_.ready_queue_close();
   }
 
-  void_result xml_processor::process_from_buffer(std::size_t xml_path_ndx)
+  void_result xml_processor::process_one_doc_from_buffer(std::size_t xml_path_ndx)
   {
-    auto& xml_mmap = ds_dscr_[xml_path_ndx].mmf();
-    auto  ps       = setup_parser_no_validation();
-    if (! ps) return std::unexpected(ps.error());
-
+    handler_->set_doc(ds_dscr_[xml_path_ndx].string_view());
     try
     {
-      handler_ = std::make_unique<Handler>(cfg_.targets, //
-                                           log_,
-                                           parser_.get(),
-                                           xml_mmap.string_view(),
-                                           seg_pool_);
-      parser_->setContentHandler(handler_.get());
-      parser_->setErrorHandler(handler_.get());
-    }
-    catch (const std::exception& e)
-    {
-      auto err = error_info{processor_error::internal_error, fmt::format("Handler init: {}", e.what()), "", 0};
-      log_.error(err.to_string());
-      return std::unexpected(err);
-    }
-    auto ws = start_workers(); // validation is on critical path workers start last
-    if (! ws) return std::unexpected(ws.error());
-    try
-    {
-      auto t0 = std::chrono::steady_clock::now();
-      if (log_info_) log_.info("SAX parsing started.");
       xercesc::MemBufInputSource src(
-        reinterpret_cast<const XMLByte*>(xml_mmap.data()), static_cast<XMLSize_t>(xml_mmap.size()), "xml_input", false);
+        reinterpret_cast<const XMLByte*>(handler_->doc().data()), static_cast<XMLSize_t>(handler_->doc().size()), "xml_input", false);
       parser_->parse(src);
-      save_stats();
-
-      auto us = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count();
-      if (log_info_) log_.info(fmt::format("SAX parsing finished. {} ms pending segments: {}", us, seg_pool_.ready_queue_size()));
-      seg_pool_.ready_queue_close();
     }
     // catch (const xercesc::SAXParseException& e)
     // {
@@ -265,8 +237,8 @@ namespace fsp
     log_.info(fmt::format("Processing file: '{}'", xml_path));
     //  Each file gets its own processor instance to avoid state conflicts
     // xml_processor file_proc(cfg_, log_.log_name(), seg_pool_, ds_dscr_);
-    auto res = process_from_buffer(doc_ndx_);
-    if (! res)
+    auto res = process_one_doc_from_buffer(doc_ndx_);
+    if (! res) [[unlikely]]
     {
       auto err = res.error();
       {
@@ -312,8 +284,20 @@ namespace fsp
                                  const fsp_logger&          log)
   {
     log.make_log_name(parent_log_name, fmt::format("doc-{:02}", worker_idx));
+    auto          t0        = std::chrono::steady_clock::now();
+    bool          log_info_ = log.active(lvl_enum::info);
     std::size_t   doc_ndx;
     xml_processor doc(config, parent_log_name, seg_pool, ds_dscr);
+
+    // Initialize parser and handler once per worker thread
+    if (auto init_res = doc.init_parser_and_handler(); ! init_res)
+    {
+      log.error(fmt::format("Failed to init parser/handler in worker {}: {}", worker_idx, init_res.error().to_string()));
+      return;
+    }
+    auto ws = doc.start_workers(); // validation is on critical path workers start last
+    if (! ws) return;
+    if (log_info_) log.info("SAX parsing started.");
     while (true) // loop the documents list
     {
       if (auto opt = doc_queue.try_pop()) { doc_ndx = opt.value(); }
@@ -327,7 +311,34 @@ namespace fsp
       }
       doc.process_one_doc(doc_ndx, results_agg_mutex, all_results, all_errors, has_error, first_error);
     }
+
+    doc.save_stats();
+    auto us = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count();
+    if (log_info_) log.info(fmt::format("SAX parsing finished. {} ms pending segments: {}", us, seg_pool.ready_queue_size()));
+    seg_pool.ready_queue_close();
+
     ++file_processed;
     if (doc_queue.is_aborted()) log.warn(fmt::format("doc_worker {}/{} aborted.", log.log_name(), worker_idx));
+  }
+
+  void_result xml_processor::init_parser_and_handler()
+  {
+    auto ps = setup_parser_no_validation();
+    if (! ps) return std::unexpected(ps.error());
+
+    try
+    {
+      // Initialize with empty string_view. Will be updated per document.
+      handler_ = std::make_unique<Handler>(cfg_.targets, log_, parser_.get(), "", seg_pool_);
+      parser_->setContentHandler(handler_.get());
+      parser_->setErrorHandler(handler_.get());
+    }
+    catch (const std::exception& e)
+    {
+      auto err = error_info{processor_error::internal_error, fmt::format("Handler init: {}", e.what()), "", 0};
+      log_.error(err.to_string());
+      return std::unexpected(err);
+    }
+    return {};
   }
 }; // namespace fsp
