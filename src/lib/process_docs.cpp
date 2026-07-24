@@ -43,6 +43,7 @@ namespace fsp
       if (num_parallel == 0) num_parallel = 1;
     }
     num_parallel = std::min(num_parallel, xml_paths.size());
+    active_cutters_.store(num_parallel, std::memory_order_relaxed);
 
     log_.info(fmt::format(
       "Processing {} XML files with {} parallel workers. XSD: {}", xml_paths.size(), num_parallel, ds_dscr_.empty() ? "none" : xsd_path));
@@ -81,6 +82,7 @@ namespace fsp
                                std::ref(doc_processed),
                                std::ref(has_error),
                                std::ref(first_error),
+                               std::ref(active_cutters_),
                                i,
                                log_name,
                                std::cref(cfg_),

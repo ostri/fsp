@@ -32,24 +32,25 @@ namespace fsp
     void_result process_files_internal();
   private: // data
     // NOLINTBEGIN(cppcoreguidelines-avoid-const-or-ref-data-members)
-    const s_clock          start_time_ = std::chrono::steady_clock::now();
-    const fsp_logger       log_;             //< logger (before any logging)
-    const xerces_mgr       xerces_life_;     //< must be first to be destructed last (before any xercesc)
-    const processor_config cfg_;             //< framework configuration
-    const str_t            parent_log_name_; //< parent name for logging
-    mutable std::mutex     results_mutex_;   //< results mutex
-    mutable std::mutex     errors_mutex_;    //< errors mutex
-    vec_seg_result         results_;         //< ok segment data
-    vec_seg_result         errors_;          //< segments that have semantic errors
-    stats_t                stats_{};         //< document processing statistics
-    doc_set_dscr           ds_dscr_{log_};   //< information about the xml documents to be processed
-    segment_pool           pool_;            //< segment pool
-    const bool             log_trace_ = log_.active(fsp::lvl_enum::trace);
-    const bool             log_debug_ = log_.active(fsp::lvl_enum::debug);
-    const bool             log_info_  = log_.active(fsp::lvl_enum::info);
-    const bool             log_warn_  = log_.active(fsp::lvl_enum::warn);
-    const bool             log_error_ = log_.active(fsp::lvl_enum::err);
-    const bool             log_crit_  = log_.active(fsp::lvl_enum::crit);
+    const s_clock            start_time_ = std::chrono::steady_clock::now();
+    const fsp_logger         log_;               //< logger (before any logging)
+    const xerces_mgr         xerces_life_;       //< must be first to be destructed last (before any xercesc)
+    const processor_config   cfg_;               //< framework configuration
+    const str_t              parent_log_name_;   //< parent name for logging
+    mutable std::mutex       results_mutex_;     //< results mutex
+    mutable std::mutex       errors_mutex_;      //< errors mutex
+    vec_seg_result           results_;           //< ok segment data
+    vec_seg_result           errors_;            //< segments that have semantic errors
+    stats_t                  stats_{};           //< document processing statistics
+    doc_set_dscr             ds_dscr_{log_};     //< information about the xml documents to be processed
+    segment_pool             pool_;              //< segment pool
+    std::atomic<std::size_t> active_cutters_{0}; //< number still active cutters
+    const bool               log_trace_ = log_.active(fsp::lvl_enum::trace);
+    const bool               log_debug_ = log_.active(fsp::lvl_enum::debug);
+    const bool               log_info_  = log_.active(fsp::lvl_enum::info);
+    const bool               log_warn_  = log_.active(fsp::lvl_enum::warn);
+    const bool               log_error_ = log_.active(fsp::lvl_enum::err);
+    const bool               log_crit_  = log_.active(fsp::lvl_enum::crit);
     // NOLINTEND(cppcoreguidelines-avoid-const-or-ref-data-members)
   };
 

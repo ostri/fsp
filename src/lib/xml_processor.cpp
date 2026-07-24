@@ -141,7 +141,7 @@ namespace fsp
    */
   void xml_processor::stop_workers()
   {
-    seg_pool_.ready_queue_close();
+    // seg_pool_.ready_queue_close();
     workers_.clear();
     log_.info("All workers stopped.");
   }
@@ -152,7 +152,7 @@ namespace fsp
   void xml_processor::cancel()
   {
     for (auto& el : workers_) el.request_stop();
-    seg_pool_.ready_queue_close();
+    // seg_pool_.ready_queue_close();
   }
 
   void_result xml_processor::process_one_doc_from_buffer(std::size_t xml_path_ndx)
@@ -279,6 +279,7 @@ namespace fsp
                                  std::atomic<std::size_t>&  file_processed,
                                  std::atomic<bool>&         has_error,
                                  std::optional<error_info>& first_error,
+                                 std::atomic<std::size_t>&  active_cutters,
                                  std::size_t                worker_idx,
                                  const std::string&         parent_log_name,
                                  const processor_config&    config,
@@ -312,6 +313,12 @@ namespace fsp
       }
       doc.process_one_doc(doc_ndx, results_agg_mutex, all_results, all_errors, has_error, first_error);
     }
+    if (active_cutters.fetch_sub(1, std::memory_order_acq_rel) == 1)
+    {
+      // zadnji C-thread je pravkar končal -> zdaj je varno zapreti deljeno ready_queue_
+      if (log_info_) log.info("Last cutter finished — closing shared ready_queue_.");
+      seg_pool.ready_queue_close();
+    }
     doc.stop_workers();
 
     auto final_res = doc.move_results();
@@ -325,7 +332,7 @@ namespace fsp
     doc.save_stats();
     auto us = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count();
     if (log_info_) log.info(fmt::format("SAX parsing finished. {} ms pending segments: {}", us, seg_pool.ready_queue_size()));
-    seg_pool.ready_queue_close();
+    // seg_pool.ready_queue_close();
 
     ++file_processed;
     if (doc_queue.is_aborted()) log.warn(fmt::format("doc_worker {}/{} aborted.", log.log_name(), worker_idx));
