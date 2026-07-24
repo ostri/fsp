@@ -49,7 +49,7 @@ namespace fsp
   xml_processor::~xml_processor()
   {
     cancel();
-    stop_workers();
+    stop_workers(); // FIXME should be on primary thread level
     parser_.reset();
     auto       stat = stats();
     const auto kilo = 1000;
@@ -192,8 +192,8 @@ namespace fsp
       log_.error(err.to_string());
       return std::unexpected(err);
     }
-    seg_pool_.ready_queue_close();
-    workers_.clear();
+    // seg_pool_.ready_queue_close();
+    // workers_.clear();
     success_ = true;
     return {};
   }
@@ -310,6 +310,15 @@ namespace fsp
         log.info(fmt::format("waiting time for new file {} µs.", elapsed));
       }
       doc.process_one_doc(doc_ndx, results_agg_mutex, all_results, all_errors, has_error, first_error);
+    }
+    doc.stop_workers();
+
+    auto final_res = doc.move_results();
+    auto final_err = doc.move_errors();
+    {
+      std::lock_guard<std::mutex> lock(results_agg_mutex);
+      all_results.append_range(final_res | std::views::as_rvalue);
+      all_errors.append_range(final_err | std::views::as_rvalue);
     }
 
     doc.save_stats();
