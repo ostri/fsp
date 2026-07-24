@@ -1,5 +1,6 @@
 #pragma once
 
+#include "doc_set_dscr.hpp"
 #include "lock_queue.hpp"
 #include "parsing_util.hpp"
 #include "segment_result.hpp"
@@ -46,16 +47,18 @@ namespace fsp
   class xml_worker
   {
   public:
-    // Konstruktor sprejme vse potrebne podatke (kopije/reference kjer je smiselno)
-    xml_worker(segment_pool&     pool,
-               const mmap_file&  xml_mmap,
-               vec_seg_result&   results,
-               vec_seg_result&   errors,
-               std::mutex&       results_mutex,
-               std::mutex&       errors_mutex,
-               const fsp_logger& log,
-               const proc_data&  targets,
-               str_t             parent_log_name);
+    // Upon construction we provide all relevant global structure references
+    xml_worker(
+      segment_pool&     pool,           // reference to segment pool
+      doc_set_dscr&     ds_dscr,        // reference to document set structure
+      vec_seg_result&   results,        // where to store correct segments
+      vec_seg_result&   errors,         // where to store non correct segmetns
+      std::mutex&       results_mutex,  // mutex for managing result structure
+      std::mutex&       errors_mutex,   // mutex for managing errors structure
+      const fsp_logger& log,            // reference to logger
+      const proc_data&  targets,        // structure that holds information about cutting points and xpaths of the values we are looking for
+      str_t             parent_log_name // parent thread log thread name
+    );
 
     // main functor method
     void operator()(const std::stop_token& st, int worker_id);
@@ -84,8 +87,9 @@ namespace fsp
   private:
     // --- worker context ---
     // NOLINTBEGIN(cppcoreguidelines-avoid-const-or-ref-data-members)
-    const fsp_logger&            log_;           //< logger
-    const mmap_file&             xml_mmap_;      //< mmap file with xml segment
+    const fsp_logger& log_;                      //< logger
+                                                 //    const mmap_file&             xml_mmap_;      //< mmap file with xml segment
+    doc_set_dscr&                ds_dscr_;       //< structre of all input documents
     std::vector<segment_result>& results_;       //< result after parsing
     std::vector<segment_result>& errors_;        //< errors after parsing
     std::mutex&                  results_mutex_; //< mutex to lock results

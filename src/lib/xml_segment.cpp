@@ -6,15 +6,17 @@ namespace fsp
 {
   // Vrne pogled na XML vsebino segmenta iz mmap bufferja.
   // mmap_base mora kazati na začetek mmap-ane datoteke.
-  xml_segment::xml_segment(std::size_t id,           // unique segment id
-                           int         subtree_type, // target index / subtree type
-                           std::size_t offset,       // start from the beggining of the buffer
-                           std::size_t length,       // length of this segment (whole xml subtree)
-                           str_XMLCh_t ns,           // set of ns as a string which belongs to top level tag
-                           str_XMLCh_t attrs         // set of attribute values which belongs to top level tag
+  xml_segment::xml_segment(std::size_t id,           //< unique segment id
+                           int         subtree_type, //< target index / subtree type
+                           int         doc_ndx,      //< index of the document the segment belongs to
+                           std::size_t offset,       //< start from the beggining of the buffer
+                           std::size_t length,       //< length of this segment (whole xml subtree)
+                           str_XMLCh_t ns,           //< set of ns as a string which belongs to top level tag
+                           str_XMLCh_t attrs         //< set of attribute values which belongs to top level tag
                            )
   : id_(id)
   , subtree_type_(subtree_type)
+  , doc_ndx_(doc_ndx)
   , offset_(offset)
   , length_(length)
   , ns_(std::move(ns))
@@ -81,10 +83,9 @@ namespace fsp
     cstr_t res{start, static_cast<std::size_t>(end - start)};
     return res;
   }
-  std::size_t        xml_segment::id() const { return id_; }
-  std::size_t        xml_segment::length() const { return length_; }
-  [[nodiscard]] bool xml_segment::empty() const noexcept { return length_ == 0; }
-  int                xml_segment::subtree_type() const { return subtree_type_; }
+
+  void xml_segment::set_doc_ndx(int doc_ndx) { doc_ndx_ = doc_ndx; }
+
   /**
    * @brief construct full subtree in utf8 from components
    * This hack is neccessary since xerces startElement returns index of one char after the opening tag of
@@ -148,14 +149,15 @@ namespace fsp
     x_str       attrs(attrs_);
     auto        leading = std::string(offs, ' ');
     std::string str     = fmt::format( //
-      R"({0}id: {1} subtree type: {2} offset: {3} length: {4}
-{0}ns:    '{5}'
-{0}attrs: '{6}')",
+      R"({0}id: {1} subtree type: {2} offset: {3} length: {4} doc_ndx: {5}
+{0}ns:    '{6}'
+{0}attrs: '{7}')",
       leading,
       id_,
       subtree_type_,
       offset_,
       length_,
+      doc_ndx_,
       ns.to_string_view(),
       attrs.to_string_view());
     return str;
@@ -164,54 +166,16 @@ namespace fsp
   { return dump_all(reinterpret_cast<const std::byte*>(base.data()), offs); }
   [[nodiscard]] std::string xml_segment::dump_all(const std::byte* mmap_base, int offs) const
   { //
-    return fmt::format(R"({0}segment {1} [subtree type: {2}, offs: {3}, len: {4} ns: {5}]
-  {0}{6})",
+    return fmt::format(R"({0}segment {1} [subtree type: {2}, offs: {3}, len: {4} doc_ndx: {5} ns: {6}]
+  {0}{7})",
                        std::string(offs, ' '),
                        id_,
                        subtree_type_,
                        offset_,
                        length_,
+                       doc_ndx_,
                        x_str(ns_).to_string_view(),
                        subtree_str(view(mmap_base)));
   }
   std::size_t xml_segment::offset() const { return offset_; }
-  xml_segment::xml_segment(const xml_segment& other) = default;
-
-  xml_segment::xml_segment(xml_segment&& other) noexcept
-  : id_(other.id_)
-  , subtree_type_(other.subtree_type_)
-  , offset_(other.offset_)
-  , length_(other.length_)
-  , ns_(std::move(other.ns_))
-  , attrs_(std::move(other.attrs_))
-  {
-  }
-
-  xml_segment& xml_segment::operator=(const xml_segment& other)
-  {
-    if (this != &other)
-    {
-      id_           = other.id_;
-      subtree_type_ = other.subtree_type_;
-      offset_       = other.offset_;
-      length_       = other.length_;
-      ns_           = other.ns_;
-      attrs_        = other.attrs_;
-    }
-    return *this;
-  }
-
-  xml_segment& xml_segment::operator=(xml_segment&& other) noexcept
-  {
-    if (this != &other)
-    {
-      id_           = other.id_;
-      subtree_type_ = other.subtree_type_;
-      offset_       = other.offset_;
-      length_       = other.length_;
-      ns_           = std::move(other.ns_);
-      attrs_        = std::move(other.attrs_);
-    }
-    return *this;
-  }
 } // namespace fsp

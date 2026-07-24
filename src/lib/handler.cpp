@@ -14,20 +14,13 @@ namespace fsp
   Handler::Handler(proc_data&                    targets,
                    const fsp_logger&             log,
                    const xercesc::SAX2XMLReader* parser,
-                   std::string_view              doc,
-                   segment_pool&                 pool)
-  : targets_(targets) //
-                      //  , queue_(queue)     //
-  , parser_(parser)
-  , log_(log)   //
-  , doc_(doc)   //
-  , pool_(pool) // segment pool
-  , log_trace_(log_.active(lvl_enum::trace))
-  , log_debug_(log_.active(lvl_enum::debug))
-  , log_info_(log_.active(lvl_enum::info))
-  , log_warn_(log_.active(lvl_enum::warn))
-  , log_err_(log_.active(lvl_enum::err))
-  , log_crit_(log_.active(lvl_enum::crit))
+                   segment_pool&                 pool,
+                   doc_set_dscr&                 ds_dscr)
+  : log_(log)         // log
+  , targets_(targets) //
+  , parser_(parser)   // parser
+  , ds_dscr_(ds_dscr) // documents to be processed
+  , pool_(pool)       // segment pool
   , max_xpath_depth_(static_cast<int>(targets_.targets.max_xpath_size()))
   {
     // targets are converted to wide characters to make all matching in XMLCh
@@ -179,37 +172,6 @@ namespace fsp
   inline void Handler::startPrefixMapping(const XMLCh* prefix, const XMLCh* uri) { push_ns_mapping(prefix, uri); }
   // ============================================================================
   // startElement
-  // ============================================================================
-  // ============================================================================
-  // Helper inline methods (add declarations to handler.hpp)
-  // ============================================================================
-  // inline void Handler::check_validation_status()
-  // {
-  //   // [DODANO] Polling preverjanje validacijske napake iz vzporedne niti.
-  //   // Izvede se vsakih 1024 elementov (bitna maska je cenejša od modulo).
-  //   // wait_for(0) je neblokirajoč — vrne immediately z deferred/timeout/ready.
-  //   // Ob napaki vržemo SAXParseException: to je edini način za prekinitev
-  //   // Xerces SAX parsinga iz ContentHandler callbacka. Izjema se propagira
-  //   // skozi parser_->parse() in jo ujame process_from_buffer().
-  //   constexpr const auto every = 524287U - 1U; // 2**15
-  //   if ((element_counter_++ & every) == 0 && val_future_.valid())
-  //   {
-  //     if (val_future_.wait_for(std::chrono::seconds(0)) == std::future_status::ready)
-  //     {
-  //       const auto& val_result = val_future_.get();
-  //       if (val_result.has_value())
-  //       {
-  //         if (log_debug_) [[unlikely]]
-  //           log_.debug("Handler: validacijska napaka zaznana, prekinjam SAX parsing.");
-  //         // Vržemo SAXParseException — Xerces jo ujame interno in ustavi parsing.
-  //         // Sporočilo prenesemo naprej; row/col ni znan na tej točki (0,0).
-  //         // TODO: ostri - ostri - preveri kako prenesemo informacijo
-  //         // NOLINTNEXTLINE(hicpp-exception-baseclass, cert-err60-cpp)
-  //         throw xercesc::SAXParseException(x_str(val_result->message()).c_str(), nullptr, nullptr, 0, 0);
-  //       }
-  //     }
-  //   }
-  // }
 
   inline void Handler::check_xpath_matches( //
     const XMLCh* uri,
@@ -298,7 +260,7 @@ namespace fsp
         std::size_t end_offset = parser_->getSrcOffset();
         std::size_t length     = end_offset - frag_start_offset_;
         std::size_t idx        = pool_.acquire_slot();
-        auto        seg        = xml_segment(counter_++, seg_type_, frag_start_offset_, length, ns_, attr_);
+        auto        seg        = xml_segment(counter_++, seg_type_, doc_ndx_, frag_start_offset_, length, ns_, attr_);
         if (log_debug_) [[unlikely]]
         {
           log_.debug(fmt::format("pushing to queue: '{}' '{}'", x_str(localname).to_string_view(), seg.dump()));
@@ -339,4 +301,5 @@ namespace fsp
   {
     if (log_crit_) { log_.critical(prepare_msg(e)); }
   }
+
 } // namespace fsp

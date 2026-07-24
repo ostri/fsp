@@ -29,7 +29,7 @@ namespace fsp
 {
   using xml_char = std::unique_ptr<xmlChar, xml_deleter>;
   xml_worker::xml_worker(segment_pool&     pool,
-                         const mmap_file&  xml_mmap,
+                         doc_set_dscr&     ds_dscr,
                          vec_seg_result&   results,
                          vec_seg_result&   errors,
                          std::mutex&       results_mutex,
@@ -38,7 +38,8 @@ namespace fsp
                          const proc_data&  targets,
                          str_t             parent_log_name)
   : log_(log)
-  , xml_mmap_(xml_mmap)
+  //  , xml_mmap_(xml_mmap)
+  , ds_dscr_(ds_dscr)
   , results_(results)
   , errors_(errors)
   , results_mutex_(results_mutex)
@@ -120,8 +121,8 @@ namespace fsp
     try
     {
       if (log_debug_) { log_.debug(fmt::format("process segment: {}", seg.dump())); }
-      auto view     = seg.view(xml_mmap_.data()); // just segment contents
-      auto tmp_view = seg.subtree_str(view);      // contents + opening and closing tag
+      auto view     = seg.view(ds_dscr_[seg.doc_ndx()].mmf().data()); // just segment contents
+      auto tmp_view = seg.subtree_str(view);                          // contents + opening and closing tag
       if (log_trace_) log_.trace(fmt::format("seg: {}: finalized doc:\n'{}'", seg.id(), tmp_view));
       auto r = sax_->exec(tmp_view, targets_.xpaths[seg.subtree_type()]);
 

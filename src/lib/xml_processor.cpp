@@ -120,9 +120,9 @@ namespace fsp
     {
       str_t parent_name = log_.log_name();
       workers_.emplace_back(
-        xml_worker{           //
-                   seg_pool_, //
-                   active_mmap(),
+        xml_worker{//
+                   seg_pool_,
+                   ds_dscr_,
                    results_,
                    errors_,
                    results_mutex_,
@@ -158,6 +158,7 @@ namespace fsp
   void_result xml_processor::process_one_doc_from_buffer(std::size_t xml_path_ndx)
   {
     handler_->set_doc(ds_dscr_[xml_path_ndx].string_view());
+    handler_->set_doc_ndx(static_cast<int>(xml_path_ndx));
     try
     {
       xercesc::MemBufInputSource src(
@@ -338,7 +339,7 @@ namespace fsp
     try
     {
       // Initialize with empty string_view. Will be updated per document.
-      handler_ = std::make_unique<Handler>(cfg_.targets, log_, parser_.get(), "", seg_pool_);
+      handler_ = std::make_unique<Handler>(cfg_.targets, log_, parser_.get(), seg_pool_, ds_dscr_);
       parser_->setContentHandler(handler_.get());
       parser_->setErrorHandler(handler_.get());
     }
