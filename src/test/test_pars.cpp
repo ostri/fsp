@@ -9,7 +9,6 @@ namespace fsp
     {.prefix = "xy", .uri = "krneki"},      // explicitly defined namespace and prefix
   });
 
-//  constexpr const std::array raw_inputs = std::to_array<raw_attr>({
   constexpr auto raw = std::to_array<raw_attr>({
     {.name="txn_id",          .path="CdtTrfTxInf/PmtId/TxId"},
     {.name="debtor_.iban_",   .path="CdtTrfTxInf/DbtrAcct/Id/IBAN"},
@@ -24,28 +23,6 @@ namespace fsp
   // clang-format on
   // NOLINTNEXTLINE(cert-err58-cpp)
   const auto xtn = build(raw, NS); // xml tree node(s)
-
-  // NOLINTBEGIN(readability-magic-numbers)
-  // Testi zastavic v času prevajanja
-  // static_assert(xtn["txn_id"].name() == "txn_id");
-  // static_assert(! xtn["txn_id"].is_attr());
-  // static_assert(! xtn["txn_id"].is_opt());
-
-  // // Test za "currency_", ki ima is_attr = true in is_opt = true
-  // static_assert(xtn["currency_"].name() == "currency_");
-  // static_assert(xtn["currency_"].is_attr());
-  // static_assert(xtn["currency_"].is_opt());
-  // static_assert(xtn["currency_"].attr_name() == "Ccy");
-
-  // // Test za "value_date_", ki ima is_opt = true
-  // static_assert(! xtn["value_date_"].is_attr());
-  // static_assert(xtn["value_date_"].is_opt());
-  // // Test za "remittance_", ki ima is_attr = true in is_opt = true
-  // static_assert(xtn["remmitance_"].name() == "remmitance_");
-  // static_assert(! xtn["remmitance_"].is_attr());
-  // static_assert(xtn["remmitance_"].is_opt());
-  // static_assert(xtn["remmitance_"].last().tag == "Nb");
-  //  NOLINTEND(readability-magic-numbers)
 }; // namespace fsp
 
 int main()
@@ -95,16 +72,6 @@ int main()
     {
       fmt::print("depth: {:3}: min: {:15} max: {:15}\n", +ndx, fsp::xtn.first(ndx), fsp::xtn.last(ndx));
     }
-    // static_assert(fsp::xtn.first_xpath_tag_name(0) == "CdtTrfTxInf");
-    // static_assert(fsp::xtn.last_xpath_tag_name(0) == "CdtTrfTxInf");
-    // static_assert(fsp::xtn.first_xpath_tag_name(1) == "CdtrAcct");
-    // static_assert(fsp::xtn.last_xpath_tag_name(1) == "RmtInf");
-    // static_assert(fsp::xtn.first_xpath_tag_name(2) == "FinInstnId");
-    // static_assert(fsp::xtn.last_xpath_tag_name(2) == "TxId");
-    // static_assert(fsp::xtn.first_xpath_tag_name(3) == "BICFI");
-    // static_assert(fsp::xtn.last_xpath_tag_name(3) == "RfrdDocInf");
-    // static_assert(fsp::xtn.first_xpath_tag_name(4) == "Nb");
-    // static_assert(fsp::xtn.last_xpath_tag_name(4) == "Nb");
   }
   catch (...)
   {

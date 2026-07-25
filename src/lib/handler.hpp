@@ -45,7 +45,6 @@ namespace fsp
       [[maybe_unused]] const XMLCh* uri,
       [[maybe_unused]] const XMLCh* localname,
       [[maybe_unused]] const XMLCh* qname) override;
-    // void characters([[maybe_unused]] const XMLCh* chars, [[maybe_unused]] XMLSize_t length) override { };
     //  --- SAX2 ErrorHandler ---
     void warning(const xercesc::SAXParseException& e) override;
     void error(const xercesc::SAXParseException& e) override;
@@ -59,7 +58,6 @@ namespace fsp
   private: // methods
     [[noreturn]] void logic_error(const char* msg) const;
     // --- helper methods ---------
-    // void check_validation_status();
     void check_xpath_matches(const XMLCh* uri,
                              const XMLCh* localname,
                              //                             const XMLCh*               qname, // it is not used to make it faster

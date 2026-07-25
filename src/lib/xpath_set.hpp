@@ -115,44 +115,6 @@ namespace fsp
       if (depth < data_[i].size()) return i;
     throw compile_error("no element at depth");
   }
-  // [[nodiscard]] constexpr cstr_t xpath_set::max(std::size_t depth) const
-  // {
-  //   if (depth >= max_xpath_size_) throw compile_error("depth exceeds max xpath depth");
-  //   auto   first_ndx = first(depth);
-  //   auto   last_ndx  = last(depth);
-  //   cstr_t val       = data_.at(first_ndx).xpath()[depth].tag;
-  //   for (std::size_t i = first_ndx + 1; i < last_ndx + 1; i++)
-  //     // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-constant-array-index)
-  //     if (depth < data_[i].size() && data_.at(i).xpath()[depth].tag > val) //
-  //       val = data_.at(i).xpath()[depth].tag;
-  //   return val;
-  // }
-  // [[nodiscard]] constexpr cstr_t xpath_set::min(std::size_t depth) const
-  // {
-  //   if (depth >= max_xpath_size_) throw compile_error("depth exceeds max xpath depth");
-  //   auto   first_ndx = first(depth);
-  //   auto   last_ndx  = last(depth);
-  //   cstr_t val       = data_.at(first_ndx).xpath()[depth].tag;
-  //   for (std::size_t i = first_ndx + 1; i < last_ndx + 1; i++)
-  //     // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-constant-array-index)
-  //     if (depth < data_[i].size() && data_.at(i).xpath()[depth].tag < val) //
-  //       val = data_.at(i).xpath()[depth].tag;
-  //   return val;
-  // }
-  // FIX 5: std::bitset → std::uint64_t (constexpr v C++20)
-  // Bit i je postavljen, če element i obstaja na globini depth.
-  // Omejitev: deluje za do 64 elementov (xpath_max = 64).
-  // [[nodiscard]] constexpr std::uint64_t xpath_set::available(std::size_t depth) const
-  // {
-  //   static_assert(xpath_max <= sizeof(uint64_t) * CHAR_BIT, "available() uses uint64_t — xpath_max must be <= 64");
-  //   if (depth >= max_xpath_size_) throw compile_error("depth exceeds max xpath depth");
-
-  //   std::uint64_t result = 0;
-  //   for (std::size_t i = 0; i < size_; ++i)
-  //     // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-constant-array-index)
-  //     if (depth < data_[i].size()) result |= (std::uint64_t{1} << i);
-  //   return result;
-  // }
   // dump() ni constexpr (fmt::format alokira) — definicija brez constexpr
   [[nodiscard]] inline std::string xpath_set::dump(int offs) const
   {

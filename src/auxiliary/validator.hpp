@@ -4,7 +4,6 @@
 #include "x_str.hpp"
 #include <fmt/base.h>
 #include <vector>
-#include <xercesc/sax2/DeclHandler.hpp>
 #include <xercesc/sax2/DefaultHandler.hpp>
 namespace fsp
 {
@@ -20,11 +19,6 @@ namespace fsp
   class valid_handler : public xercesc::DefaultHandler
   {
   public:
-    void                validate_xml([[maybe_unused]] const std::stop_token& st,
-                                     const gr_pool_t&                        gr_pool,
-                                     std::latch&                             gr_latch,
-                                     std::atomic<bool>&                      gr_loaded,
-                                     const vec_str_t&                        xml_files);
     void                reset();
     void                error(const xercesc::SAXParseException& exc) override;
     void                fatalError(const xercesc::SAXParseException& exc) override;

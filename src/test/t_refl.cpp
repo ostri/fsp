@@ -109,11 +109,8 @@ consteval auto get_ns_annotation()
 }
 int main()
 {
-  // constexpr auto ns_ann  = get_ns_annotation<^^work>();
   constexpr auto classes = get_classes_with_xpath<^^work>();
 
-  // std::cout << "NS anotacije:\n";
-  // for (const auto& ann : ns_ann) std::format("- '{}'\n", ann);
   std::cout << "Razredi z xpath anotacijo:\n";
   for (const auto& ci : classes)
   {

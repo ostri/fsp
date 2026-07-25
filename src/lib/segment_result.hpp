@@ -1,15 +1,12 @@
 #pragma once
 
-// #include "xml_processor.hpp"
 #include <fmt/format.h>
 #include <string>
-// #include <unordered_map>
 #include <utility>
 #include <vector>
 namespace fsp
 {
   using cstr_t = std::string_view;
-  //  using xpath_result = std::unordered_map<cstr_t, std::vector<std::string>>;
   using xpath_result = std::vector<std::vector<std::string>>;
   struct segment_result
   {
@@ -49,9 +46,4 @@ namespace fsp
   inline int                 segment_result::doc_ndx() const { return doc_ndx_; }
   inline const xpath_result& segment_result::values() const { return values_; }
   inline xpath_result&       segment_result::values() { return values_; }
-  //   inline cstr_t              segment_result::values(cstr_t key) const { return values(key, 0); }
-  //   inline cstr_t              segment_result::values(std::size_t key, std::size_t ndx) const
-  //   {
-  // return values_.at(key);
-  //   }
 } // namespace fsp

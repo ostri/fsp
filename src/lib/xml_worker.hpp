@@ -90,7 +90,6 @@ namespace fsp
     // --- worker context ---
     // NOLINTBEGIN(cppcoreguidelines-avoid-const-or-ref-data-members)
     const fsp_logger& log_;                      //< logger
-                                                 //    const mmap_file&             xml_mmap_;      //< mmap file with xml segment
     const doc_set_dscr&          ds_dscr_;       //< structre of all input documents
     std::vector<segment_result>& results_;       //< result after parsing
     std::vector<segment_result>& errors_;        //< errors after parsing

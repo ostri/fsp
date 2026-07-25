@@ -128,54 +128,6 @@ int main(int argc, const char* argv[])
       std::cout << "\n--- Errors ---\n";
       for (const auto& e : errors) { std::cout << "  " << e.seg_id() << "\n"; }
     }
-
-    // for (const auto& err : errors)
-    // {
-    //   std::cerr << "  ✗ Error in segment " << err.segment_id << " (XPath index " << err.xpath_index << "): " << err.error_message <<
-    //   "\n";
-    // }
-
-    // for (const auto& res : results)
-    // {
-    //   std::cout << "  ✓ Segment " << res.segment_id << " (XPath index " << res.xpath_index << ") processed\n";
-    // }
-    // ///===============================================================================
-    // // Example of using the processor directly
-    // std::cout << "\n=== Advanced usage with custom config ===\n";
-
-    // fsp::processor_config config;
-    // for (const auto& xpath_str : xpath_strings)
-    // {
-    //   auto xpath = fsp::xpath_helpers::from_string(xpath_str);
-    //   if (xpath) config.targets.push_back(std::move(*xpath));
-    // }
-    // config.num_workers            = 4;
-    // config.validate_against_xsd   = true;
-    // config.log_config             = log_cfg;
-    // config.log_config.logger_name = "advanced_processor";
-
-    // fsp::xml_processor processor(config);
-
-    // auto process_result = processor.process_file(xml_file, xsd_file);
-    // if (! process_result)
-    // {
-    //   std::cerr << "Advanced processing failed: " << process_result.error().to_string() << "\n";
-    //   return 1;
-    // }
-
-    // auto advanced_results = processor.get_results();
-    // auto advanced_errors  = processor.get_errors();
-    // auto stats            = processor.get_stats();
-
-    // std::cout << "\n=== Processing Statistics ===\n";
-    // std::cout << fmt::format("  Total segments: {}\n", stats.total_segments);
-    // std::cout << fmt::format("  Successful: {}\n", stats.successful_segments);
-    // std::cout << fmt::format("  Failed: {}\n", stats.failed_segments);
-    // std::cout << fmt::format("  Active workers: {}\n", stats.active_workers);
-    // std::cout << fmt::format("  Processing time: {:.2f} ms\n", stats.processing_time_ms);
-
-    // auto logger = processor.get_logger();
-    // if (logger) logger->info("Application completed successfully");
   }
   catch (const std::exception& e)
   {

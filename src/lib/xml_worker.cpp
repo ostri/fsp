@@ -11,7 +11,6 @@
 #include <libxml/xmlreader.h>
 #include <stack>
 #include <utility>
-// #include <thread>
 
 namespace
 {
@@ -40,7 +39,6 @@ namespace fsp
     str_t               parent_log_name // parent thread log thread name
     )
   : log_(log)
-  //  , xml_mmap_(xml_mmap)
   , ds_dscr_(ds_dscr)
   , results_(results)
   , errors_(errors)

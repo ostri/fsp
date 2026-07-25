@@ -109,13 +109,6 @@ namespace fsp
     if (ns_stack_.back().depth == doc_depth_) ns_stack_.pop_back();
   }
 
-  // inline x_str Handler::resolve_ns(const x_str& prefix) const noexcept
-  // {
-  //   for (const auto& it : std::views::reverse(ns_stack_)) // from top to bottom
-  //     for (const auto& el : it.ns_vec)
-  //       if (el.first == prefix) return el.second;
-  //   return {};
-  // }
   // ============================================================================
   // Tag matching
   // ============================================================================
@@ -234,7 +227,6 @@ namespace fsp
                              [[maybe_unused]] const XMLCh* qname,
                              const xercesc::Attributes&    attrs)
   {
-    // check_validation_status();
     open_ns_scope();
     doc_depth_++;
     if (log_debug_) [[unlikely]]

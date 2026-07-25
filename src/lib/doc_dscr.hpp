@@ -115,7 +115,6 @@ namespace fsp
   inline doc_dscr::       operator bool() const noexcept { return doc_.is_open(); }
   inline doc_status       doc_dscr::status() const noexcept { return status_.load(std::memory_order_acquire); }
   inline void             doc_dscr::set_status(doc_status status) noexcept { status_.store(status, std::memory_order_release); }
-  // inline doc_status       doc_dscr::status() const noexcept { return status_.load(std::memory_order_acquire); }
 
   /**
    * @brief Records a validation outcome for this document (called by either the C or V worker).
