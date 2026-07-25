@@ -447,7 +447,7 @@ namespace fsp
    * idx mora klicatelj že imeti (npr. iz pool_.try_pop_ready() ali pool_.pop_segment_ndx()).
    * @param idx indeks segmenta v pool-u
    */
-  void xml_worker::process_one(std::size_t idx)
+  int xml_worker::process_one(std::size_t idx)
   {
     const xml_segment seg = pool_.retrieve_segment(idx); // slot se sprosti tukaj, ne glede na izid spodaj
 
@@ -456,7 +456,7 @@ namespace fsp
     {
       if (log_debug_)
         log_.debug(fmt::format("Segment {} (doc {}): dokument neveljaven, procesiranje preskočeno.", seg.id(), seg.doc_ndx()));
-      return;
+      return seg.doc_ndx();
     }
 
     if (auto res = process_segment(seg))
@@ -469,6 +469,7 @@ namespace fsp
       if (loc_res_nak_.size() + 1 == loc_res_nak_.capacity()) loc_res_nak_.reserve(loc_res_nak_.size() * 2);
       loc_res_nak_.emplace_back(std::move(*res));
     }
+    return seg.doc_ndx();
   }
   /**
    * @brief prenese lokalno nabrane rezultate v skupne results_/errors_ (kliče pipeline_worker ob koncu niti)

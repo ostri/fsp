@@ -16,8 +16,9 @@ namespace fsp
   {
   public:
     doc_cutter(const processor_config& cfg, const fsp_logger& log, segment_pool& pool, const doc_set_dscr& ds_dscr);
-    void_result init();                   //< once, when the hybrid thread starts
-    void_result cut(std::size_t doc_ndx); //< cuts ONE document; caller checks doc_status before calling
+    void_result               init();                   //< once, when the hybrid thread starts
+    void_result               cut(std::size_t doc_ndx); //< cuts ONE document; caller checks doc_status before calling
+    [[nodiscard]] std::size_t segments_found() const noexcept;
   private:
     void_result setup_parser_no_validation();
   private:
@@ -31,4 +32,6 @@ namespace fsp
     const bool                              log_debug_ = log_.active(lvl_enum::debug);
     // NOLINTEND(cppcoreguidelines-avoid-const-or-ref-data-members)
   };
+
+  inline std::size_t doc_cutter::segments_found() const noexcept { return handler_->segments_found(); }
 } // namespace fsp

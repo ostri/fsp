@@ -61,9 +61,9 @@ namespace fsp
     );
 
     // main functor method
-    void operator()(const std::stop_token& st, int worker_id);
-    void process_one(std::size_t idx);
-    void flush_results();
+    void              operator()(const std::stop_token& st, int worker_id);
+    [[nodiscard]] int process_one(std::size_t idx); // returns the segment's doc_ndx, for pipeline-level completion timing
+    void              flush_results();
   private:
     // Nekdanje statične funkcije zdaj kot članske metode
     result<segment_result>               process_segment(const xml_segment& seg);

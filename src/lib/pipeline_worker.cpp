@@ -33,11 +33,16 @@ namespace fsp
       pipeline_.notify_cut_done();
       return;
     }
+    pipeline_.record_cut_start(doc_ndx);
     if (auto res = cutter_->cut(doc_ndx); ! res)
     {
       // A malformed document is a per-document failure, not a fatal one: mark it invalid so
       // any already-cut segments of this document get discarded by P, then keep going.
       pipeline_.report_validation_result(doc_ndx, doc_status::validation_failed, res.error());
+    }
+    else
+    {
+      pipeline_.record_cut_finished(doc_ndx, cutter_->segments_found());
     }
     pipeline_.notify_cut_done();
   }
@@ -91,7 +96,8 @@ namespace fsp
       if (pool.ready_queue_size_approx() > 0)
         if (auto seg_ndx = pool.try_pop_ready())
         {
-          processor_->process_one(*seg_ndx);
+          auto doc_ndx = processor_->process_one(*seg_ndx);
+          pipeline_.record_segment_done(static_cast<std::size_t>(doc_ndx));
           continue;
         }
 
@@ -100,7 +106,10 @@ namespace fsp
       // real exit condition for this thread.
       std::size_t seg_ndx = 0;
       if (pool.pop_segment_ndx(seg_ndx) != queue_status::active) break;
-      processor_->process_one(seg_ndx);
+      {
+        auto doc_ndx = processor_->process_one(seg_ndx);
+        pipeline_.record_segment_done(static_cast<std::size_t>(doc_ndx));
+      }
     }
     processor_->flush_results();
   }

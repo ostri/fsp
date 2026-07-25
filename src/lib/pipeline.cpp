@@ -42,6 +42,37 @@ namespace fsp
     return false;
   }
   void pipeline::release_cutter_slot() noexcept { threads_cutting_.fetch_sub(1, std::memory_order_acq_rel); }
+  void pipeline::record_cut_start(std::size_t doc_ndx) { doc_timing_[doc_ndx].start = std::chrono::steady_clock::now(); }
+
+  void pipeline::record_cut_finished(std::size_t doc_ndx, std::size_t segment_count)
+  {
+    auto& t = doc_timing_[doc_ndx];
+    t.total_segments.store(segment_count, std::memory_order_release);
+    t.cut_finished.store(true, std::memory_order_release);
+    maybe_log_doc_done(doc_ndx);
+  }
+
+  void pipeline::record_segment_done(std::size_t doc_ndx)
+  {
+    doc_timing_[doc_ndx].segments_done.fetch_add(1, std::memory_order_acq_rel);
+    maybe_log_doc_done(doc_ndx);
+  }
+
+  // Whichever of (cut finished) or (last segment done) happens LAST triggers this log --
+  // 'logged' CAS ensures it fires exactly once even if both conditions become true concurrently
+  // from different threads.
+  void pipeline::maybe_log_doc_done(std::size_t doc_ndx)
+  {
+    auto& t = doc_timing_[doc_ndx];
+    if (! t.cut_finished.load(std::memory_order_acquire)) return;
+    auto total = t.total_segments.load(std::memory_order_acquire);
+    auto done  = t.segments_done.load(std::memory_order_acquire);
+    if (done < total) return;
+    bool expected = false;
+    if (! t.logged.compare_exchange_strong(expected, true, std::memory_order_acq_rel)) return;
+    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t.start).count();
+    log_.info(fmt::format("Doc {}: cut+process finished ({} segments, {} ms).", doc_ndx, total, ms));
+  }
 
   void pipeline::report_validation_result(std::size_t doc_ndx, doc_status result, error_info err)
 
@@ -91,6 +122,7 @@ namespace fsp
 
     const auto doc_count = xml_paths.size();
     docs_remaining_to_cut_.store(doc_count, std::memory_order_relaxed);
+    doc_timing_ = std::make_unique<doc_timing_t[]>(doc_count); // value-initializes each entry's atomics
 
     // c_queue_ and v_queue_: both known, final quantities up front -> set_finished() immediately.
     // v_queue_ stays empty when validation is disabled -- pipeline_worker's size_approx() check
@@ -144,7 +176,8 @@ namespace fsp
     if (! failed.empty()) log_.warn(fmt::format("{} of {} document(s) failed and were skipped.", failed.size(), doc_count));
 
     auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start_time_).count();
-    stats_  = stats_t{
+    log_.info(fmt::format("TOTAL_EXECUTION_TIME_MS={}", ms)); // easily-greppable line for benchmark scripts
+    stats_ = stats_t{
       .successful_segments = results_.size(),
       .failed_segments     = errors_.size(),
       .processing_time_ms  = static_cast<double>(ms),
