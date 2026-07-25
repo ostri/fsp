@@ -23,7 +23,7 @@ namespace fsp
     void                         ready_queue_close();
     void                         abort();
     queue_status                 pop_segment_ndx(std::size_t& ndx);
-    void                         set_segment(std::size_t ndx, const xml_segment& seg);
+    void                         set_segment(std::size_t ndx, xml_segment seg);
     void                         set_result(std::size_t ndx, const segment_result& seg_r);
     xml_segment                  retrieve_segment(std::size_t ndx);
     std::size_t                  ready_queue_size() const { return ready_queue_.size(); }
@@ -118,10 +118,10 @@ namespace fsp
     free_queue_.push(ndx);
     return seg; // with move the segment slot is also reinitiaized
   }
-  inline void segment_pool::set_segment(std::size_t ndx, const xml_segment& seg)
+  inline void segment_pool::set_segment(std::size_t ndx, xml_segment seg)
   {
     //    log_.debug(fmt::format("before set segment: ndx: {} {}", ndx, seg.dump()));
-    segments_[ndx] = seg;
+    segments_[ndx] = std::move(seg);
     //    log_.debug(fmt::format("after set segment:  ndx: {} {}", ndx, segments_[ndx].dump()));
   }
   inline void segment_pool::set_result(std::size_t ndx, const segment_result& seg_r) { results_[ndx] = seg_r; }

@@ -171,7 +171,7 @@ namespace fsp
       }
       log_.debug(msg);
     }
-    return ctx_.results;
+    return std::move(ctx_.results); // faster than copy
   }
 
   // Pomožna funkcija za iteracijo čez nastavljene bite

@@ -258,7 +258,7 @@ namespace fsp
           log_.debug(fmt::format("pushing to queue: '{}' '{}'", x_str(localname).to_string_view(), seg.dump()));
           log_.trace(fmt::format("{}", seg.dump_all(doc_)));
         }
-        pool_.set_segment(idx, seg);
+        pool_.set_segment(idx, std::move(seg));
         pool_.push_ready(idx);
 
         frag_depth_ = -1; // we are outside of capturing

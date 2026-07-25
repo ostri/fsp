@@ -134,7 +134,7 @@ namespace fsp
                                  seg.offset(),
                                  seg.length()));
         }
-        segment_result res(seg.id(), seg.subtree_type(), r, seg.doc_ndx());
+        segment_result res(seg.id(), seg.subtree_type(), std::move(r), seg.doc_ndx());
         return res;
       }
 
