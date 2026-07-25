@@ -108,7 +108,7 @@ namespace fsp
    */
   inline xml_segment segment_pool::retrieve_segment(std::size_t ndx)
   {
-    results_[ndx] = segment_result{0, -1};      // FIXME ostri check whether we need to have segmetns and results in parallel
+    results_[ndx] = segment_result{0, -1, -1};  // FIXME ostri check whether we need to have segmetns and results in parallel
                                                 //    log_.debug(fmt::format("retrieve before: idx: {} {}", ndx, segments_[ndx].dump()));
     xml_segment seg(std::move(segments_[ndx])); // std::move(segments_.at(idx));
     if (seg.subtree_type() < 0 || seg.length() == 0)

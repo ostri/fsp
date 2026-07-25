@@ -127,7 +127,7 @@ set(SOURCES
     ${CMAKE_SOURCE_DIR}/src/lib/lock_queue.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/xml_segment.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/mmap_file.cpp
-    ${CMAKE_SOURCE_DIR}/src/lib/xml_processor.cpp
+#    ${CMAKE_SOURCE_DIR}/src/lib/xml_processor.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/e_tag.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/error_info.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/mem_buf_holder.cpp
@@ -159,6 +159,7 @@ set(SOURCES
     ${CMAKE_SOURCE_DIR}/src/lib/doc_cutter.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/pipeline_worker.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/pipeline.cpp
+    ${CMAKE_SOURCE_DIR}/src/lib/doc_validator.cpp
 )
 # --- 5. Define targets ---
 set(b_target fsp_lib) # name of the target

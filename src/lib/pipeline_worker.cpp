@@ -1,8 +1,6 @@
 #include "pipeline_worker.hpp"
 #include "pipeline.hpp"
 #include <fmt/format.h>
-#include <chrono>
-#include <thread>
 
 namespace fsp
 {
@@ -21,6 +19,7 @@ namespace fsp
                                               log_,
                                               cfg.targets,
                                               parent_log_name_);
+    validator_ = std::make_unique<doc_validator>(log_, pipeline_.ds_dscr());
   }
 
   void_result pipeline_worker::init() { return cutter_->init(); }
@@ -45,14 +44,23 @@ namespace fsp
 
   void pipeline_worker::do_validate(std::size_t doc_ndx)
   {
-    // TODO: ostri - ostri replace with a real xercesc/XSD validator; for now a stub as agreed.
-    std::this_thread::sleep_for(std::chrono::seconds(17)); // NOLINT(readability-magic-numbers)
-    pipeline_.report_validation_result(doc_ndx, doc_status::validation_ok);
+    auto res = validator_->validate(doc_ndx);
+    if (! res)
+    {
+      // The XSD itself failed to load/compile -- systemic, not specific to this one document.
+      pipeline_.report_fatal_error(res.error());
+      return;
+    }
+    if (*res) pipeline_.report_validation_result(doc_ndx, doc_status::validation_ok);
+    else
+      pipeline_.report_validation_result(doc_ndx,
+                                         doc_status::validation_failed,
+                                         error_info{processor_error::xsd_validation_failed, validator_->last_error_message(), "", 0});
   }
 
   void pipeline_worker::operator()(const std::stop_token& st, int worker_id)
   {
-    log_.make_log_name(parent_log_name_, fmt::format("pw.{:02}", worker_id));
+    log_.make_log_name(parent_log_name_, fmt::format("pipe-wrk.{:02}", worker_id));
     auto& pool = pipeline_.pool();
 
     while (! st.stop_requested())

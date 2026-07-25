@@ -100,10 +100,10 @@ int main(int argc, const char* argv[])
                                       .log_level      = spdlog::level::trace, // spdlog::level::info;
                                       .logger_name    = "fsp"};
 
-    const auto no_of_workers = 2U;                   // number of paralell workers
+    const auto no_of_workers = 20U;                  // number of paralell workers
     auto       cfg           = fsp::processor_config{//
                                                      .targets              = all,
-                                                     .num_workers          = no_of_workers,
+                                                     .num_docs             = no_of_workers,
                                                      .validate_against_xsd = ! xsd_file.empty(),
                                                      .log_config           = log_cfg};
 

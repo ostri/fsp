@@ -139,7 +139,7 @@ namespace fsp
                                  seg.offset(),
                                  seg.length()));
         }
-        segment_result res(seg.id(), seg.subtree_type(), r);
+        segment_result res(seg.id(), seg.subtree_type(), r, seg.doc_ndx());
         return res;
       }
 
@@ -245,7 +245,7 @@ namespace fsp
   }
   segment_result xml_worker::loop(const xml_segment& seg, const fsp::xpath_set& xpaths, const xpath_limits& limits)
   {
-    segment_result res(seg.id(), seg.subtree_type());
+    segment_result res(seg.id(), seg.subtree_type(), seg.doc_ndx());
     prepare_tree_stack(xpaths.size());
     value_ndx_      = -1; // xpath index of the value
     int read_status = xmlTextReaderRead(reader_.get());

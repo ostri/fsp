@@ -81,7 +81,9 @@ namespace fsp
     auto num_parallel = cfg_.num_docs;
     if (num_parallel == 0) num_parallel = std::thread::hardware_concurrency();
     if (num_parallel == 0) num_parallel = 1;
-    num_parallel = std::min(num_parallel, xml_paths.size());
+    // NOTE: no longer capped to xml_paths.size() -- unlike the old per-document worker model,
+    // P operates on segments independently of document count, so threads beyond doc_count are
+    // still useful (they simply never win a C reservation and help drain the pool via P instead).
 
     // At most half the threads may cut concurrently, guaranteeing that at least as many
     // threads remain structurally free for P as are currently committed to C.
@@ -122,7 +124,16 @@ namespace fsp
 
     for (auto& t : threads)
       if (t.joinable()) t.join();
-
+    // Safety net for the rare race where P processed a segment before V (or a late C failure)
+    // marked its document invalid -- priority C > V > P makes this uncommon but not impossible.
+    // Discard any result/error whose document ended up invalid.
+    auto belongs_to_invalid_doc = [this](const segment_result& r)
+    {
+      return r.doc_ndx() >= 0 && static_cast<std::size_t>(r.doc_ndx()) < ds_dscr_.size() &&
+             ds_dscr_[static_cast<std::size_t>(r.doc_ndx())].status() == doc_status::validation_failed;
+    };
+    std::erase_if(results_, belongs_to_invalid_doc);
+    std::erase_if(errors_, belongs_to_invalid_doc);
     if (first_error_)
     {
       log_.error(fmt::format("Pipeline failed with a fatal error: {}", first_error_->to_string()));

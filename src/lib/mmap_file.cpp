@@ -25,10 +25,11 @@ namespace fsp
       data_       = other.data_;
       size_       = other.size_;
       fd_         = other.fd_;
+      path_       = std::move(other.path_);
       other.data_ = nullptr;
       other.size_ = 0;
       other.fd_   = -1;
-      other.path_ = "";
+      other.path_.clear();
     }
     return *this;
   }

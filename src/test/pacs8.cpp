@@ -102,12 +102,11 @@ int main(int argc, const char* argv[])
                                .log_level      = spdlog::level::trace, // spdlog::level::info;
                                .logger_name    = "fsp"};
 
-    const auto no_of_doc_workers = 3U; // number of paralell workers processing document
-    const auto no_of_doc         = 2U; // number of paralell documents processed
+    //    const auto no_of_doc_workers = 3U; // number of paralell workers processing document
+    const auto no_of_doc = 20U; // number of paralell documents processed
 
     auto cfg = fsp::processor_config{//
                                      .targets              = all,
-                                     .num_workers          = no_of_doc_workers,
                                      .num_docs             = no_of_doc,
                                      .validate_against_xsd = ! xsd_file.empty(),
                                      .log_config           = log_cfg};

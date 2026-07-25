@@ -1,6 +1,7 @@
 #pragma once
 
 #include "doc_cutter.hpp"
+#include "doc_validator.hpp"
 #include "xml_worker.hpp"
 #include "logger.hpp"
 #include "processor_config.hpp"
@@ -24,12 +25,13 @@ namespace fsp
     void do_validate(std::size_t doc_ndx);
   private:
     // NOLINTBEGIN(cppcoreguidelines-avoid-const-or-ref-data-members)
-    pipeline&                   pipeline_;
-    const fsp_logger&           log_;
-    str_t                       parent_log_name_;
-    std::unique_ptr<doc_cutter> cutter_;
-    std::unique_ptr<xml_worker> processor_;
-    const bool                  log_info_ = log_.active(lvl_enum::info);
+    pipeline&                      pipeline_;
+    const fsp_logger&              log_;
+    str_t                          parent_log_name_;
+    std::unique_ptr<doc_cutter>    cutter_;
+    std::unique_ptr<xml_worker>    processor_;
+    std::unique_ptr<doc_validator> validator_;
+    const bool                     log_info_ = log_.active(lvl_enum::info);
     // NOLINTEND(cppcoreguidelines-avoid-const-or-ref-data-members)
   };
 } // namespace fsp
