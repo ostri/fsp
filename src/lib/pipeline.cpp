@@ -28,7 +28,23 @@ namespace fsp
     }
   }
 
+  // Guarantees that at most (max_concurrent_cutters_) threads are ever inside a cut at once,
+  // always leaving at least as many threads free to drain the pool via P. Without this, cutting
+  // is fully synchronous per document: if every thread commits to C simultaneously, nobody is
+  // left to free pool slots and Handler::endElement()'s acquire_slot() deadlocks permanently.
+  bool pipeline::try_reserve_cutter_slot()
+  {
+    std::size_t cur = threads_cutting_.load(std::memory_order_relaxed);
+    while (cur < max_concurrent_cutters_)
+    {
+      if (threads_cutting_.compare_exchange_weak(cur, cur + 1, std::memory_order_acq_rel, std::memory_order_relaxed)) return true;
+    }
+    return false;
+  }
+  void pipeline::release_cutter_slot() noexcept { threads_cutting_.fetch_sub(1, std::memory_order_acq_rel); }
+
   void pipeline::report_validation_result(std::size_t doc_ndx, doc_status result, error_info err)
+
   { ds_dscr_[doc_ndx].set_validation_result(result, std::move(err)); }
 
   void pipeline::report_fatal_error(error_info err)
@@ -56,25 +72,37 @@ namespace fsp
     for (const auto& file : xml_paths) ds_dscr_.add_document(file);
     ds_dscr_.set_grammar(xsd_path);
 
+    // Skip V entirely when no XSD grammar was successfully loaded -- has_grammar() also covers
+    // the case where a path was given but loading it failed (set_grammar() swallows that and
+    // returns false without setting anything).
+    const bool run_validation = ds_dscr_.has_grammar();
+    if (! run_validation) log_.info("No XSD grammar available -- V (validation) is disabled for this run.");
+
     auto num_parallel = cfg_.num_docs;
     if (num_parallel == 0) num_parallel = std::thread::hardware_concurrency();
     if (num_parallel == 0) num_parallel = 1;
     num_parallel = std::min(num_parallel, xml_paths.size());
 
+    // At most half the threads may cut concurrently, guaranteeing that at least as many
+    // threads remain structurally free for P as are currently committed to C.
+    max_concurrent_cutters_ = std::max<std::size_t>(1, num_parallel / 2);
+
     const auto doc_count = xml_paths.size();
     docs_remaining_to_cut_.store(doc_count, std::memory_order_relaxed);
 
-    // c_queue_ and v_queue_: both known, final quantities up front -> set_finished() immediately
+    // c_queue_ and v_queue_: both known, final quantities up front -> set_finished() immediately.
+    // v_queue_ stays empty when validation is disabled -- pipeline_worker's size_approx() check
+    // then naturally never selects the V role, no changes needed anywhere else.
     for (std::size_t i = 0; i < doc_count; ++i)
     {
       c_queue_.push(i);
-      v_queue_.push(i);
+      if (run_validation) v_queue_.push(i);
     }
     c_queue_.set_finished();
     v_queue_.set_finished();
 
-    log_.info(fmt::format("Pipeline: {} documents, {} hybrid worker threads.", doc_count, num_parallel));
-
+    log_.info(fmt::format(
+      "Pipeline: {} documents, {} hybrid worker threads (max {} cutting concurrently).", doc_count, num_parallel, max_concurrent_cutters_));
     std::vector<std::unique_ptr<pipeline_worker>> worker_state;
     worker_state.reserve(num_parallel);
     for (std::size_t i = 0; i < num_parallel; ++i)

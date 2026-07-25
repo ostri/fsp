@@ -57,13 +57,18 @@ namespace fsp
 
     while (! st.stop_requested())
     {
-      // 1) highest priority: start as many C as possible right away
-      if (pipeline_.c_queue_size_approx() > 0)
+      // 1) highest priority: start as many C as possible right away -- but never let more than
+      //    max_concurrent_cutters_ threads commit to cutting at once (see pipeline::try_reserve_cutter_slot()).
+      if (pipeline_.c_queue_size_approx() > 0 && pipeline_.try_reserve_cutter_slot())
+      {
         if (auto doc_ndx = pipeline_.try_pop_cut())
         {
           do_cut(*doc_ndx);
+          pipeline_.release_cutter_slot();
           continue;
         }
+        pipeline_.release_cutter_slot(); // reserved but nothing left to pop -- release immediately
+      }
 
       // 2) V runs in parallel with C, picked whenever this thread currently has no C work
       if (pipeline_.v_queue_size_approx() > 0)

@@ -36,6 +36,10 @@ namespace fsp
     [[nodiscard]] std::ptrdiff_t                           c_queue_size_approx() const noexcept;
     [[nodiscard]] std::ptrdiff_t                           v_queue_size_approx() const noexcept;
     void                                                   notify_cut_done();
+    // Deadlock guard: at most half the threads may cut concurrently, so at least as many
+    // threads remain structurally free for P as are currently committed to C.
+    [[nodiscard]] bool                try_reserve_cutter_slot();
+    void                              release_cutter_slot() noexcept;
     void                              report_validation_result(std::size_t doc_ndx, doc_status result, error_info err = {});
     void                              report_fatal_error(error_info err);
     [[nodiscard]] segment_pool&       pool() noexcept { return pool_; }
@@ -54,6 +58,8 @@ namespace fsp
     lock_queue<std::size_t>   c_queue_;
     lock_queue<std::size_t>   v_queue_;
     std::atomic<std::size_t>  docs_remaining_to_cut_{0};
+    std::size_t               max_concurrent_cutters_{1}; //< computed in process_files()
+    std::atomic<std::size_t>  threads_cutting_{0};
     vec_seg_result            results_;
     vec_seg_result            errors_;
     mutable std::mutex        results_mutex_;
