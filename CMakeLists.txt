@@ -127,26 +127,21 @@ set(SOURCES
     ${CMAKE_SOURCE_DIR}/src/lib/lock_queue.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/xml_segment.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/mmap_file.cpp
-#    ${CMAKE_SOURCE_DIR}/src/lib/xml_processor.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/e_tag.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/error_info.cpp
-    ${CMAKE_SOURCE_DIR}/src/lib/mem_buf_holder.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/logger_config.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/processor_config.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/xpath_helpers.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/common.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/parsing_util.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/e_tag_wide.cpp
-    ${CMAKE_SOURCE_DIR}/src/lib/static_sorted_set.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/xml_node.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/xml_attr.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/xpath_limits.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/xpath_el.cpp
-    ${CMAKE_SOURCE_DIR}/src/lib/static_xpath_vec.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/xpath_limits.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/segment_result.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/logger.cpp
-    ${CMAKE_SOURCE_DIR}/src/lib/root_cb.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/xml_worker.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/load_grammar.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/process_docs.cpp
