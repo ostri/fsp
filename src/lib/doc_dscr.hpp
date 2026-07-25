@@ -45,7 +45,6 @@ namespace fsp
     [[nodiscard]] const mmap_file&           mmf() const noexcept;
     mmap_file&                               mmf() noexcept;
     [[nodiscard]] doc_status                 status() const noexcept;
-    void                                     set_status(doc_status status) noexcept;
     void                            set_validation_result(doc_status result, error_info err = {}) noexcept; // SPREMENJENO iz set_status()
     [[nodiscard]] const error_info& error() const noexcept;                                                 // NOVO
   private:                                                                                                  //< methods
@@ -114,7 +113,6 @@ namespace fsp
   inline mmap_file&       doc_dscr::mmf() noexcept { return doc_; }
   inline doc_dscr::       operator bool() const noexcept { return doc_.is_open(); }
   inline doc_status       doc_dscr::status() const noexcept { return status_.load(std::memory_order_acquire); }
-  inline void             doc_dscr::set_status(doc_status status) noexcept { status_.store(status, std::memory_order_release); }
 
   /**
    * @brief Records a validation outcome for this document (called by either the C or V worker).
