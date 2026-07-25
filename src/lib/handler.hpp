@@ -33,7 +33,11 @@ namespace fsp
   class Handler : public xercesc::DefaultHandler
   {
   public:
-    Handler(proc_data& targets, const fsp_logger& log, const xercesc::SAX2XMLReader* parser, segment_pool& pool, doc_set_dscr& ds_dscr);
+    Handler(const proc_data&              targets, //
+            const fsp_logger&             log,
+            const xercesc::SAX2XMLReader* parser,
+            segment_pool&                 pool,
+            const doc_set_dscr&           ds_dscr);
     // --- SAX2 ContentHandler ---
     void startPrefixMapping(const XMLCh* prefix, const XMLCh* uri) override;
     void startElement(const XMLCh* uri, const XMLCh* localname, const XMLCh* qname, const xercesc::Attributes& attrs) override;
@@ -107,7 +111,7 @@ namespace fsp
     std::size_t                   counter_           = 0;  //< counter to obtain unique segment id within the file
     const xercesc::SAX2XMLReader* parser_;                 //< pointer to related parser; only for getSrcOffs, not owner
     cstr_t                        doc_;                    //< xml document mapped as string view over mmap file
-    doc_set_dscr&                 ds_dscr_;                //< structure of all documents to be processed
+    const doc_set_dscr&           ds_dscr_;                //< structure of all documents to be processed
     int                           doc_ndx_ = -1;           //< index of the document within the ds_dscr global structure
     str_XMLCh_t                   ns_;                     //< current and inherited namespaces as string (for current segment)
     str_XMLCh_t                   attr_;                   //< current tag attributes as a string (for current segment)

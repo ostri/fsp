@@ -49,19 +49,21 @@ namespace fsp
   public:
     // Upon construction we provide all relevant global structure references
     xml_worker(
-      segment_pool&     pool,           // reference to segment pool
-      doc_set_dscr&     ds_dscr,        // reference to document set structure
-      vec_seg_result&   results,        // where to store correct segments
-      vec_seg_result&   errors,         // where to store non correct segmetns
-      std::mutex&       results_mutex,  // mutex for managing result structure
-      std::mutex&       errors_mutex,   // mutex for managing errors structure
-      const fsp_logger& log,            // reference to logger
-      const proc_data&  targets,        // structure that holds information about cutting points and xpaths of the values we are looking for
-      str_t             parent_log_name // parent thread log thread name
+      segment_pool&       pool,          // reference to segment pool
+      const doc_set_dscr& ds_dscr,       // reference to document set structure
+      vec_seg_result&     results,       // where to store correct segments
+      vec_seg_result&     errors,        // where to store non correct segmetns
+      std::mutex&         results_mutex, // mutex for managing result structure
+      std::mutex&         errors_mutex,  // mutex for managing errors structure
+      const fsp_logger&   log,           // reference to logger
+      const proc_data&    targets, // structure that holds information about cutting points and xpaths of the values we are looking for
+      str_t               parent_log_name // parent thread log thread name
     );
 
     // main functor method
     void operator()(const std::stop_token& st, int worker_id);
+    void process_one(std::size_t idx);
+    void flush_results();
   private:
     // Nekdanje statične funkcije zdaj kot članske metode
     result<segment_result>               process_segment(const xml_segment& seg);
@@ -89,7 +91,7 @@ namespace fsp
     // NOLINTBEGIN(cppcoreguidelines-avoid-const-or-ref-data-members)
     const fsp_logger& log_;                      //< logger
                                                  //    const mmap_file&             xml_mmap_;      //< mmap file with xml segment
-    doc_set_dscr&                ds_dscr_;       //< structre of all input documents
+    const doc_set_dscr&          ds_dscr_;       //< structre of all input documents
     std::vector<segment_result>& results_;       //< result after parsing
     std::vector<segment_result>& errors_;        //< errors after parsing
     std::mutex&                  results_mutex_; //< mutex to lock results
@@ -118,6 +120,8 @@ namespace fsp
     std::size_t                  segment_counter_ = 0;
     std::unique_ptr<segment_sax> sax_;  // sax parser
     segment_pool&                pool_; // segment pool
+    vec_seg_result               loc_res_ok_;
+    vec_seg_result               loc_res_nak_;
     //  NOLINTEND(cppcoreguidelines-avoid-const-or-ref-data-members)
   };
 

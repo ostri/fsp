@@ -15,18 +15,19 @@ namespace fsp
   public:
     // segment_pool();
     explicit segment_pool(const fsp_logger& log, std::size_t no_of_slots);
-    void                      init(std::size_t capacity = 1024UL); // NOLINT(readability-magic-numbers)
-    std::size_t               acquire_slot();                      // get free slot (blocks if none)
-    void                      push_ready(std::size_t idx);
-    auto                      try_pop_ready();
-    [[nodiscard]] std::size_t size() const noexcept;
-    void                      ready_queue_close();
-    void                      abort();
-    queue_status              pop_segment_ndx(std::size_t& ndx);
-    void                      set_segment(std::size_t ndx, const xml_segment& seg);
-    void                      set_result(std::size_t ndx, const segment_result& seg_r);
-    xml_segment               retrieve_segment(std::size_t ndx);
-    std::size_t               ready_queue_size() const { return ready_queue_.size(); }
+    void                         init(std::size_t capacity = 1024UL); // NOLINT(readability-magic-numbers)
+    std::size_t                  acquire_slot();                      // get free slot (blocks if none)
+    void                         push_ready(std::size_t idx);
+    auto                         try_pop_ready();
+    [[nodiscard]] std::size_t    size() const noexcept;
+    void                         ready_queue_close();
+    void                         abort();
+    queue_status                 pop_segment_ndx(std::size_t& ndx);
+    void                         set_segment(std::size_t ndx, const xml_segment& seg);
+    void                         set_result(std::size_t ndx, const segment_result& seg_r);
+    xml_segment                  retrieve_segment(std::size_t ndx);
+    std::size_t                  ready_queue_size() const { return ready_queue_.size(); }
+    [[nodiscard]] std::ptrdiff_t ready_queue_size_approx() const noexcept { return ready_queue_.size_approx(); }
   private:
     const fsp_logger&        log_;
     std::size_t              capacity_{0};

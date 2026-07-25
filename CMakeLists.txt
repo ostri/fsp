@@ -156,6 +156,9 @@ set(SOURCES
     ${CMAKE_SOURCE_DIR}/src/lib/doc_dscr.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/doc_set_dscr.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/segment_pool.cpp
+    ${CMAKE_SOURCE_DIR}/src/lib/doc_cutter.cpp
+    ${CMAKE_SOURCE_DIR}/src/lib/pipeline_worker.cpp
+    ${CMAKE_SOURCE_DIR}/src/lib/pipeline.cpp
 )
 # --- 5. Define targets ---
 set(b_target fsp_lib) # name of the target

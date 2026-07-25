@@ -28,15 +28,17 @@ namespace
 namespace fsp
 {
   using xml_char = std::unique_ptr<xmlChar, xml_deleter>;
-  xml_worker::xml_worker(segment_pool&     pool,
-                         doc_set_dscr&     ds_dscr,
-                         vec_seg_result&   results,
-                         vec_seg_result&   errors,
-                         std::mutex&       results_mutex,
-                         std::mutex&       errors_mutex,
-                         const fsp_logger& log,
-                         const proc_data&  targets,
-                         str_t             parent_log_name)
+  xml_worker::xml_worker(
+    segment_pool&       pool,           // reference to segment pool
+    const doc_set_dscr& ds_dscr,        // reference to document set structure
+    vec_seg_result&     results,        // where to store correct segments
+    vec_seg_result&     errors,         // where to store non correct segmetns
+    std::mutex&         results_mutex,  // mutex for managing result structure
+    std::mutex&         errors_mutex,   // mutex for managing errors structure
+    const fsp_logger&   log,            // reference to logger
+    const proc_data&    targets,        // structure that holds information about cutting points and xpaths of the values we are looking for
+    str_t               parent_log_name // parent thread log thread name
+    )
   : log_(log)
   //  , xml_mmap_(xml_mmap)
   , ds_dscr_(ds_dscr)
@@ -438,5 +440,50 @@ namespace fsp
     if (value.has_value()) [[likely]]
       return value.value(); // non null value
     throw std::runtime_error(fmt::format("attribute '{}:{}' has no value.", local_name, uri));
+  }
+  /**
+   * @brief obdela EN segment iz pool-a (za hibridni pipeline_worker)
+   * V nasprotju z operator() ne pozna svoje zanke po pool_.pop_segment_ndx() —
+   * idx mora klicatelj že imeti (npr. iz pool_.try_pop_ready() ali pool_.pop_segment_ndx()).
+   * @param idx indeks segmenta v pool-u
+   */
+  void xml_worker::process_one(std::size_t idx)
+  {
+    const xml_segment seg = pool_.retrieve_segment(idx); // slot se sprosti tukaj, ne glede na izid spodaj
+
+    // Umik: dokument je bil medtem validiran kot neveljaven -> prihranimo SAX ekstrakcijo.
+    if (ds_dscr_[seg.doc_ndx()].status() == doc_status::validation_failed)
+    {
+      if (log_debug_)
+        log_.debug(fmt::format("Segment {} (doc {}): dokument neveljaven, procesiranje preskočeno.", seg.id(), seg.doc_ndx()));
+      return;
+    }
+
+    if (auto res = process_segment(seg))
+    {
+      if (loc_res_ok_.size() + 1 == loc_res_ok_.capacity()) loc_res_ok_.reserve(loc_res_ok_.size() * 2);
+      loc_res_ok_.emplace_back(std::move(*res));
+    }
+    else
+    {
+      if (loc_res_nak_.size() + 1 == loc_res_nak_.capacity()) loc_res_nak_.reserve(loc_res_nak_.size() * 2);
+      loc_res_nak_.emplace_back(std::move(*res));
+    }
+  }
+  /**
+   * @brief prenese lokalno nabrane rezultate v skupne results_/errors_ (kliče pipeline_worker ob koncu niti)
+   */
+  void xml_worker::flush_results()
+  {
+    {
+      std::lock_guard lock(results_mutex_);
+      results_.append_range(std::move(loc_res_ok_));
+    }
+    {
+      std::lock_guard lock(errors_mutex_);
+      errors_.append_range(std::move(loc_res_nak_));
+    }
+    loc_res_ok_.clear();
+    loc_res_nak_.clear();
   }
 } // namespace fsp
