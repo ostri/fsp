@@ -4,7 +4,6 @@
 
 #include <fmt/base.h>
 #include <xercesc/util/XercesDefs.hpp>
-#include <xercesc/framework/LocalFileInputSource.hpp>
 #include <xercesc/framework/MemBufInputSource.hpp>
 #include <xercesc/framework/XMLGrammarPool.hpp>
 #include <xercesc/sax2/XMLReaderFactory.hpp>

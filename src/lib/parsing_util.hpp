@@ -3,7 +3,6 @@
 #include "xml_attr.hpp"
 #include "xpath_set.hpp"
 
-#include <cassert>
 #include <chrono>
 #include <fmt/format.h>
 // #include <ranges>

@@ -4,18 +4,14 @@
 #include <vector>
 #include <string_view>
 
-#include <xercesc/dom/DOMLocator.hpp>
-#include <xercesc/sax/Locator.hpp>
 #include <xercesc/sax2/Attributes.hpp>
 #include <xercesc/sax2/DefaultHandler.hpp>
 #include <xercesc/sax2/SAX2XMLReader.hpp>
 
 #include "doc_set_dscr.hpp"
 #include "e_tag_wide.hpp"
-#include "error_info.hpp"
 #include "logger.hpp"
 #include "parsing_util.hpp"
-#include "lock_queue.hpp"
 #include "x_str.hpp"
 #include "xml_segment.hpp"
 #include "segment_pool.hpp"
@@ -27,8 +23,6 @@ namespace fsp
   using cstr_XMLCh_t  = std::basic_string_view<XMLCh>;
   using ns_def_t      = std::vector<std::pair<x_str, x_str>>;
   using RuleMask      = uint64_t;
-  using segment_queue = lock_queue<xml_segment>;
-
 
   class Handler : public xercesc::DefaultHandler
   {

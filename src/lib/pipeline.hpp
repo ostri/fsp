@@ -36,7 +36,7 @@ namespace fsp
     void_result                            process_files(const std::vector<std::string>& xml_paths, const std::string& xsd_path);
     [[nodiscard]] const vec_seg_result&    get_results() const;
     [[nodiscard]] const vec_seg_result&    get_errors() const;
-    [[nodiscard]] stats_t                  stats() const { return stats_; }
+    // [[nodiscard]] stats_t                  stats() const { return stats_; }
     [[nodiscard]] std::vector<std::size_t> failed_document_indices() const;
 
     // --- API for pipeline_worker / toolkits ---

@@ -29,8 +29,6 @@ namespace fsp
 
   void                             EH::resetErrors() { hasErrors = false; }
   [[nodiscard]] bool               EH::hasValidationErrors() const { return hasErrors; }
-  [[nodiscard]] const std::string& EH::getLastErrorLocation() const { return lastErrorLocation; }
-  [[nodiscard]] const std::string& EH::getLastErrorMessage() const { return lastErrorMessage; }
   void                             EH::handleError(const char* type, const xercesc::SAXParseException& exc)
   {
     // Convert from UTF-16 to UTF-8 for console output

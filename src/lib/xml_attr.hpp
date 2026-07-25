@@ -46,7 +46,6 @@ namespace fsp
   // --- xml attribute (runtime friendly, built at compile time) ------------------------
   struct xml_attr
   {
-    static constexpr std::size_t MAX_XPATH_LEN = 1024;
   public:
     constexpr xml_attr() = default;
     constexpr xml_attr(std::size_t original_ndx, const raw_attr& raw, std::span<const ns> ns_arr);

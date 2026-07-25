@@ -137,9 +137,7 @@ set(SOURCES
     ${CMAKE_SOURCE_DIR}/src/lib/e_tag_wide.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/xml_node.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/xml_attr.cpp
-    ${CMAKE_SOURCE_DIR}/src/lib/xpath_limits.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/xpath_el.cpp
-    ${CMAKE_SOURCE_DIR}/src/lib/xpath_limits.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/segment_result.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/logger.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/xml_worker.cpp

@@ -3,19 +3,8 @@
 #include <string>
 
 #include <xercesc/parsers/XercesDOMParser.hpp>
-#include <xercesc/dom/DOMDocument.hpp>
-#include <xercesc/framework/LocalFileInputSource.hpp>
-#include <xercesc/framework/MemBufInputSource.hpp>
 #include <xercesc/sax/SAXParseException.hpp>
-#include <xercesc/validators/schema/SchemaGrammar.hpp>
-#include <xercesc/framework/psvi/XSModel.hpp>
-#include <xercesc/validators/common/GrammarResolver.hpp>
-#include <xercesc/validators/schema/SchemaValidator.hpp>
-#include <xercesc/util/PlatformUtils.hpp>
-#include <xercesc/util/XMLString.hpp>
-#include <xercesc/util/XMLUni.hpp>
 #include <xercesc/sax/ErrorHandler.hpp>
-#include <xercesc/util/TranscodingException.hpp>
 
 namespace fsp
 {
@@ -30,8 +19,6 @@ namespace fsp
     void                             fatalError(const xercesc::SAXParseException& exc) override;
     void                             resetErrors() override;
     [[nodiscard]] bool               hasValidationErrors() const;
-    [[nodiscard]] const std::string& getLastErrorLocation() const;
-    [[nodiscard]] const std::string& getLastErrorMessage() const;
   private:
     bool        hasErrors{};
     bool        quietMode;
