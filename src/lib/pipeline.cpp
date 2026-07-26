@@ -60,7 +60,7 @@ namespace fsp
   void pipeline::log_doc_done(std::size_t doc_ndx)
   {
     const auto& c = (*doc_counters_)[doc_ndx];
-    log_.info(fmt::format("Doc {}: cut+process finished ({} segments, {} ms).", doc_ndx, c.total(), c.total_latency().count()));
+    log_.debug(fmt::format("Doc {}: cut+process finished ({} segments, {} ms).", doc_ndx, c.total(), c.total_latency().count()));
   }
 
   void pipeline::report_validation_result(std::size_t doc_ndx, doc_status result, error_info err)
