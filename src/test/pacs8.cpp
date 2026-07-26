@@ -109,9 +109,9 @@ int main(int argc, const char* argv[])
     const auto no_of_doc = 16U; // number of paralell worker threads
 
     auto cfg = fsp::processor_config{//
-                                     .targets    = all,
-                                     .num_docs   = no_of_doc,
-                                     .log_config = log_cfg};
+                                     .targets          = all,
+                                     .num_docs         = no_of_doc,
+                                     .log_config       = log_cfg};
 
     auto p   = fsp::process_docs(cfg, "pacs8");
     auto res = p.process_files(files, xsd_file);

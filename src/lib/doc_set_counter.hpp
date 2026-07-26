@@ -25,7 +25,10 @@ namespace fsp
     std::vector<doc_counters> counters_;
   };
 
-  inline doc_set_counter::doc_set_counter(std::size_t doc_count) : counters_(doc_count) { }
+  inline doc_set_counter::doc_set_counter(std::size_t doc_count)
+  : counters_(doc_count)
+  {
+  }
   inline doc_counters&       doc_set_counter::operator[](std::size_t doc_ndx) noexcept { return counters_[doc_ndx]; }
   inline const doc_counters& doc_set_counter::operator[](std::size_t doc_ndx) const noexcept { return counters_[doc_ndx]; }
   inline std::size_t         doc_set_counter::size() const noexcept { return counters_.size(); }
@@ -36,7 +39,7 @@ namespace fsp
     std::string out;
     for (std::size_t i = 0; i < counters_.size(); ++i)
     {
-      out += fmt::format("{}doc {}:\n{}", leading, i, counters_[i].dump(offs + 2));
+      out += fmt::format("{}doc {}: {}", leading, i, counters_[i].dump());
       if (i + 1 < counters_.size()) out += "\n";
     }
     return out;
