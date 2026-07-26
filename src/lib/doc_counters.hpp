@@ -39,6 +39,12 @@ namespace fsp
 
     [[nodiscard]] std::chrono::milliseconds processing_doc() const noexcept;  // doc open -> doc close
     [[nodiscard]] std::chrono::milliseconds processing_segs() const noexcept; // first segment -> last segment
+    // True end-to-end latency for this document: from the moment cutting started to the moment
+    // its last segment was processed. Not the same as processing_doc() (cutting only) or
+    // processing_segs() (first-to-last segment span only, which excludes the initial cutting
+    // work needed before any segment can even be ready) -- with P threads shared across many
+    // concurrently-cutting documents, this can be much longer than either of those on their own.
+    [[nodiscard]] std::chrono::milliseconds total_latency() const noexcept; // doc open -> last segment
 
     // Prints every field as "name: value", one pair per line, each line indented by offs spaces.
     [[nodiscard]] std::string dump(int offs = 0) const;
@@ -51,14 +57,14 @@ namespace fsp
 
     std::atomic<std::size_t> ok_{0};
     std::atomic<std::size_t> error_{0};
-    std::atomic<std::size_t> expected_total_{0};    // set once, by record_doc_close()
-    std::atomic<bool>        cut_finished_{false};  // set once, by record_doc_close()
+    std::atomic<std::size_t> expected_total_{0};       // set once, by record_doc_close()
+    std::atomic<bool>        cut_finished_{false};     // set once, by record_doc_close()
     std::atomic<bool>        first_seg_logged_{false}; // guards first_seg_ against a double write
     std::atomic<bool>        last_seg_logged_{false};  // guards last_seg_ / completion against firing twice
-    clock::time_point        doc_open_{};
-    clock::time_point        doc_close_{};
-    clock::time_point        first_seg_{};
-    clock::time_point        last_seg_{};
+    clock::time_point        doc_open_;
+    clock::time_point        doc_close_;
+    clock::time_point        first_seg_;
+    clock::time_point        last_seg_;
   };
 
   inline void doc_counters::record_doc_open() noexcept { doc_open_ = clock::now(); }
@@ -104,20 +110,20 @@ namespace fsp
   inline std::chrono::milliseconds doc_counters::processing_segs() const noexcept
   { return std::chrono::duration_cast<std::chrono::milliseconds>(last_seg_ - first_seg_); }
 
+  inline std::chrono::milliseconds doc_counters::total_latency() const noexcept
+  { return std::chrono::duration_cast<std::chrono::milliseconds>(last_seg_ - doc_open_); }
+
   inline std::string doc_counters::dump(int offs) const
   {
     auto leading = std::string(offs, ' ');
     return fmt::format(
-      "{0}ok: {1}\n"
-      "{0}error: {2}\n"
-      "{0}total: {3}\n"
-      "{0}processing_doc_ms: {4}\n"
-      "{0}processing_segs_ms: {5}",
+      R"({0} ok: {1} error: {2} total: {3} processing doc_ms: {4} processing segs_ms: {5} total latency_ms: {6})",
       leading,
       ok(),
       error(),
       total(),
       processing_doc().count(),
-      processing_segs().count());
+      processing_segs().count(),
+      total_latency().count());
   }
 } // namespace fsp
