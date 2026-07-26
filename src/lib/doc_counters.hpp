@@ -116,14 +116,13 @@ namespace fsp
   inline std::string doc_counters::dump(int offs) const
   {
     auto leading = std::string(offs, ' ');
-    return fmt::format(
-      R"({0} ok: {1} error: {2} total: {3} processing doc_ms: {4} processing segs_ms: {5} total latency_ms: {6})",
-      leading,
-      ok(),
-      error(),
-      total(),
-      processing_doc().count(),
-      processing_segs().count(),
-      total_latency().count());
+    return fmt::format(R"({0} seg.(ok: {1} err: {2} total: {3}) C doc: {4} ms P segs: {5} ms total latency: {6} ms)",
+                       leading,
+                       ok(),
+                       error(),
+                       total(),
+                       processing_doc().count(),
+                       processing_segs().count(),
+                       total_latency().count());
   }
 } // namespace fsp
