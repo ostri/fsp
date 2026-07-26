@@ -279,7 +279,10 @@ namespace fsp
   {
     auto col = e.getColumnNumber();
     auto row = e.getLineNumber();
-    auto msg = x_str(e.getMessage()).to_string_view();
+    // .to_string() (owning copy), not .to_string_view() -- the x_str here is a temporary that's
+    // destroyed at the end of this statement, so a view into its cached_utf8_ would dangle by
+    // the time fmt::format() reads it below.
+    auto msg = x_str(e.getMessage()).to_string();
     return fmt::format("sax parser '{}' row: {} col: {}", msg, row, col);
   }
   void Handler::warning(const xercesc::SAXParseException& e)
