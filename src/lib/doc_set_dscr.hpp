@@ -91,7 +91,7 @@ namespace fsp
       if (! path.empty())
       {
         doc_set_.emplace_back(path);
-        log_.info(fmt::format("Added document: '{}' ({} total documents)", path, doc_set_.size()));
+        log_.trace(fmt::format("Added document: '{}' ({} total documents)", path, doc_set_.size()));
         return true;
       }
       return false;
@@ -115,7 +115,7 @@ namespace fsp
     {
       auto path = doc.path(); // Capture path before move
       doc_set_.push_back(std::move(doc));
-      log_.info(fmt::format("Added document: '{}' ({} total documents)", path, doc_set_.size()));
+      log_.trace(fmt::format("Added document: '{}' ({} total documents)", path, doc_set_.size()));
       return true;
     }
     catch (const std::exception& e)
