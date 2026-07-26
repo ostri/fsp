@@ -49,6 +49,11 @@ namespace fsp
     [[nodiscard]] cstr_t      doc() const;
     [[nodiscard]] int         doc_ndx() const;
     void                      set_doc_ndx(int doc_ndx);
+    // When true, error()/fatalError() throw the SAXParseException right back out of parse()
+    // instead of only logging -- used when this Handler's parser was set up with schema
+    // validation enabled (see doc_cutter::setup_parser_with_validation()), so an invalid
+    // document short-circuits cutting immediately instead of paying for the rest of it.
+    void set_validating(bool validating) { validating_ = validating; }
   private: // methods
     [[noreturn]] void logic_error(const char* msg) const;
     // --- helper methods ---------
@@ -110,6 +115,7 @@ namespace fsp
     std::size_t                   element_counter_ = 0;    //< pooling counter check also "every"
     str_XMLCh_t                   buf_;                    //< space for "make_open_tag" as XMLCh
     segment_pool&                 pool_;                   //< segment pool
+    bool                          validating_      = false; //< see set_validating()
     const bool                    log_trace_       = log_.active(lvl_enum::trace);
     const bool                    log_debug_       = log_.active(lvl_enum::debug);
     const bool                    log_info_        = log_.active(lvl_enum::info);

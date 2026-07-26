@@ -6,6 +6,7 @@
 #include "segment_pool.hpp"
 #include "xpath_helpers.hpp"
 #include <xercesc/sax2/SAX2XMLReader.hpp>
+#include <xercesc/framework/XMLGrammarPoolImpl.hpp>
 #include <memory>
 
 namespace fsp
@@ -21,15 +22,22 @@ namespace fsp
     [[nodiscard]] std::size_t segments_found() const noexcept;
   private:
     void_result setup_parser_no_validation();
+    // Experiment (cfg_.cut_with_validation): folds XSD validation into this same SAX pass --
+    // see doc_cutter.cpp for details. Mirrors doc_validator::ensure_grammar_loaded()'s grammar
+    // setup, plus the offset-tracking feature C needs that V doesn't.
+    void_result setup_parser_with_validation();
   private:
     // NOLINTBEGIN(cppcoreguidelines-avoid-const-or-ref-data-members)
-    const fsp_logger&                       log_;
-    const processor_config&                 cfg_;
-    segment_pool&                           seg_pool_;
-    const doc_set_dscr&                     ds_dscr_;
-    std::unique_ptr<xercesc::SAX2XMLReader> parser_;
-    std::unique_ptr<Handler>                handler_;
-    const bool                              log_debug_ = log_.active(lvl_enum::debug);
+    const fsp_logger&        log_;
+    const processor_config&  cfg_;
+    segment_pool&            seg_pool_;
+    const doc_set_dscr&      ds_dscr_;
+    // Declared before parser_ so it outlives it (members destroyed in reverse declaration order)
+    // -- only ever constructed when cfg_.cut_with_validation is actually used, see init().
+    std::unique_ptr<xercesc::XMLGrammarPoolImpl> grammar_pool_;
+    std::unique_ptr<xercesc::SAX2XMLReader>      parser_;
+    std::unique_ptr<Handler>                     handler_;
+    const bool                                   log_debug_ = log_.active(lvl_enum::debug);
     // NOLINTEND(cppcoreguidelines-avoid-const-or-ref-data-members)
   };
 

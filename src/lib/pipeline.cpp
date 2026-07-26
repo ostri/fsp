@@ -103,13 +103,24 @@ namespace fsp
     for (const auto& file : xml_paths) ds_dscr_.add_document(file);
     ds_dscr_.set_grammar(xsd_path);
 
+    const auto doc_count = xml_paths.size();
+
+    // Whether C folds XSD validation into its own SAX pass instead of running it separately as
+    // V (see doc_cutter.cpp / processor_config.hpp for the measured break-even). cfg_.cut_with_validation
+    // lets a caller force either mode; left unset, default to the empirically-best choice for the
+    // actual document count: separate for a single document, merged from 2 documents up. This
+    // must match doc_cutter::init()'s own computation of the same condition exactly, since both
+    // decide independently from the same (ds_dscr_.has_grammar(), doc count) inputs.
+    const bool cut_with_validation = ds_dscr_.has_grammar() && cfg_.cut_with_validation.value_or(doc_count > 1);
+
     // Skip V entirely when no XSD grammar was successfully loaded -- has_grammar() also covers
     // the case where a path was given but loading it failed (set_grammar() swallows that and
-    // returns false without setting anything).
-    const bool run_validation = ds_dscr_.has_grammar();
-    if (! run_validation) log_.info("No XSD grammar available -- V (validation) is disabled for this run.");
-
-    const auto doc_count = xml_paths.size();
+    // returns false without setting anything). Also skip it when cut_with_validation folded
+    // validation into C's own SAX pass instead -- running V separately too would just validate
+    // the same document twice.
+    const bool run_validation = ds_dscr_.has_grammar() && ! cut_with_validation;
+    if (! ds_dscr_.has_grammar()) log_.info("No XSD grammar available -- V (validation) is disabled for this run.");
+    else if (cut_with_validation) log_.info("cut_with_validation active -- C validates while cutting, separate V pass skipped.");
 
     auto requested_threads = cfg_.num_docs;
     if (requested_threads == 0) requested_threads = std::thread::hardware_concurrency();

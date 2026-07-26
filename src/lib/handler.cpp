@@ -292,10 +292,12 @@ namespace fsp
   void Handler::error(const xercesc::SAXParseException& e)
   {
     if (log_err_) { log_.error(prepare_msg(e)); }
+    if (validating_) throw e; // NOLINT(hicpp-exception-baseclass) -- caught by type in doc_cutter::cut()
   }
   void Handler::fatalError(const xercesc::SAXParseException& e)
   {
     if (log_crit_) { log_.critical(prepare_msg(e)); }
+    if (validating_) throw e; // NOLINT(hicpp-exception-baseclass)
   }
 
 } // namespace fsp
