@@ -205,7 +205,7 @@ namespace fsp
     if (! failed.empty()) log_.warn(fmt::format("{} of {} document(s) failed and were skipped.", failed.size(), doc_count));
 
     auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start_time_).count();
-    stats_ = stats_t{
+    stats_  = stats_t{
       .successful_segments = results_.size(),
       .failed_segments     = errors_.size(),
       .processing_time_ms  = static_cast<double>(ms),
@@ -213,11 +213,12 @@ namespace fsp
 
     const auto pool_capacity = pool_.size();
     const auto pool_peak     = pool_.high_water_mark();
-    const auto pool_pct =
-      pool_capacity > 0 ? (static_cast<double>(pool_peak) / static_cast<double>(pool_capacity)) * 100.0 : 0.0; // NOLINT(readability-magic-numbers)
-    log_.info(fmt::format("execution time: {:.3f} sec\n"
-                          "Processed {} docs (segments ok:{} err:{}, docs failed:{})\n"
-                          "segment_pool: peak usage {} / {} slots ({:.2f}%)",
+    const auto pool_pct      = pool_capacity > 0 ? (static_cast<double>(pool_peak) / static_cast<double>(pool_capacity)) * 100.0
+                                                 : 0.0; // NOLINT(readability-magic-numbers)
+    log_.info(fmt::format(R"(
+  Execution time: {:.3f} sec
+  Processed {} docs (segments ok:{} err:{}, docs failed:{})
+  Segment pool: peak usage {} / {} slots ({:.2f}%))",
                           static_cast<double>(ms) / 1000.0, // NOLINT(readability-magic-numbers)
                           doc_count,
                           results_.size(),
