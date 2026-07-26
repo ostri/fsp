@@ -104,7 +104,7 @@ int main(int argc, const char* argv[])
 
     //    const auto no_of_doc_workers = 3U; // number of paralell workers processing document
     // 10 docs in this benchmark -> C is capped at 10 by document count regardless of
-    // max_concurrent_cutters_; sizing total threads to ~10(C)+6(P) (13:7 ratio) avoids leaving
+    // max_concurrent_cutters_; sizing total threads to ~10(C)+4(P) (13:6 ratio) avoids leaving
     // surplus P threads idle. Revisit once run against a larger document batch.
     const auto no_of_doc = 16U; // number of paralell worker threads
 

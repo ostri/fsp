@@ -128,14 +128,14 @@ namespace fsp
     // commit a838163) for zero throughput gain.
     max_concurrent_cutters_ = std::max<std::size_t>(1, std::min({requested_threads, hw_concurrency, doc_count}));
 
-    // P is then sized off the measured C:P cost ratio (cutting costs ~1.67x, i.e. 13:7, what
-    // processing -- extraction only, no I/O yet -- does per perf report_no_v.txt), scaled to
-    // the actual number of cutters rather than the raw thread budget, so a small document batch
-    // doesn't oversupply P threads relative to the segments its few cutters can produce. Revisit
-    // once P grows to include real business-logic and DB-write cost (that should get its own,
-    // separately-sized I/O thread pool instead of being folded into this ratio).
+    // P is then sized off the C:P ratio (13:6, empirically the fastest of 13:5/13:6/13:7 tested
+    // on a 10-doc/10M-txn batch), scaled to the actual number of cutters rather than the raw
+    // thread budget, so a small document batch doesn't oversupply P threads relative to the
+    // segments its few cutters can produce. Revisit once P grows to include real business-logic
+    // and DB-write cost (that should get its own, separately-sized I/O thread pool instead of
+    // being folded into this ratio).
     static constexpr std::size_t cutter_ratio_num = 13; // NOLINT(readability-magic-numbers) -- see comment above
-    static constexpr std::size_t cutter_ratio_den = 7;  // NOLINT(readability-magic-numbers)
+    static constexpr std::size_t cutter_ratio_den = 6;  // NOLINT(readability-magic-numbers)
     const auto num_processors = std::max<std::size_t>(1, (max_concurrent_cutters_ * cutter_ratio_den) / cutter_ratio_num);
 
     auto num_parallel = std::min(requested_threads, max_concurrent_cutters_ + num_processors);
