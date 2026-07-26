@@ -14,13 +14,24 @@
 
 namespace fsp
 {
-  // Minimal ErrorHandler that just records the first validation error, if any.
+  // Minimal ErrorHandler that records the first validation error, then throws it straight back
+  // out of parser_->parse() -- once a document is known invalid, there's no value in continuing
+  // to validate the rest of it, so this short-circuits the parse instead of paying full CPU cost
+  // for content we're going to discard anyway.
   class validation_error_handler : public xercesc::ErrorHandler
   {
   public:
     void warning(const xercesc::SAXParseException& /*e*/) override { }
-    void error(const xercesc::SAXParseException& e) override { record(e); }
-    void fatalError(const xercesc::SAXParseException& e) override { record(e); }
+    void error(const xercesc::SAXParseException& e) override
+    {
+      record(e);
+      throw e; // NOLINT(hicpp-exception-baseclass) -- caught by type in doc_validator::validate()
+    }
+    void fatalError(const xercesc::SAXParseException& e) override
+    {
+      record(e);
+      throw e; // NOLINT(hicpp-exception-baseclass)
+    }
     void resetErrors() override
     {
       has_error_ = false;

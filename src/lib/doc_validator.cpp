@@ -82,6 +82,12 @@ namespace fsp
       parser_->parse(src);
       valid = ! err_handler_.has_error();
     }
+    catch (const xercesc::SAXParseException&)
+    {
+      // error()/fatalError() already recorded the details and threw to short-circuit parsing
+      // the rest of an already-invalid document.
+      valid = false;
+    }
     catch (const xercesc::XMLException& e)
     {
       // A parse-level exception (not just a validation error reported via the ErrorHandler)
