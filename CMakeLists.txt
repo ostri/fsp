@@ -148,6 +148,8 @@ set(SOURCES
     ${CMAKE_SOURCE_DIR}/src/lib/xpath_set.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/doc_dscr.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/doc_set_dscr.cpp
+    ${CMAKE_SOURCE_DIR}/src/lib/doc_counters.cpp
+    ${CMAKE_SOURCE_DIR}/src/lib/doc_set_counter.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/segment_pool.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/doc_cutter.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/pipeline_worker.cpp

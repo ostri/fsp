@@ -33,7 +33,7 @@ namespace fsp
       pipeline_.notify_cut_done();
       return;
     }
-    pipeline_.record_cut_start(doc_ndx);
+    pipeline_.record_doc_open(doc_ndx);
     if (auto res = cutter_->cut(doc_ndx); ! res)
     {
       // A malformed document is a per-document failure, not a fatal one: mark it invalid so
@@ -42,7 +42,7 @@ namespace fsp
     }
     else
     {
-      pipeline_.record_cut_finished(doc_ndx, cutter_->segments_found());
+      pipeline_.record_doc_close(doc_ndx, cutter_->segments_found());
     }
     pipeline_.notify_cut_done();
   }
@@ -109,7 +109,9 @@ namespace fsp
         if (auto seg_ndx = pool.try_pop_ready(shard))
         {
           auto doc_ndx = processor_->process_one(*seg_ndx);
-          pipeline_.record_segment_done(static_cast<std::size_t>(doc_ndx));
+          // TODO: ostri - semantically_ok is a placeholder (always true) until the
+          // on_segment_processed hook exists -- its return value replaces this once wired in.
+          pipeline_.record_segment_done(static_cast<std::size_t>(doc_ndx), true);
           processed = true;
         }
       }
@@ -123,7 +125,9 @@ namespace fsp
       if (pool.pop_segment_ndx(own_shard, seg_ndx) != queue_status::active) break;
       {
         auto doc_ndx = processor_->process_one(seg_ndx);
-        pipeline_.record_segment_done(static_cast<std::size_t>(doc_ndx));
+        // TODO: ostri - semantically_ok is a placeholder (always true) until the
+        // on_segment_processed hook exists -- its return value replaces this once wired in.
+        pipeline_.record_segment_done(static_cast<std::size_t>(doc_ndx), true);
       }
     }
     processor_->flush_results();
