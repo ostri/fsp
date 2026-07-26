@@ -11,7 +11,9 @@ namespace fsp
     // NOLINTBEGIN(misc-non-private-member-variables-in-classes)
     proc_data     targets;                     // target points to split the xml document
     std::size_t   num_docs             = 0;    // number of documents processed in parallel
-    bool          validate_against_xsd = true; // should we validate with xsd
+    // Whether V (validation) runs at all is decided solely by whether an XSD grammar was given
+    // and successfully loaded (doc_set_dscr::has_grammar(), checked in pipeline.cpp) -- no
+    // separate on/off flag here, to avoid two indicators that could disagree.
     // Fold XSD validation into the same SAX pass that cuts segments (doc_cutter), instead of
     // running it as a separate full second parse (doc_validator/V role). Measured break-even is
     // between 1 and 2 concurrent documents: for a single document, C and V already run
@@ -44,12 +46,10 @@ namespace fsp
     std::string msg;
     msg = fmt::format(R"({0}targets:{1}
   {0}num workers:{2}
-  {0}validate:{3}
-  {0}logger: {4})",
+  {0}logger: {3})",
                       std::string(offs, ' '),
                       targets.dump(offs),
                       num_docs,
-                      validate_against_xsd,
                       log_config.logger_name);
     return msg;
   }

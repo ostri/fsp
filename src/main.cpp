@@ -102,10 +102,9 @@ int main(int argc, const char* argv[])
 
     const auto no_of_workers = 20U;                  // number of paralell workers
     auto       cfg           = fsp::processor_config{//
-                                                     .targets              = all,
-                                                     .num_docs             = no_of_workers,
-                                                     .validate_against_xsd = ! xsd_file.empty(),
-                                                     .log_config           = log_cfg};
+                                                     .targets    = all,
+                                                     .num_docs   = no_of_workers,
+                                                     .log_config = log_cfg};
 
     auto p   = fsp::process_docs(cfg, "fsp");
     auto res = p.process_files(files, xsd_file);
