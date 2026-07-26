@@ -5,12 +5,19 @@
 
 namespace fsp
 {
+  namespace
+  {
+    // Sharding the segment_pool's ready/free queues to reduce contention -- see segment_pool.hpp.
+    // Fixed for now while we measure the effect of N=2 vs N=4; tie this to thread/doc count later.
+    constexpr std::size_t pool_shard_count = 2; // NOLINT(readability-magic-numbers)
+  } // namespace
+
   pipeline::pipeline(processor_config cfg, const fsp_logger& log, str_t parent_log_name)
   : log_(log)
   , cfg_(std::move(cfg))
   , parent_log_name_(std::move(parent_log_name))
   , ds_dscr_(log_)
-  , pool_(log_, 1024UL * 1024UL * 8UL) // NOLINT(readability-magic-numbers)
+  , pool_(log_, 1024UL * 1024UL * 8UL, pool_shard_count) // NOLINT(readability-magic-numbers)
   {
   }
 

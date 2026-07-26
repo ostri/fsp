@@ -251,8 +251,9 @@ namespace fsp
       { // fragment is finished. wrap it up and send it to the workers
         std::size_t end_offset = parser_->getSrcOffset();
         std::size_t length     = end_offset - frag_start_offset_;
-        std::size_t idx        = pool_.acquire_slot();
-        auto        seg        = xml_segment(counter_++, seg_type_, doc_ndx_, frag_start_offset_, length, ns_, attr_);
+        std::size_t segment_id = counter_++;
+        std::size_t idx        = pool_.acquire_slot(segment_id);
+        auto        seg        = xml_segment(segment_id, seg_type_, doc_ndx_, frag_start_offset_, length, ns_, attr_);
         if (log_debug_) [[unlikely]]
         {
           log_.debug(fmt::format("pushing to queue: '{}' '{}'", x_str(localname).to_string_view(), seg.dump()));

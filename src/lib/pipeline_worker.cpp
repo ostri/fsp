@@ -66,7 +66,14 @@ namespace fsp
   void pipeline_worker::operator()(const std::stop_token& st, int worker_id)
   {
     log_.make_log_name(parent_log_name_, fmt::format("pipe-wrk.{:02}", worker_id));
-    auto& pool = pipeline_.pool();
+    auto&             pool       = pipeline_.pool();
+    const std::size_t num_shards = pool.num_shards();
+    // Each P-capable thread is permanently assigned one shard (worker_id % num_shards) of the
+    // segment_pool's ready/free queues -- this is the shard it tries FIRST and the one it
+    // blocks on when idle, so most of the time it only ever contends with the handful of other
+    // threads sharing that same shard, not all P threads at once. Other shards are only visited
+    // as a non-blocking fallback so an imbalanced shard never starves a thread outright.
+    const std::size_t own_shard = static_cast<std::size_t>(worker_id) % num_shards;
 
     while (! st.stop_requested())
     {
@@ -92,20 +99,28 @@ namespace fsp
         }
 
       // 3) P is deliberately lowest priority: as few P as possible early on, so V gets a
-      //    chance to flag invalid documents before we spend effort processing their segments
-      if (pool.ready_queue_size_approx() > 0)
-        if (auto seg_ndx = pool.try_pop_ready())
+      //    chance to flag invalid documents before we spend effort processing their segments.
+      //    Own shard first, then a non-blocking sweep of the others if it's currently empty.
+      bool processed = false;
+      for (std::size_t i = 0; i < num_shards && ! processed; ++i)
+      {
+        const std::size_t shard = (own_shard + i) % num_shards;
+        if (pool.ready_queue_size_approx(shard) <= 0) continue;
+        if (auto seg_ndx = pool.try_pop_ready(shard))
         {
           auto doc_ndx = processor_->process_one(*seg_ndx);
           pipeline_.record_segment_done(static_cast<std::size_t>(doc_ndx));
-          continue;
+          processed = true;
         }
+      }
+      if (processed) continue;
 
-      // Neither C nor V currently show any work -> authoritative, blocking wait on the only
-      // queue that can still dynamically receive work from OTHER threads. This is also the
-      // real exit condition for this thread.
+      // Neither C nor V currently show any work, and no shard had anything ready -> authoritative,
+      // blocking wait on this thread's own shard, the only queue guaranteed to still dynamically
+      // receive work from OTHER threads relevant to it. This is also the real exit condition for
+      // this thread once its own shard closes.
       std::size_t seg_ndx = 0;
-      if (pool.pop_segment_ndx(seg_ndx) != queue_status::active) break;
+      if (pool.pop_segment_ndx(own_shard, seg_ndx) != queue_status::active) break;
       {
         auto doc_ndx = processor_->process_one(seg_ndx);
         pipeline_.record_segment_done(static_cast<std::size_t>(doc_ndx));
