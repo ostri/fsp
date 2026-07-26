@@ -109,18 +109,36 @@ namespace fsp
     const bool run_validation = ds_dscr_.has_grammar();
     if (! run_validation) log_.info("No XSD grammar available -- V (validation) is disabled for this run.");
 
-    auto num_parallel = cfg_.num_docs;
-    if (num_parallel == 0) num_parallel = std::thread::hardware_concurrency();
-    if (num_parallel == 0) num_parallel = 1;
-    // NOTE: no longer capped to xml_paths.size() -- unlike the old per-document worker model,
-    // P operates on segments independently of document count, so threads beyond doc_count are
-    // still useful (they simply never win a C reservation and help drain the pool via P instead).
-
-    // At most half the threads may cut concurrently, guaranteeing that at least as many
-    // threads remain structurally free for P as are currently committed to C.
-    max_concurrent_cutters_ = std::max<std::size_t>(1, num_parallel / 2);
-
     const auto doc_count = xml_paths.size();
+
+    auto requested_threads = cfg_.num_docs;
+    if (requested_threads == 0) requested_threads = std::thread::hardware_concurrency();
+    if (requested_threads == 0) requested_threads = 1;
+
+    auto hw_concurrency = static_cast<std::size_t>(std::thread::hardware_concurrency());
+    if (hw_concurrency == 0) hw_concurrency = 1;
+
+    // At most one cutter can ever usefully work per document (try_reserve_cutter_slot() would
+    // just leave surplus cutter slots permanently unused past doc_count), and cutting more
+    // documents at once than there are hardware threads just oversubscribes the CPU -- so C is
+    // capped by the smallest of (caller's requested thread count, hardware concurrency, doc
+    // count), not sized as a fixed fraction of the thread budget. This matters most for small
+    // batches: for a single document, 15 idle-prone extra P threads competing over one cutter's
+    // trickle of segments cost us a measured ~25-35% wall-time regression (see bisection of
+    // commit a838163) for zero throughput gain.
+    max_concurrent_cutters_ = std::max<std::size_t>(1, std::min({requested_threads, hw_concurrency, doc_count}));
+
+    // P is then sized off the measured C:P cost ratio (cutting costs ~1.67x, i.e. 13:7, what
+    // processing -- extraction only, no I/O yet -- does per perf report_no_v.txt), scaled to
+    // the actual number of cutters rather than the raw thread budget, so a small document batch
+    // doesn't oversupply P threads relative to the segments its few cutters can produce. Revisit
+    // once P grows to include real business-logic and DB-write cost (that should get its own,
+    // separately-sized I/O thread pool instead of being folded into this ratio).
+    static constexpr std::size_t cutter_ratio_num = 13; // NOLINT(readability-magic-numbers) -- see comment above
+    static constexpr std::size_t cutter_ratio_den = 7;  // NOLINT(readability-magic-numbers)
+    const auto num_processors = std::max<std::size_t>(1, (max_concurrent_cutters_ * cutter_ratio_den) / cutter_ratio_num);
+
+    auto num_parallel = std::min(requested_threads, max_concurrent_cutters_ + num_processors);
     docs_remaining_to_cut_.store(doc_count, std::memory_order_relaxed);
     doc_timing_ = std::make_unique<doc_timing_t[]>(doc_count); // value-initializes each entry's atomics
 
