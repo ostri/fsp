@@ -5,19 +5,12 @@
 
 namespace fsp
 {
-  namespace
-  {
-    // Sharding the segment_pool's ready/free queues to reduce contention -- see segment_pool.hpp.
-    // Fixed for now while we measure the effect of N=2 vs N=4; tie this to thread/doc count later.
-    constexpr std::size_t pool_shard_count = 2; // NOLINT(readability-magic-numbers)
-  } // namespace
-
   pipeline::pipeline(processor_config cfg, const fsp_logger& log, str_t parent_log_name)
   : log_(log)
   , cfg_(std::move(cfg))
   , parent_log_name_(std::move(parent_log_name))
   , ds_dscr_(log_)
-  , pool_(log_, 1024UL * 1024UL * 8UL, pool_shard_count) // NOLINT(readability-magic-numbers)
+  , pool_(log_, 1024UL * 1024UL * 8UL, std::max<std::size_t>(1, cfg_.pool_shard_count)) // NOLINT(readability-magic-numbers)
   {
   }
 
@@ -135,15 +128,15 @@ namespace fsp
     // commit a838163) for zero throughput gain.
     max_concurrent_cutters_ = std::max<std::size_t>(1, std::min({requested_threads, hw_concurrency, doc_count}));
 
-    // P is then sized off the C:P ratio (13:6, empirically the fastest of 13:5/13:6/13:7 tested
-    // on a 10-doc/10M-txn batch), scaled to the actual number of cutters rather than the raw
-    // thread budget, so a small document batch doesn't oversupply P threads relative to the
-    // segments its few cutters can produce. Revisit once P grows to include real business-logic
-    // and DB-write cost (that should get its own, separately-sized I/O thread pool instead of
-    // being folded into this ratio).
-    static constexpr std::size_t cutter_ratio_num = 13; // NOLINT(readability-magic-numbers) -- see comment above
-    static constexpr std::size_t cutter_ratio_den = 6;  // NOLINT(readability-magic-numbers)
-    const auto num_processors = std::max<std::size_t>(1, (max_concurrent_cutters_ * cutter_ratio_den) / cutter_ratio_num);
+    // P is then sized off the caller-configured C:P ratio (cfg_.cutter_ratio_num/_den, default
+    // 13:6, empirically the fastest of 13:5/13:6/13:7/13:8 tested on a 10-doc/10M-txn batch),
+    // scaled to the actual number of cutters rather than the raw thread budget, so a small
+    // document batch doesn't oversupply P threads relative to the segments its few cutters can
+    // produce. Revisit once P grows to include real business-logic and DB-write cost (that
+    // should get its own, separately-sized I/O thread pool instead of being folded into this
+    // ratio).
+    const auto cutter_ratio_num = std::max<std::size_t>(1, cfg_.cutter_ratio_num);
+    const auto num_processors   = std::max<std::size_t>(1, (max_concurrent_cutters_ * cfg_.cutter_ratio_den) / cutter_ratio_num);
 
     auto num_parallel = std::min(requested_threads, max_concurrent_cutters_ + num_processors);
     docs_remaining_to_cut_.store(doc_count, std::memory_order_relaxed);
