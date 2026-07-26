@@ -35,6 +35,11 @@ namespace fsp
     }
     [[nodiscard]] std::ptrdiff_t ready_queue_size_approx(std::size_t shard) const noexcept;
     [[nodiscard]] std::size_t    num_shards() const noexcept { return num_shards_; }
+    // Highest number of distinct slots ever handed out from the unallocated pool (across all
+    // shards) -- a shard only reaches for a never-before-used slot when its own free_queues_
+    // entry is empty, so this is the peak footprint the pool actually needed this run, as
+    // opposed to capacity_ (the fixed size it was allocated with up front).
+    [[nodiscard]] std::size_t high_water_mark() const noexcept { return next_unallocated_slot_.load(std::memory_order_relaxed); }
   private:
     const fsp_logger&        log_;
     std::size_t              capacity_{0};

@@ -217,6 +217,12 @@ namespace fsp
                           results_.size(),
                           errors_.size(),
                           failed.size()));
+
+    const auto pool_capacity = pool_.size();
+    const auto pool_peak     = pool_.high_water_mark();
+    const auto pool_pct =
+      pool_capacity > 0 ? (static_cast<double>(pool_peak) / static_cast<double>(pool_capacity)) * 100.0 : 0.0; // NOLINT(readability-magic-numbers)
+    log_.info(fmt::format("segment_pool: peak usage {} / {} slots ({:.2f}%).", pool_peak, pool_capacity, pool_pct));
     return {};
   }
 
