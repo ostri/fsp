@@ -36,6 +36,12 @@ namespace fsp
     [[nodiscard]] std::size_t ok() const noexcept;
     [[nodiscard]] std::size_t error() const noexcept;
     [[nodiscard]] std::size_t total() const noexcept; // ok() + error(), never stored separately
+   [[nodiscard]] bool cut_finished() const noexcept;
+    // Reports the outcome of a SEPARATE V pass -- sticky: once reported failed, stays failed
+    // regardless of call order/multiplicity. Defaults to "not failed" when V never runs
+    // separately for this document.
+    void               record_validation_result(bool passed) noexcept;
+    [[nodiscard]] bool validation_failed() const noexcept;
 
     [[nodiscard]] std::chrono::milliseconds processing_doc() const noexcept;  // doc open -> doc close
     [[nodiscard]] std::chrono::milliseconds processing_segs() const noexcept; // first segment -> last segment
@@ -61,6 +67,7 @@ namespace fsp
     std::atomic<bool>        cut_finished_{false};     // set once, by record_doc_close()
     std::atomic<bool>        first_seg_logged_{false}; // guards first_seg_ against a double write
     std::atomic<bool>        last_seg_logged_{false};  // guards last_seg_ / completion against firing twice
+    std::atomic<bool>        validation_failed_{false}; // set by record_validation_result(false)
     clock::time_point        doc_open_;
     clock::time_point        doc_close_;
     clock::time_point        first_seg_;
@@ -103,6 +110,13 @@ namespace fsp
   inline std::size_t doc_counters::ok() const noexcept { return ok_.load(std::memory_order_relaxed); }
   inline std::size_t doc_counters::error() const noexcept { return error_.load(std::memory_order_relaxed); }
   inline std::size_t doc_counters::total() const noexcept { return ok() + error(); }
+  inline bool         doc_counters::cut_finished() const noexcept { return cut_finished_.load(std::memory_order_acquire); }
+
+  inline void doc_counters::record_validation_result(bool passed) noexcept
+  {
+    if (! passed) validation_failed_.store(true, std::memory_order_release);
+  }
+  inline bool doc_counters::validation_failed() const noexcept { return validation_failed_.load(std::memory_order_acquire); }
 
   inline std::chrono::milliseconds doc_counters::processing_doc() const noexcept
   { return std::chrono::duration_cast<std::chrono::milliseconds>(doc_close_ - doc_open_); }

@@ -102,16 +102,12 @@ int main(int argc, const char* argv[])
                                .log_level      = spdlog::level::trace, // spdlog::level::info;
                                .logger_name    = "fsp"};
 
-    //    const auto no_of_doc_workers = 3U; // number of paralell workers processing document
-    // 10 docs in this benchmark -> C is capped at 10 by document count regardless of
-    // max_concurrent_cutters_; sizing total threads to ~10(C)+4(P) (13:6 ratio) avoids leaving
-    // surplus P threads idle. Revisit once run against a larger document batch.
-    const auto no_of_doc = 16U; // number of paralell worker threads
+    const auto no_of_cores = 16U; // number of paralell worker threads
 
     auto cfg = fsp::processor_config{//
-                                     .targets          = all,
-                                     .num_docs         = no_of_doc,
-                                     .log_config       = log_cfg};
+                                     .targets    = all,
+                                     .num_docs   = no_of_cores,
+                                     .log_config = log_cfg};
 
     auto p   = fsp::process_docs(cfg, "pacs8");
     auto res = p.process_files(files, xsd_file);
@@ -120,20 +116,18 @@ int main(int argc, const char* argv[])
       std::cerr << "Processing failed: " << res.error().to_string() << "\n";
       return 1;
     }
-    // Get aggregated results
-    const auto& results = p.get_results();
-    const auto& errors  = p.get_errors();
+    assert(files.size() == res->total_docs());
+    assert(p.get_results().size() == res->syntactically_correct_docs());
+    assert(p.get_errors().size() == res->syntactically_incorrect_docs());
 
-    std::cout << "\n=== Processing Results ===\n";
-    std::cout << "Total files processed: " << files.size() << "\n";
-    std::cout << "Successful segments:   " << results.size() << "\n";
-    std::cout << "Errors:                " << errors.size() << "\n";
-
-    if (! errors.empty())
-    {
-      std::cout << "\n--- Errors ---\n";
-      for (const auto& e : errors) { std::cout << "  " << e.seg_id() << "\n"; }
-    }
+    std::cout << "\n=== Document Statistics ===\n";
+    std::cout << "  Total documents:              " << res->total_docs() << "\n";
+    std::cout << "  Total segments processed:     " << res->total_segments() << "\n";
+    std::cout << "\n";
+    std::cout << "  Syntactically correct docs:   " << res->syntactically_correct_docs() << "\n";
+    std::cout << "  Syntactically incorrect docs: " << res->syntactically_incorrect_docs() << "\n";
+    std::cout << "  Semantically correct docs:    " << res->semantically_correct_docs() << "\n";
+    std::cout << "  Semantically incorrect docs:  " << res->semantically_incorrect_docs() << "\n";
   }
   catch (const std::exception& e)
   {

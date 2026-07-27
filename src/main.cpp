@@ -121,6 +121,13 @@ int main(int argc, const char* argv[])
     std::cout << "Total files processed: " << files.size() << "\n";
     std::cout << "Successful segments:   " << results.size() << "\n";
     std::cout << "Errors:                " << errors.size() << "\n";
+    std::cout << "\n=== Document Statistics ===\n";
+    std::cout << "Total segments processed:    " << res->total_segments() << "\n";
+    std::cout << "Total documents:             " << res->total_docs() << "\n";
+    std::cout << "Syntactically correct docs:  " << res->syntactically_correct_docs() << "\n";
+    std::cout << "Syntactically incorrect docs:" << res->syntactically_incorrect_docs() << "\n";
+    std::cout << "Semantically correct docs:   " << res->semantically_correct_docs() << "\n";
+    std::cout << "Semantically incorrect docs: " << res->semantically_incorrect_docs() << "\n";
 
     if (! errors.empty())
     {

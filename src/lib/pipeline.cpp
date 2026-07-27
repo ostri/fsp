@@ -64,8 +64,10 @@ namespace fsp
   }
 
   void pipeline::report_validation_result(std::size_t doc_ndx, doc_status result, error_info err)
-
-  { ds_dscr_[doc_ndx].set_validation_result(result, std::move(err)); }
+  {
+    ds_dscr_[doc_ndx].set_validation_result(result, std::move(err));
+    (*doc_counters_)[doc_ndx].record_validation_result(result != doc_status::validation_failed);
+  }
 
   void pipeline::report_fatal_error(error_info err)
   {

@@ -27,7 +27,6 @@ namespace fsp
     [[nodiscard]] const vec_seg_result&    get_results() const;
     [[nodiscard]] const vec_seg_result&    get_errors() const;
     [[nodiscard]] std::vector<std::size_t> failed_document_indices() const;
-    // [[nodiscard]] stats_t                  stats() const;
   private:
     // NOLINTBEGIN(cppcoreguidelines-avoid-const-or-ref-data-members)
     const fsp_logger log_;         //< "main" logger; must exist before xerces_life_ and impl_
@@ -52,5 +51,4 @@ namespace fsp
   inline const vec_seg_result&    process_docs::get_results() const { return impl_.get_results(); }
   inline const vec_seg_result&    process_docs::get_errors() const { return impl_.get_errors(); }
   inline std::vector<std::size_t> process_docs::failed_document_indices() const { return impl_.failed_document_indices(); }
-  // inline stats_t                  process_docs::stats() const { return impl_.stats(); }
 } // namespace fsp
