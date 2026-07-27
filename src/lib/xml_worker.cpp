@@ -462,8 +462,10 @@ namespace fsp
     }
     else
     {
+      // res holds an error_info here, not a segment_result -- *res would be UB (dereferencing a
+      // disengaged std::expected). Record the failure with the id-only constructor instead.
       if (loc_res_nak_.size() + 1 == loc_res_nak_.capacity()) loc_res_nak_.reserve(loc_res_nak_.size() * 2);
-      loc_res_nak_.emplace_back(std::move(*res));
+      loc_res_nak_.emplace_back(seg.id(), seg.subtree_type(), seg.doc_ndx());
     }
     return seg.doc_ndx();
   }

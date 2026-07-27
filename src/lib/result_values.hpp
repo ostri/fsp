@@ -39,11 +39,28 @@ namespace fsp
      * @param schema The xpath_set matching this segment's own subtree type. Must outlive this
      * object (expected to be a static/constexpr xpath_set living for the whole program).
      */
-    explicit result_values(const xpath_set& schema)
-    : schema_(&schema)
-    , scalars_(schema.size() - static_cast<std::size_t>(std::popcount(schema.array_mask())))
-    , arrays_(static_cast<std::size_t>(std::popcount(schema.array_mask())))
+    explicit result_values(const xpath_set& schema) { reset(schema); }
+
+    /**
+     * @brief Rewinds this instance to an empty state for schema, reusing scalars_/arrays_'
+     * already-allocated capacity instead of reallocating -- the intended way to reuse one
+     * instance across many segments (one per worker thread, reset() once per segment), so the
+     * only per-segment allocations left are for the values actually extracted, not the
+     * scaffolding around them. Safe to call with a different schema than last time (e.g.
+     * alternating between a document's header and transaction segment types): scalars_/arrays_
+     * are resized to match, which reallocates only if this schema's counts exceed any
+     * previously-seen high-water mark.
+     * @param schema The xpath_set matching this segment's own subtree type.
+     */
+    void reset(const xpath_set& schema)
     {
+      schema_               = &schema;
+      const auto array_count  = static_cast<std::size_t>(std::popcount(schema.array_mask()));
+      const auto scalar_count = schema.size() - array_count;
+      scalars_.resize(scalar_count);
+      arrays_.resize(array_count);
+      for (auto& s : scalars_) s.reset();
+      for (auto& a : arrays_) a.clear();
     }
 
     /**
@@ -65,7 +82,7 @@ namespace fsp
     void add(std::string_view name, std::string value) { add(index_of(name), std::move(value)); }
 
     /// @brief Total number of xpaths declared in the schema (scalar + array).
-    [[nodiscard]] std::size_t size() const noexcept { return schema_ ? schema_->size() : 0; }
+    [[nodiscard]] std::size_t size() const noexcept { return schema_ != nullptr ? schema_->size() : 0; }
     /// @brief True iff the schema has no xpaths at all (mirrors the old container's empty()).
     [[nodiscard]] bool empty() const noexcept { return size() == 0; }
 
@@ -96,9 +113,9 @@ namespace fsp
     [[nodiscard]] const std::vector<std::string>& values(std::string_view name) const { return values(index_of(name)); }
 
     /// @brief True iff every non-optional (is_opt() == false) xpath in the schema has found() == true.
-    [[nodiscard]] bool complete() const noexcept
+    [[nodiscard]] bool complete() const
     {
-      if (! schema_) return false;
+      if (schema_ == nullptr) return false;
       for (std::size_t i = 0; i < schema_->size(); ++i)
         if (! (*schema_)[i].is_opt() && ! found(i)) return false;
       return true;

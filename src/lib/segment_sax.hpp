@@ -102,7 +102,7 @@ namespace fsp
   inline void sax_ctx::reset_for_reuse(const xpath_set& t)
   {
     targets = &t; // non-owning -- t is expected to outlive this call (a static/long-lived xpath_set)
-    results = result_values(t);
+    results.reset(t); // reuses scalars_/arrays_' already-allocated capacity instead of reallocating every segment
     path_stack.reserve(targets->max_xpath_size());
     remaining_mask    = targets->full_mask();
     stop_parsing      = false;
