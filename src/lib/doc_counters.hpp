@@ -36,7 +36,7 @@ namespace fsp
     [[nodiscard]] std::size_t ok() const noexcept;
     [[nodiscard]] std::size_t error() const noexcept;
     [[nodiscard]] std::size_t total() const noexcept; // ok() + error(), never stored separately
-   [[nodiscard]] bool cut_finished() const noexcept;
+    [[nodiscard]] bool        cut_finished() const noexcept;
     // Reports the outcome of a SEPARATE V pass -- sticky: once reported failed, stays failed
     // regardless of call order/multiplicity. Defaults to "not failed" when V never runs
     // separately for this document.
@@ -63,10 +63,10 @@ namespace fsp
 
     std::atomic<std::size_t> ok_{0};
     std::atomic<std::size_t> error_{0};
-    std::atomic<std::size_t> expected_total_{0};       // set once, by record_doc_close()
-    std::atomic<bool>        cut_finished_{false};     // set once, by record_doc_close()
-    std::atomic<bool>        first_seg_logged_{false}; // guards first_seg_ against a double write
-    std::atomic<bool>        last_seg_logged_{false};  // guards last_seg_ / completion against firing twice
+    std::atomic<std::size_t> expected_total_{0};        // set once, by record_doc_close()
+    std::atomic<bool>        cut_finished_{false};      // set once, by record_doc_close()
+    std::atomic<bool>        first_seg_logged_{false};  // guards first_seg_ against a double write
+    std::atomic<bool>        last_seg_logged_{false};   // guards last_seg_ / completion against firing twice
     std::atomic<bool>        validation_failed_{false}; // set by record_validation_result(false)
     clock::time_point        doc_open_;
     clock::time_point        doc_close_;
@@ -110,7 +110,7 @@ namespace fsp
   inline std::size_t doc_counters::ok() const noexcept { return ok_.load(std::memory_order_relaxed); }
   inline std::size_t doc_counters::error() const noexcept { return error_.load(std::memory_order_relaxed); }
   inline std::size_t doc_counters::total() const noexcept { return ok() + error(); }
-  inline bool         doc_counters::cut_finished() const noexcept { return cut_finished_.load(std::memory_order_acquire); }
+  inline bool        doc_counters::cut_finished() const noexcept { return cut_finished_.load(std::memory_order_acquire); }
 
   inline void doc_counters::record_validation_result(bool passed) noexcept
   {
@@ -143,14 +143,15 @@ namespace fsp
 
   inline std::string doc_counters::dump(int offs) const
   {
-    auto leading = std::string(offs, ' ');
-    return fmt::format(R"({0} seg.(ok: {1} err: {2} total: {3}) C doc: {4} ms P segs: {5} ms total latency: {6:.3f} sec)",
+    auto       leading = std::string(offs, ' ');
+    const auto kilo    = 1000.0;
+    return fmt::format(R"({0} segments [ok: {1:4} err: {2:4} Σ: {3:4}] threads [C: {4:.3f} sec P: {5:.3f} sec Σ: {6:.3f} sec])",
                        leading,
                        ok(),
                        error(),
                        total(),
-                       processing_doc().count(),
-                       processing_segs().count(),
-                       static_cast<double>(total_latency().count()) / 1000.0); // NOLINT(readability-magic-numbers)
+                       static_cast<double>(processing_doc().count()) / kilo,
+                       static_cast<double>(processing_segs().count()) / kilo,
+                       static_cast<double>(total_latency().count()) / kilo);
   }
 } // namespace fsp

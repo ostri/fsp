@@ -120,14 +120,25 @@ int main(int argc, const char* argv[])
     assert(p.get_results().size() == res->syntactically_correct_docs());
     assert(p.get_errors().size() == res->syntactically_incorrect_docs());
 
-    std::cout << "\n=== Document Statistics ===\n";
-    std::cout << "  Total documents:              " << res->total_docs() << "\n";
-    std::cout << "  Total segments processed:     " << res->total_segments() << "\n";
-    std::cout << "\n";
-    std::cout << "  Syntactically correct docs:   " << res->syntactically_correct_docs() << "\n";
-    std::cout << "  Syntactically incorrect docs: " << res->syntactically_incorrect_docs() << "\n";
-    std::cout << "  Semantically correct docs:    " << res->semantically_correct_docs() << "\n";
-    std::cout << "  Semantically incorrect docs:  " << res->semantically_incorrect_docs() << "\n";
+    std::cout << fmt::format(
+      "\n=== Document Statistics ===\n"
+      "  Total documents:              {:5}\n"
+      "  Total segments processed:     {:5}\n"
+      "    ok:                         {:5}\n"
+      "    error:                      {:5}\n"
+      "\n"
+      "  Syntactically correct docs:   {:5}\n"
+      "  Syntactically incorrect docs: {:5}\n"
+      "  Semantically correct docs:    {:5}\n"
+      "  Semantically incorrect docs:  {:5}\n",
+      res->total_docs(),
+      res->total_segments(),
+      res->total_segments_ok(),
+      res->total_segments_error(),
+      res->syntactically_correct_docs(),
+      res->syntactically_incorrect_docs(),
+      res->semantically_correct_docs(),
+      res->semantically_incorrect_docs());
   }
   catch (const std::exception& e)
   {

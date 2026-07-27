@@ -37,6 +37,8 @@ namespace fsp
     // semantically_incorrect_docs() == syntactically_correct_docs()).
     [[nodiscard]] std::size_t semantically_correct_docs() const noexcept;
     [[nodiscard]] std::size_t semantically_incorrect_docs() const noexcept;
+    [[nodiscard]] std::size_t total_segments_ok() const noexcept;
+    [[nodiscard]] std::size_t total_segments_error() const noexcept;
   private:
     std::vector<doc_counters> counters_;
   };
@@ -51,10 +53,29 @@ namespace fsp
 
   inline std::size_t doc_set_counter::total_segments() const noexcept
   {
+    // Only counts segments belonging to a syntactically correct document -- a document that
+    // never finished cutting (or failed a separate V pass) may have processed some segments
+    // before it was abandoned, and those don't belong in a whole-run total.
     std::size_t sum = 0;
-    for (const auto& c : counters_) sum += c.total();
+    for (const auto& c : counters_)
+      if (c.cut_finished() && ! c.validation_failed()) sum += c.total();
     return sum;
   }
+  inline std::size_t doc_set_counter::total_segments_ok() const noexcept
+  {
+    std::size_t sum = 0;
+    for (const auto& c : counters_)
+      if (c.cut_finished() && ! c.validation_failed()) sum += c.ok();
+    return sum;
+  }
+  inline std::size_t doc_set_counter::total_segments_error() const noexcept
+  {
+    std::size_t sum = 0;
+    for (const auto& c : counters_)
+      if (c.cut_finished() && ! c.validation_failed()) sum += c.error();
+    return sum;
+  }
+
   inline std::size_t doc_set_counter::total_docs() const noexcept { return counters_.size(); }
 
   inline std::size_t doc_set_counter::syntactically_correct_docs() const noexcept
