@@ -118,14 +118,28 @@ namespace fsp
   }
   inline bool doc_counters::validation_failed() const noexcept { return validation_failed_.load(std::memory_order_acquire); }
 
+  // doc_close_/last_seg_ are only ever written inside record_doc_close()/the completion branch
+  // of record_segment() -- for a document that never completes (e.g. cutting fails partway
+  // through, after some segments were already processed), they stay at their default epoch
+  // value, which would make these subtractions wildly negative. Guard on the flag that actually
+  // gates the write instead of assuming it happened.
   inline std::chrono::milliseconds doc_counters::processing_doc() const noexcept
-  { return std::chrono::duration_cast<std::chrono::milliseconds>(doc_close_ - doc_open_); }
+  {
+    if (! cut_finished()) return std::chrono::milliseconds{0};
+    return std::chrono::duration_cast<std::chrono::milliseconds>(doc_close_ - doc_open_);
+  }
 
   inline std::chrono::milliseconds doc_counters::processing_segs() const noexcept
-  { return std::chrono::duration_cast<std::chrono::milliseconds>(last_seg_ - first_seg_); }
+  {
+    if (! last_seg_logged_.load(std::memory_order_acquire)) return std::chrono::milliseconds{0};
+    return std::chrono::duration_cast<std::chrono::milliseconds>(last_seg_ - first_seg_);
+  }
 
   inline std::chrono::milliseconds doc_counters::total_latency() const noexcept
-  { return std::chrono::duration_cast<std::chrono::milliseconds>(last_seg_ - doc_open_); }
+  {
+    if (! last_seg_logged_.load(std::memory_order_acquire)) return std::chrono::milliseconds{0};
+    return std::chrono::duration_cast<std::chrono::milliseconds>(last_seg_ - doc_open_);
+  }
 
   inline std::string doc_counters::dump(int offs) const
   {
