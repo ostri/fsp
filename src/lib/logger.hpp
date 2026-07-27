@@ -59,7 +59,7 @@ namespace fsp
   class fsp_logger
   {
   public:
-    explicit fsp_logger(const logger_config& cfg);
+    explicit fsp_logger(const logger_config& cfg, cstr_t initial_name = "");
     // cant be copied or moved — ownership through shared_ptr.
     fsp_logger(const fsp_logger&)            = delete;
     fsp_logger& operator=(const fsp_logger&) = delete;

@@ -43,9 +43,10 @@ namespace fsp
   }
 
   inline process_docs::process_docs(processor_config cfg, const str_t& parent_log_name)
-  : log_(cfg.log_config)
+  : log_(cfg.log_config, parent_log_name)
   , impl_(std::move(cfg), log_, parent_log_name)
-  { log_.make_log_name(parent_log_name); }
+  {
+  }
 
   inline void_result process_docs::process_files(const std::vector<std::string>& xml_paths, const std::string& xsd_path)
   { return impl_.process_files(xml_paths, xsd_path); }

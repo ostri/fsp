@@ -21,7 +21,11 @@ namespace fsp
    *
    * @param cfg logger configuration
    */
-  fsp_logger::fsp_logger(const logger_config& cfg) { build(cfg); }
+  fsp_logger::fsp_logger(const logger_config& cfg, cstr_t initial_name)
+  {
+    build(cfg);
+    if (! initial_name.empty()) make_log_name(initial_name);
+  }
 
   fsp_logger::~fsp_logger()
   {
