@@ -5,7 +5,6 @@
 #include "processor_config.hpp"
 #include "logger.hpp"
 #include "segment_result.hpp"
-#include "stats.hpp"
 #include <vector>
 #include <string>
 

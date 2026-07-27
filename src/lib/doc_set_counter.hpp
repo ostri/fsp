@@ -18,9 +18,7 @@ namespace fsp
     [[nodiscard]] doc_counters&       operator[](std::size_t doc_ndx) noexcept;
     [[nodiscard]] const doc_counters& operator[](std::size_t doc_ndx) const noexcept;
     [[nodiscard]] std::size_t         size() const noexcept;
-    // Prints every document's dump() nested under a "doc N:" header, each line indented by offs
-    // spaces (the per-document dump is indented by offs + 2).
-    [[nodiscard]] std::string dump(int offs = 0) const;
+    [[nodiscard]] std::string         dump(int offs = 0) const;
   private:
     std::vector<doc_counters> counters_;
   };

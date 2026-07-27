@@ -204,19 +204,18 @@ namespace fsp
     const auto pool_peak     = pool_.high_water_mark();
     const auto pool_pct      = pool_capacity > 0 ? (static_cast<double>(pool_peak) / static_cast<double>(pool_capacity)) * 100.0
                                                  : 0.0; // NOLINT(readability-magic-numbers)
-    log_.info(fmt::format(R"(
-  Execution time: {:.3f} sec
-  Processed {} docs (segments ok:{} err:{}, docs failed:{})
-  Segment pool: peak usage {} / {} slots ({:.2f}%))",
-                          static_cast<double>(ms) / 1000.0, // NOLINT(readability-magic-numbers)
-                          doc_count,
-                          results_.size(),
-                          errors_.size(),
-                          failed.size(),
-                          pool_peak,
-                          pool_capacity,
-                          pool_pct));
-    log_.info(fmt::format("doc_set_counter:\n{}", doc_counters_->dump(2))); // NOLINT(readability-magic-numbers)
+    auto       msg           = fmt::format(R"(
+  Processed {0} docs in {1:.3f} sec (segments ok:{2} err:{3}, docs failed:{4}) seg. peak: {5} / {6} slots ({7:.2f}%))",
+                                           doc_count,
+                                           static_cast<double>(ms) / 1000.0, // NOLINT(readability-magic-numbers)
+                                           results_.size(),
+                                           errors_.size(),
+                                           failed.size(),
+                                           pool_peak,
+                                           pool_capacity,
+                                           pool_pct);
+    msg += fmt::format("\ndocument statistics:\n{}", doc_counters_->dump(2)); // NOLINT(readability-magic-numbers)
+    log_.info(msg);                                                           // NOLINT(readability-magic-numbers)
     return {};
   }
 
