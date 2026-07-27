@@ -81,15 +81,17 @@ namespace fsp
     return out;
   }
 
-  void_result pipeline::process_files(const std::vector<std::string>& xml_paths, const std::string& xsd_path)
+  result<doc_set_counter> pipeline::process_files(const std::vector<std::string>& xml_paths, const std::string& xsd_path)
   {
     if (xml_paths.empty())
     {
       log_.info("No files to process.");
-      return {};
+      return doc_set_counter(0);
     }
 
-    for (const auto& file : xml_paths) ds_dscr_.add_document(file);
+    for (const auto& file : xml_paths)
+      if (! ds_dscr_.add_document(file))
+        return std::unexpected(error_info{processor_error::file_open_failed, fmt::format("Failed to add document: '{}'", file), file, 0});
     ds_dscr_.set_grammar(xsd_path);
 
     const auto doc_count = xml_paths.size();
@@ -216,7 +218,7 @@ namespace fsp
                                            pool_pct);
     msg += fmt::format("\ndocument statistics:\n{}", doc_counters_->dump(2)); // NOLINT(readability-magic-numbers)
     log_.info(msg);                                                           // NOLINT(readability-magic-numbers)
-    return {};
+    return std::move(*doc_counters_);
   }
 
   const vec_seg_result& pipeline::get_results() const

@@ -24,7 +24,7 @@ namespace fsp
   {
   public:
     pipeline(processor_config cfg, const fsp_logger& log, str_t parent_log_name);
-    void_result                            process_files(const std::vector<std::string>& xml_paths, const std::string& xsd_path);
+    [[nodiscard]] result<doc_set_counter>  process_files(const std::vector<std::string>& xml_paths, const std::string& xsd_path);
     [[nodiscard]] const vec_seg_result&    get_results() const;
     [[nodiscard]] const vec_seg_result&    get_errors() const;
     // [[nodiscard]] stats_t                  stats() const { return stats_; }
