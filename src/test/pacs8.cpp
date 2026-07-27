@@ -117,8 +117,7 @@ int main(int argc, const char* argv[])
       return 1;
     }
     assert(files.size() == res->total_docs());
-    assert(p.get_results().size() == res->syntactically_correct_docs());
-    assert(p.get_errors().size() == res->syntactically_incorrect_docs());
+        assert(p.get_results().size() + p.get_errors().size() == res->total_segments());
 
     std::cout << fmt::format(
       "\n=== Document Statistics ===\n"

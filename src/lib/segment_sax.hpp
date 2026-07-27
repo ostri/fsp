@@ -1,9 +1,9 @@
 #include "logger.hpp"
+#include "result_values.hpp"
 #include "xml_attr.hpp"
 #include "xpath_set.hpp"
 #include <libxml/parser.h>
 #include <cstddef>
-#include <memory>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -23,22 +23,22 @@ namespace fsp
   };
 
   struct sax_ctx
-  {                                                // NOLINTBEGIN(misc-non-private-member-variables-in-classes)
-    const fsp_logger&                     log_;    // NOLINT(cppcoreguidelines-avoid-const-or-ref-data-members)
-    std::shared_ptr<xpath_set>            targets; // NOLINT(cppcoreguidelines-avoid-const-or-ref-data-members)
-    std::vector<xml_path_el>              path_stack;
-    std::vector<std::vector<std::string>> results;
-    std::uint64_t                         remaining_mask    = 0;
-    bool                                  stop_parsing      = false;
-    int                                   active_target_idx = -1;
-    xmlParserCtxtPtr                      ctxt              = nullptr; // to stop the parser
-    std::string                           current_buffer;              // for temporary tag values
-    bool                                  log_trace_ = log_.active(lvl_enum::trace);
-    bool                                  log_debug_ = log_.active(lvl_enum::debug);
-    bool                                  log_info_  = log_.active(lvl_enum::info);
-    bool                                  log_warn_  = log_.active(lvl_enum::warn);
-    bool                                  log_error_ = log_.active(lvl_enum::err);
-    bool                                  log_crit_  = log_.active(lvl_enum::crit);
+  {                                           // NOLINTBEGIN(misc-non-private-member-variables-in-classes)
+    const fsp_logger&        log_;            // NOLINT(cppcoreguidelines-avoid-const-or-ref-data-members)
+    const xpath_set*         targets = nullptr; // non-owning -- points at the caller's (static/long-lived) xpath_set for this segment's own subtree_type()
+    std::vector<xml_path_el> path_stack;
+    result_values             results;
+    std::uint64_t             remaining_mask    = 0;
+    bool                      stop_parsing      = false;
+    int                       active_target_idx = -1;
+    xmlParserCtxtPtr          ctxt              = nullptr; // to stop the parser
+    std::string               current_buffer;              // for temporary tag values
+    bool                      log_trace_ = log_.active(lvl_enum::trace);
+    bool                      log_debug_ = log_.active(lvl_enum::debug);
+    bool                      log_info_  = log_.active(lvl_enum::info);
+    bool                      log_warn_  = log_.active(lvl_enum::warn);
+    bool                      log_error_ = log_.active(lvl_enum::err);
+    bool                      log_crit_  = log_.active(lvl_enum::crit);
     // NOLINTEND(misc-non-private-member-variables-in-classes)
 
     explicit sax_ctx(const fsp_logger& log);
@@ -48,7 +48,7 @@ namespace fsp
   class segment_sax
   {
   public:
-    using result_t = std::vector<std::vector<std::string>>;
+    using result_t = result_values;
     explicit segment_sax(const fsp_logger& log);
     ~segment_sax();
     segment_sax(segment_sax&&)                 = delete;
@@ -101,10 +101,9 @@ namespace fsp
 
   inline void sax_ctx::reset_for_reuse(const xpath_set& t)
   {
-    targets = std::make_shared<fsp::xpath_set>(t); // FIXME
-    results.resize(targets->size());
+    targets = &t; // non-owning -- t is expected to outlive this call (a static/long-lived xpath_set)
+    results = result_values(t);
     path_stack.reserve(targets->max_xpath_size());
-    for (auto& r : results) r.clear();
     remaining_mask    = targets->full_mask();
     stop_parsing      = false;
     active_target_idx = -1;
@@ -153,24 +152,7 @@ namespace fsp
                       XML_PARSE_NOERROR | XML_PARSE_NOWARNING | XML_PARSE_NONET); // NOLINT(hicpp-signed-bitwise)
     ctx_.ctxt = ctxt_; // xmlCtxtResetPush can change internal structures. realign.
     xmlParseChunk(ctxt_, xml_data.data(), static_cast<int>(xml_data.size()), 1);
-    if (log_debug_)
-    {
-      auto  ndx = 0UL;
-      str_t msg = "values:\n";
-      for (auto& result : ctx_.results)
-      {
-        str_t msg_el;
-        for (const auto& el : result)
-        {
-          msg_el.append(" ,");
-          msg_el.append(el);
-        }
-        // remove leading " ,"
-        if (msg_el.size() > 2) msg_el = msg_el.substr(2, msg_el.size() - 2);
-        msg += fmt::format("{:15} : [{}]\n", (*ctx_.targets)[ndx++].name(), msg_el);
-      }
-      log_.debug(msg);
-    }
+    if (log_debug_) log_.debug("values:\n" + ctx_.results.dump());
     return std::move(ctx_.results); // faster than copy
   }
 
@@ -206,9 +188,12 @@ namespace fsp
               target.attr_name() == reinterpret_cast<const char*>(attr_localname) &&
               target.attr_uri() == (nullptr != attr_uri ? reinterpret_cast<const char*>(attr_uri) : ""))
           {
-            ctx->results[t].emplace_back(reinterpret_cast<const char*>(val_ptr), val_end - val_ptr);
-            if ((ctx->targets->array_mask() & (std::uint64_t{1} << static_cast<std::size_t>(t))) == 0)
-              ctx->remaining_mask &= ~(std::uint64_t{1} << static_cast<std::size_t>(t));
+            std::string value(reinterpret_cast<const char*>(val_ptr), static_cast<std::size_t>(val_end - val_ptr));
+            const bool  is_array = (ctx->targets->array_mask() & (std::uint64_t{1} << static_cast<std::size_t>(t))) != 0;
+            if (ctx->log_trace_) ctx->log_.trace(fmt::format("assign attr [{}] '{}' = '{}'", t, target.name(), value));
+            if (is_array) ctx->results.add(static_cast<std::size_t>(t), std::move(value));
+            else ctx->results.set(static_cast<std::size_t>(t), std::move(value));
+            if (! is_array) ctx->remaining_mask &= ~(std::uint64_t{1} << static_cast<std::size_t>(t));
           }
         });
     }
@@ -289,11 +274,14 @@ namespace fsp
     auto* ctx = static_cast<sax_ctx*>(user_data);
     if (ctx->active_target_idx != -1)
     {
-      auto idx = ctx->active_target_idx;
-      ctx->results[idx].push_back(std::move(ctx->current_buffer));
+      auto       idx      = ctx->active_target_idx;
+      const bool is_array = (ctx->targets->array_mask() & (std::uint64_t{1} << static_cast<unsigned int>(idx))) != 0U;
+      if (ctx->log_trace_)
+        ctx->log_.trace(fmt::format("assign elem [{}] '{}' = '{}'", idx, (*ctx->targets)[static_cast<std::size_t>(idx)].name(), ctx->current_buffer));
+      if (is_array) ctx->results.add(static_cast<std::size_t>(idx), std::move(ctx->current_buffer));
+      else ctx->results.set(static_cast<std::size_t>(idx), std::move(ctx->current_buffer));
       ctx->current_buffer.clear();
-      if ((ctx->targets->array_mask() & (std::uint64_t{1} << static_cast<unsigned int>(idx))) == 0U)
-        ctx->remaining_mask &= ~(std::uint64_t{1} << static_cast<unsigned int>(idx));
+      if (! is_array) ctx->remaining_mask &= ~(std::uint64_t{1} << static_cast<unsigned int>(idx));
       ctx->active_target_idx = -1;
     }
     ctx->path_stack.pop_back();
