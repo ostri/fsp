@@ -5,8 +5,8 @@
 #include "xml_attr.hpp"
 #include <array>
 #include <charconv>
-#include <cstdint>
 #include <meta>
+#include <optional>
 #include <string_view>
 #include <type_traits>
 #include <variant>
@@ -37,9 +37,10 @@ namespace fsp
    * @brief Parse a single "name=path" annotation string into a raw_attr. Used
    * for class-level (target/segment) annotations, where the desired name
    * (e.g. "header") legitimately differs from the C++ class identifier (e.g.
-   * pacs8_header). path is passed through as-is -- any leading cardinality
-   * marker (?, * or +) or embedded '@' in it is understood natively by
-   * xml_attr's own parsing (see xml_attr.hpp), nothing to do here.
+   * pacs8_header). path is passed through as-is -- an embedded '@' in it is
+   * understood natively by xml_attr's own parsing (see xml_attr.hpp), nothing
+   * to do here. Class-level annotations have no cardinality of their own
+   * (is_opt/is_array default to false), unlike field_attr_of() below.
    *
    * @param s annotation payload, e.g. "header=/x:Document/.../GrpHdr"
    * @return constexpr raw_attr with name/path filled in
@@ -84,19 +85,63 @@ namespace fsp
   consteval raw_attr attr_of()
   { return parse_raw_attr(annotation_text<Item>()); }
 
+  /** @brief True iff FieldType is a std::optional<X> -- an o_*-named schema field type. */
+  template <typename>
+  struct is_optional : std::false_type
+  {
+  };
+  template <typename X>
+  struct is_optional<std::optional<X>> : std::true_type
+  {
+  };
+  template <typename FieldType>
+  inline constexpr bool is_optional_v = is_optional<FieldType>::value;
+
+  /** @brief True iff FieldType is a std::array<X, N> -- an m_*-named schema field type. */
+  template <typename>
+  struct is_fixed_array : std::false_type
+  {
+  };
+  template <typename X, std::size_t N>
+  struct is_fixed_array<std::array<X, N>> : std::true_type
+  {
+  };
+  template <typename FieldType>
+  inline constexpr bool is_fixed_array_v = is_fixed_array<FieldType>::value;
+
+  /** @brief True iff FieldType is a std::vector<X> -- the older, dynamically-growing array schema field type. */
+  template <typename>
+  struct is_vector : std::false_type
+  {
+  };
+  template <typename X>
+  struct is_vector<std::vector<X>> : std::true_type
+  {
+  };
+  template <typename FieldType>
+  inline constexpr bool is_vector_v = is_vector<FieldType>::value;
+
   /**
-   * @brief Read a field's [[= "path"]] annotation into a raw_attr, taking the
-   * name from the field's own identifier instead of requiring it spelled out
-   * again in the annotation string. path is passed through as-is -- any
-   * leading cardinality marker (?, * or +) or embedded '@' in it is understood
-   * natively by xml_attr's own parsing (see the raw_attr comment in
-   * xml_attr.hpp for the exact syntax), nothing to do here.
+   * @brief Read a field's [[= "path"]] annotation into a raw_attr, taking the name from the
+   * field's own identifier instead of requiring it spelled out again in the annotation
+   * string. Cardinality comes ONLY from the field's own C++ type -- there is no marker
+   * character in path anymore (see the raw_attr comment in xml_attr.hpp): an o_*-named field
+   * type (std::optional<X>, see parsing_util.hpp) sets is_opt, and an m_*-named field type
+   * (std::array<X, max_values>) or a std::vector<X> field sets is_array.
    *
    * @tparam Item reflection of the annotated non-static data member
    */
   template <std::meta::info Item>
   consteval raw_attr field_attr_of()
-  { return raw_attr{.name = std::meta::identifier_of(Item), .path = annotation_text<Item>()}; }
+  {
+    using field_t = typename[:std::meta::type_of(Item):];
+    return raw_attr{
+      .name     = std::meta::identifier_of(Item),
+      .path     = annotation_text<Item>(),
+      .is_opt   = is_optional_v<field_t>,
+      .is_array = is_fixed_array_v<field_t> || is_vector_v<field_t>,
+    };
+  }
 
   /**
    * @brief Build the raw_attr table for one xpath schema class by walking its
@@ -222,40 +267,51 @@ namespace fsp
     return proc_data{.targets = fsp::build(targets_raw.span(), ns_arr), .xpaths = std::move(xpaths)};
   }
 
-  /** @brief True iff FieldType is a std::vector<X> -- an optional-or-repeated-cardinality schema field. */
-  template <typename>
-  struct is_vector : std::false_type
-  {
-  };
-  template <typename X>
-  struct is_vector<std::vector<X>> : std::true_type
-  {
-  };
-  template <typename FieldType>
-  inline constexpr bool is_vector_v = is_vector<FieldType>::value;
-
   /**
    * @brief Converts one extracted string value into a schema class field's own (scalar)
    * C++ type.
    * @details Materialize's only supported scalar element types for now are str_t (passed
-   * through as-is) and std::uint64_t (parsed via std::from_chars). Other C++ types are
-   * rejected at compile time -- support is added incrementally as
-   * materialize()/materialize_variant() grow to cover more of a schema class's field types
-   * (optional<>, signed integers, ...).
-   * @tparam FieldType the target field's own declared C++ type (or a vector field's own
+   * through as-is), big_int_t, int_t and small_int_t (std::uint64_t/std::int32_t/std::int16_t,
+   * parsed via std::from_chars), ts_t (an ISO 20022 ISODateTime, parsed via
+   * parse_iso_datetime()), date_t (an ISO 20022 ISODate, parsed via parse_iso_date()) and
+   * amount_t (an ISO 20022 decimal amount, parsed via parse_iso_amount() -- see
+   * parsing_util.hpp), plus any o_*-named std::optional<X> of one of those (see
+   * is_optional_v above -- unwraps to X, then the result converts back to std::optional<X> at
+   * the return statement). Other C++ types are rejected at compile time -- support is added
+   * incrementally as materialize()/materialize_variant() grow to cover more of a schema
+   * class's field types.
+   * @tparam FieldType the target field's own declared C++ type (or a vector/array field's own
    * value_type)
    */
   template <typename FieldType>
   FieldType convert_scalar(cstr_t s)
   {
     if constexpr (std::is_same_v<FieldType, str_t>) return str_t(s);
-    else if constexpr (std::is_same_v<FieldType, std::uint64_t>)
+    else if constexpr (std::is_same_v<FieldType, big_int_t>)
     {
-      std::uint64_t v = 0;
+      big_int_t v = 0;
       std::from_chars(s.data(), s.data() + s.size(), v);
       return v;
     }
-    else static_assert(sizeof(FieldType) == 0, "materialize: unsupported field type (only str_t and std::uint64_t so far)");
+    else if constexpr (std::is_same_v<FieldType, int_t>)
+    {
+      int_t v = 0;
+      std::from_chars(s.data(), s.data() + s.size(), v);
+      return v;
+    }
+    else if constexpr (std::is_same_v<FieldType, small_int_t>)
+    {
+      small_int_t v = 0;
+      std::from_chars(s.data(), s.data() + s.size(), v);
+      return v;
+    }
+    else if constexpr (std::is_same_v<FieldType, ts_t>) return parse_iso_datetime(s);
+    else if constexpr (std::is_same_v<FieldType, date_t>) return parse_iso_date(s);
+    else if constexpr (std::is_same_v<FieldType, amount_t>) return parse_iso_amount(s);
+    else if constexpr (is_optional_v<FieldType>) return convert_scalar<typename FieldType::value_type>(s);
+    else static_assert(
+      sizeof(FieldType) == 0,
+      "materialize: unsupported field type (only str_t, big_int_t, int_t, small_int_t, ts_t, date_t, amount_t and std::optional<> of those so far)");
   }
 
   /**
@@ -272,8 +328,15 @@ namespace fsp
    * xpath, scalar for a single-valued one). result_values::value()/values() don't cross-check
    * this themselves (see result_values.hpp), so a scalar field wrongly declared for an array
    * xpath reads out of bounds instead of failing cleanly.
+   *
+   * An m_*-named std::array<X, max_values> field (see parsing_util.hpp) is filled the same way
+   * as std::vector<X>, capped at max_values -- extra values beyond max_values are silently
+   * dropped (m_* trades unbounded growth for a fixed, allocation-free capacity; the schema
+   * would need more than max_values repeats of the same xpath to hit this). Slots beyond the
+   * found count keep their default-constructed value, same as any other not-found field.
    * @tparam T a schema class (see work.hpp) whose fields are all currently either str_t,
-   * std::uint64_t, or std::vector<str_t>/std::vector<std::uint64_t>
+   * big_int_t, int_t, small_int_t, ts_t, date_t, amount_t, an o_*-named std::optional<> of one
+   * of those, or a std::vector<>/m_*-named std::array<> of one of those
    * @param values one segment's extracted values, as produced for T's own subtree_type()
    */
   template <typename T>
@@ -291,6 +354,16 @@ namespace fsp
         if constexpr (is_vector_v<field_t>)
         {
           for (const auto& s : values.values(name)) out.[:m:].push_back(convert_scalar<typename field_t::value_type>(s));
+        }
+        else if constexpr (is_fixed_array_v<field_t>)
+        {
+          constexpr std::size_t capacity = std::tuple_size_v<field_t>;
+          std::size_t           i        = 0;
+          for (const auto& s : values.values(name))
+          {
+            if (i >= capacity) break;
+            out.[:m:][i++] = convert_scalar<typename field_t::value_type>(s);
+          }
         }
         else out.[:m:] = convert_scalar<field_t>(values.value(name));
       }

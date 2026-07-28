@@ -1,15 +1,37 @@
 // result_values.hpp
 #pragma once
+#include "parsing_util.hpp"
 #include "xpath_set.hpp"
+#include <array>
 #include <bit>
 #include <cstdint>
 #include <fmt/format.h>
 #include <optional>
+#include <span>
 #include <vector>
 
 namespace fsp
 {
-  using vec_str_t = std::vector<str_t>;
+  /**
+   * @brief Fixed-capacity storage for one array-cardinality xpath's collected values, capped
+   * at max_values (see parsing_util.hpp -- the same constant m_*-named schema field types are
+   * sized with, since an xpath can never usefully collect more repeats than an m_* field could
+   * hold). No heap growth: values() beyond max_values are silently dropped, mirroring
+   * materialize<T>()'s own m_* capping (see reflection.hpp).
+   */
+  struct array_values
+  {
+    // NOLINTBEGIN(misc-non-private-member-variables-in-classes)
+    std::array<str_t, max_values> data{};
+    std::size_t                   count = 0;
+    // NOLINTEND(misc-non-private-member-variables-in-classes)
+
+    void push_back(str_t value)
+    {
+      if (count < max_values) data[count++] = std::move(value); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index)
+    }
+  };
+
   /**
    * @brief Named, typed view over one segment's extracted xpath values.
    *
@@ -20,9 +42,11 @@ namespace fsp
    * already knows its own subtree_type().
    *
    * Scalar and array xpaths are stored in two separate vectors: most xpaths in a real schema
-   * (e.g. all of SEPA pacs) are single-valued, so paying for a std::vector<str_t> per
-   * field there would waste an allocation per field for something that only ever holds 0 or 1
-   * entries.
+   * (e.g. all of SEPA pacs) are single-valued, so paying for an array_values per field there
+   * would waste space for something that only ever holds 0 or 1 entries. The array-xpath
+   * vector itself still grows with the schema's own array-xpath count (small, fixed per
+   * schema); each entry within it is the fixed-capacity array_values above, not a
+   * dynamically-growing vector.
    *
    * @note Constructed/destroyed millions of times per session (once per processed segment) --
    * kept rule-of-zero (no custom copy/move/dtor) and the constructor only pre-sizes the two
@@ -33,21 +57,21 @@ namespace fsp
   public:
     result_values() = default;
     explicit result_values(const xpath_set& schema);
-    void                           reset(const xpath_set& schema);
-    void                           set(std::size_t idx, str_t value) noexcept;
-    void                           set(cstr_t name, str_t value);
-    void                           add(std::size_t idx, str_t value);
-    void                           add(cstr_t name, str_t value);
-    [[nodiscard]] std::size_t      size() const noexcept;
-    [[nodiscard]] bool             empty() const noexcept;
-    [[nodiscard]] bool             found(std::size_t idx) const noexcept;
-    [[nodiscard]] bool             found(cstr_t name) const;
-    [[nodiscard]] cstr_t           value(std::size_t idx) const noexcept;
-    [[nodiscard]] cstr_t           value(cstr_t name) const;
-    [[nodiscard]] const vec_str_t& values(std::size_t idx) const noexcept;
-    [[nodiscard]] const vec_str_t& values(cstr_t name) const;
-    [[nodiscard]] bool             complete() const;
-    [[nodiscard]] str_t            dump(int offs = 0) const;
+    void                          reset(const xpath_set& schema);
+    void                          set(std::size_t idx, str_t value) noexcept;
+    void                          set(cstr_t name, str_t value);
+    void                          add(std::size_t idx, str_t value);
+    void                          add(cstr_t name, str_t value);
+    [[nodiscard]] std::size_t     size() const noexcept;
+    [[nodiscard]] bool            empty() const noexcept;
+    [[nodiscard]] bool            found(std::size_t idx) const noexcept;
+    [[nodiscard]] bool            found(cstr_t name) const;
+    [[nodiscard]] cstr_t          value(std::size_t idx) const noexcept;
+    [[nodiscard]] cstr_t          value(cstr_t name) const;
+    [[nodiscard]] std::span<const str_t> values(std::size_t idx) const noexcept;
+    [[nodiscard]] std::span<const str_t> values(cstr_t name) const;
+    [[nodiscard]] bool                   complete() const;
+    [[nodiscard]] str_t                  dump(int offs = 0) const;
   private:
     [[nodiscard]] std::size_t index_of(cstr_t name) const;
     [[nodiscard]] bool        is_array_xpath(std::size_t idx) const noexcept;
@@ -58,8 +82,8 @@ namespace fsp
     const xpath_set* schema_ = nullptr;
     /** @brief One slot per non-array xpath; nullopt = not found. */
     std::vector<std::optional<str_t>> scalars_;
-    /** @brief One slot per array xpath; empty vector = not found. */
-    std::vector<std::vector<str_t>> arrays_;
+    /** @brief One slot per array xpath; count == 0 = not found. */
+    std::vector<array_values> arrays_;
   };
 
   /**
@@ -88,7 +112,7 @@ namespace fsp
     scalars_.resize(scalar_count);
     arrays_.resize(array_count);
     for (auto& s : scalars_) s.reset();
-    for (auto& a : arrays_) a.clear();
+    for (auto& a : arrays_) a.count = 0;
   }
 
   /**
@@ -120,10 +144,10 @@ namespace fsp
   /**
    * @brief Whether ANY value was recorded for this xpath.
    * @details Distinguishes "" found in the XML from "never set" -- for scalars via
-   * std::optional, for arrays via vector emptiness.
+   * std::optional, for arrays via a zero count.
    */
   inline bool result_values::found(std::size_t idx) const noexcept
-  { return is_array_xpath(idx) ? ! arrays_[array_slot(idx)].empty() : scalars_[scalar_slot(idx)].has_value(); }
+  { return is_array_xpath(idx) ? arrays_[array_slot(idx)].count > 0 : scalars_[scalar_slot(idx)].has_value(); }
 
   /** @brief Name-based overload of found(). */
   inline bool result_values::found(cstr_t name) const { return found(index_of(name)); }
@@ -138,11 +162,15 @@ namespace fsp
   /** @brief Name-based overload of value(). */
   inline cstr_t result_values::value(cstr_t name) const { return value(index_of(name)); }
 
-  /** @brief All occurrences of an array xpath; empty vector if found() == false. */
-  inline const std::vector<str_t>& result_values::values(std::size_t idx) const noexcept { return arrays_[array_slot(idx)]; }
+  /** @brief All occurrences of an array xpath, capped at max_values; empty span if found() == false. */
+  inline std::span<const str_t> result_values::values(std::size_t idx) const noexcept
+  {
+    const auto& a = arrays_[array_slot(idx)];
+    return {a.data.data(), a.count};
+  }
 
   /** @brief Name-based overload of values(). */
-  inline const vec_str_t& result_values::values(cstr_t name) const { return values(index_of(name)); }
+  inline std::span<const str_t> result_values::values(cstr_t name) const { return values(index_of(name)); }
 
   /** @brief True iff every non-optional (is_opt() == false) xpath in the schema has found() == true. */
   inline bool result_values::complete() const

@@ -23,20 +23,17 @@ namespace fsp
 
   // --- raw attribute definition (compile-time) ----------------------------------------
   /**
-   * @brief path may carry markers understood natively by xml_attr's parsing,
-   * in addition to the raw is_opt flag below (kept for hand-written tables
-   * that don't use markers at all):
+   * @brief Cardinality (optional/array) is carried ONLY by is_opt/is_array below -- never by
+   * a marker character in path. For reflection-based schema classes, the field's own C++ type
+   * determines both (see fsp::field_attr_of() in reflection.hpp: an o_*-named
+   * std::optional<X> field sets is_opt, an m_*-named std::array<X, max_values> or
+   * std::vector<X> field sets is_array); hand-written raw_attr tables set them directly.
    *
-   *   "path"     required, exactly one value, tag
-   *   "?path"    optional, zero or one value             (leading, whole-path)
-   *   "*path"    optional, zero or more values           (leading, whole-path)
-   *   "+path"    required, one or more values            (leading, whole-path)
+   *   "path"     tag, cardinality per is_opt/is_array above
    *   ".../@tag" or ".../@ns:tag"   tag is an attribute, not an element -- '@'
    *              is looked for on whichever segment carries it (conventionally
    *              the last one, mimicking xpath's ".../@Ccy"), not just position 0
-   *              of the whole string.
-   *
-   * The two are independent and combine freely, e.g. "*CdtTrfTxInf/.../@Ccy".
+   *              of the whole string. Independent of cardinality, combines freely.
    */
   struct raw_attr
   {
@@ -44,7 +41,8 @@ namespace fsp
     // NOLINTBEGIN(misc-non-private-member-variables-in-classes)
     cstr_t name;
     cstr_t path;
-    bool   is_opt = false;
+    bool   is_opt   = false;
+    bool   is_array = false;
     // NOLINTEND(misc-non-private-member-variables-in-classes)
   };
 
@@ -184,28 +182,14 @@ namespace fsp
 
   constexpr xml_attr::xml_attr(std::size_t original_ndx, const raw_attr& raw, std::span<const ns> ns_arr)
   : name_(raw.name)
+  , path_(trim_xpath(raw.path))
+  , is_opt_(raw.is_opt)
   , original_ndx_(original_ndx)
   {
-    // leading whole-path cardinality marker: ?, * or + (see raw_attr comment above)
-    cstr_t working      = raw.path;
-    bool   marker_opt   = false;
-    bool   marker_array = false;
-    if (! working.empty())
-    {
-      char c = working.front();
-      if (c == '?' || c == '*' || c == '+')
-      {
-        marker_opt   = (c == '?' || c == '*');
-        marker_array = (c == '*' || c == '+');
-        working      = working.substr(1);
-      }
-    }
-    path_   = trim_xpath(working);
-    is_opt_ = raw.is_opt || marker_opt;
-
-    // '@' anywhere in the (marker-stripped) path means it resolves to an
-    // attribute -- parse_xpath_to_elements() already found and consumed it
-    // per-segment, this just tells us whether the *last* element is that one.
+    // '@' anywhere in path means it resolves to an attribute -- parse_xpath_to_elements()
+    // already found and consumed it per-segment, this just tells us whether the *last*
+    // element is that one. Independent of cardinality (is_opt_/is_array_), which come only
+    // from raw.is_opt/raw.is_array -- see the raw_attr comment above.
     bool marker_attr = path_.contains('@');
 
     auto parsed = parse_xpath_to_elements(path_, ns_arr);
@@ -219,15 +203,7 @@ namespace fsp
       attr_ = last_el; // ns/tag already resolved correctly (no '@') by parse_xpath_to_elements
       xpath_size_--;
     }
-    else if (marker_array || last_el.tag.starts_with('*'))
-    { // last_el.tag.starts_with('*') is the old per-segment convention, kept
-      // for hand-written raw_attr tables that embed '*' instead of using the
-      // leading marker (e.g. ".../*BICFI")
-      is_array_ = true;
-      if (last_el.tag.starts_with('*'))
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-constant-array-index)
-        xpath_[last_pos] = xpath_el{.ns = last_el.ns, .tag = last_el.tag.substr(1)}; // strip '*'
-    }
+    else if (raw.is_array) is_array_ = true;
   }
 
   [[nodiscard]] inline str_t xml_attr::full_xpath() const

@@ -289,11 +289,11 @@ disable_ubsan_for_reflection(${CMAKE_SOURCE_DIR}/src/test/pacs8.cpp)
 add_fsp_target(${b_target} EXECUTABLE ${${b_target}_SOURCES})
 add_log_config(${b_target})
 # -----------------------------------------------------------------------------
-# --- target: pacs8-hook (same as pacs8, but wires an explicit custom pipeline_hooks class)
+# --- target: pacs8-cb (same as pacs8, but wires an explicit custom pipeline_hooks class)
 # -----------------------------------------------------------------------------
-set(b_target pacs8-hook) # name of the target
+set(b_target pacs8-cb) # name of the target
 set(${b_target}_SOURCES
-    ${CMAKE_SOURCE_DIR}/src/test/pacs8-hook.cpp
+    ${CMAKE_SOURCE_DIR}/src/test/pacs8-cb.cpp
     ${CMAKE_SOURCE_DIR}/src/test/pacs8_cb.cpp
 )
 set(FSP_TARGET_${b_target}_INCLUDES
@@ -306,7 +306,7 @@ set(FSP_TARGET_${b_target}_LIBS
     spdlog::spdlog
     magic_enum::magic_enum
 )
-disable_ubsan_for_reflection(${CMAKE_SOURCE_DIR}/src/test/pacs8-hook.cpp)
+disable_ubsan_for_reflection(${CMAKE_SOURCE_DIR}/src/test/pacs8-cb.cpp)
 add_fsp_target(${b_target} EXECUTABLE ${${b_target}_SOURCES})
 add_log_config(${b_target})
 # -----------------------------------------------------------------------------

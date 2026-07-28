@@ -113,7 +113,7 @@ namespace fsp
    *    is_debug()/is_release()) in the current working directory, if LOG_CONFIG was unset,
    *    empty, or pointed at a file that couldn't be read.
    * 3. Hardcoded fallback if neither file could be read: console logging, level info.
-   * @param program_name Identifies the calling program (e.g. "pacs8", "pacs8-hook", "fsp") --
+   * @param program_name Identifies the calling program (e.g. "pacs8", "pacs8-cb", "fsp") --
    * used only to pick the right fallback config file in step 2, so each program can have its own
    * log_file_path (see config/log_debug.conf.in/log_release.conf.in, generated per-program by
    * CMake into log_<program_name>_debug.conf/_release.conf).
