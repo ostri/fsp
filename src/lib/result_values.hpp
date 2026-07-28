@@ -69,7 +69,7 @@ namespace fsp
      * @param value Extracted value (may legitimately be empty -- still counts as found()).
      */
     void set(std::size_t idx, std::string value) noexcept { scalars_[scalar_slot(idx)] = std::move(value); }
-    /// @brief Name-based overload of set() -- looks up idx via the schema.
+    /** @brief Name-based overload of set() -- looks up idx via the schema. */
     void set(std::string_view name, std::string value) { set(index_of(name), std::move(value)); }
 
     /**
@@ -78,12 +78,12 @@ namespace fsp
      * @param value Extracted value for this occurrence.
      */
     void add(std::size_t idx, std::string value) { arrays_[array_slot(idx)].push_back(std::move(value)); }
-    /// @brief Name-based overload of add() -- looks up idx via the schema.
+    /** @brief Name-based overload of add() -- looks up idx via the schema. */
     void add(std::string_view name, std::string value) { add(index_of(name), std::move(value)); }
 
-    /// @brief Total number of xpaths declared in the schema (scalar + array).
+    /** @brief Total number of xpaths declared in the schema (scalar + array). */
     [[nodiscard]] std::size_t size() const noexcept { return schema_ != nullptr ? schema_->size() : 0; }
-    /// @brief True iff the schema has no xpaths at all (mirrors the old container's empty()).
+    /** @brief True iff the schema has no xpaths at all (mirrors the old container's empty()). */
     [[nodiscard]] bool empty() const noexcept { return size() == 0; }
 
     /**
@@ -95,24 +95,24 @@ namespace fsp
     {
       return is_array_xpath(idx) ? ! arrays_[array_slot(idx)].empty() : scalars_[scalar_slot(idx)].has_value();
     }
-    /// @brief Name-based overload of found().
+    /** @brief Name-based overload of found(). */
     [[nodiscard]] bool found(std::string_view name) const { return found(index_of(name)); }
 
-    /// @brief Value of a scalar xpath; empty string_view if found() == false.
+    /** @brief Value of a scalar xpath; empty string_view if found() == false. */
     [[nodiscard]] std::string_view value(std::size_t idx) const noexcept
     {
       const auto& v = scalars_[scalar_slot(idx)];
       return v ? std::string_view(*v) : std::string_view{};
     }
-    /// @brief Name-based overload of value().
+    /** @brief Name-based overload of value(). */
     [[nodiscard]] std::string_view value(std::string_view name) const { return value(index_of(name)); }
 
-    /// @brief All occurrences of an array xpath; empty vector if found() == false.
+    /** @brief All occurrences of an array xpath; empty vector if found() == false. */
     [[nodiscard]] const std::vector<std::string>& values(std::size_t idx) const noexcept { return arrays_[array_slot(idx)]; }
-    /// @brief Name-based overload of values().
+    /** @brief Name-based overload of values(). */
     [[nodiscard]] const std::vector<std::string>& values(std::string_view name) const { return values(index_of(name)); }
 
-    /// @brief True iff every non-optional (is_opt() == false) xpath in the schema has found() == true.
+    /** @brief True iff every non-optional (is_opt() == false) xpath in the schema has found() == true. */
     [[nodiscard]] bool complete() const
     {
       if (schema_ == nullptr) return false;
@@ -121,7 +121,7 @@ namespace fsp
       return true;
     }
 
-    /// @brief One "name : [values]" line per xpath, in schema order.
+    /** @brief One "name : [values]" line per xpath, in schema order. */
     [[nodiscard]] std::string dump(int offs = 0) const
     {
       std::string msg;
@@ -140,22 +140,25 @@ namespace fsp
     }
 
   private:
-    /// @brief Resolves a field name to its original schema index.
+    /** @brief Resolves a field name to its original schema index. */
     [[nodiscard]] std::size_t index_of(std::string_view name) const { return (*schema_)[name].original_ndx(); }
 
-    /// @brief Whether the xpath at idx is array (multi-valued) type, per schema's array_mask().
+    /** @brief Whether the xpath at idx is array (multi-valued) type, per schema's array_mask(). */
     [[nodiscard]] bool is_array_xpath(std::size_t idx) const noexcept { return ((schema_->array_mask() >> idx) & std::uint64_t{1}) != 0; }
 
-    /// @brief This xpath's own slot within arrays_ (count of array-type xpaths below idx).
+    /** @brief This xpath's own slot within arrays_ (count of array-type xpaths below idx). */
     [[nodiscard]] std::size_t array_slot(std::size_t idx) const noexcept
     {
       return static_cast<std::size_t>(std::popcount(schema_->array_mask() & ((std::uint64_t{1} << idx) - 1)));
     }
-    /// @brief This xpath's own slot within scalars_ (count of scalar-type xpaths below idx).
+    /** @brief This xpath's own slot within scalars_ (count of scalar-type xpaths below idx). */
     [[nodiscard]] std::size_t scalar_slot(std::size_t idx) const noexcept { return idx - array_slot(idx); }
 
-    const xpath_set* schema_ = nullptr; ///< Non-owning; points at a static/constexpr xpath_set that outlives the whole run.
-    std::vector<std::optional<std::string>> scalars_; ///< One slot per non-array xpath; nullopt = not found.
-    std::vector<std::vector<std::string>>   arrays_;  ///< One slot per array xpath; empty vector = not found.
+    /** @brief Non-owning; points at a static/constexpr xpath_set that outlives the whole run. */
+    const xpath_set* schema_ = nullptr;
+    /** @brief One slot per non-array xpath; nullopt = not found. */
+    std::vector<std::optional<std::string>> scalars_;
+    /** @brief One slot per array xpath; empty vector = not found. */
+    std::vector<std::vector<std::string>> arrays_;
   };
 } // namespace fsp

@@ -8,8 +8,8 @@
 namespace fsp
 {
   // Per-document runtime facts collected while processing one document: how many of its segments
-  // turned out semantically correct vs. in error (via record_segment(), driven by the
-  // on_segment_processed hook's verdict), plus end-to-end timing for the cutting phase
+  // turned out semantically correct vs. in error (via begin_segment()/end_segment(), driven by
+  // the on_segment_processed hook's verdict), plus end-to-end timing for the cutting phase
   // (open/close) and the segment-processing phase (first/last segment). Replaces the old
   // doc_timing_t, which only tracked timing -- this consolidates timing and outcome counts into
   // one per-document structure. No session-wide totals are kept here or anywhere alongside it:
@@ -18,20 +18,36 @@ namespace fsp
   class doc_counters
   {
   public:
+    // Reported to the caller by begin_segment(), see below.
+    struct segment_position
+    {
+      bool is_first; // NOLINT(misc-non-private-member-variables-in-classes)
+      bool is_last;  // NOLINT(misc-non-private-member-variables-in-classes)
+    };
+
     // Called once by the cutter thread when it starts cutting this document.
     void record_doc_open() noexcept;
     // Called once by the cutter thread when it finishes cutting this document, reporting how
     // many segments it found in total. Returns true if this call is the one that completes the
     // document (i.e. every one of its segments had already been processed by the time cutting
-    // finished) -- see record_segment() for the symmetric, more common case.
+    // finished) -- see end_segment() for the symmetric, more common case.
     bool record_doc_close(std::size_t total_segments) noexcept;
 
-    // Called by whichever P-role thread just finished processing one segment of this document.
-    // semantically_ok is the on_segment_processed hook's verdict (true = semantically correct,
-    // false = semantic error) -- not to be confused with technical extraction success. Returns
-    // true if this call is the one that completes the document (cutting already finished AND
-    // this was the last of its segments to be processed).
-    bool record_segment(bool semantically_ok) noexcept;
+    // Called by whichever P-role thread is about to process one segment of this document,
+    // BEFORE its outcome is known -- this is what lets on_segment_processed's is_first/is_last
+    // parameters be ready before the hook call itself. is_last here is best-effort: for a
+    // document small/fast enough that every one of its segments gets processed before cutting
+    // itself reports done, cut_finished() is still false for every one of them, so none can
+    // correctly claim is_last (see end_segment()/maybe_complete() for the authoritative,
+    // dual-path completion check used for internal bookkeeping instead).
+    [[nodiscard]] segment_position begin_segment() noexcept;
+    // Called once the segment's outcome is known (semantically_ok is the on_segment_processed
+    // hook's verdict, or false for a segment that failed technically and never reached the
+    // hook at all -- not to be confused with technical extraction success in the ok() case).
+    // Returns true if this call is the one that completes the document (cutting already
+    // finished AND this was the last of its segments to be processed) -- checked independently
+    // of begin_segment()'s is_last, and correct even in the race described above.
+    bool end_segment(bool semantically_ok) noexcept;
 
     [[nodiscard]] std::size_t ok() const noexcept;
     [[nodiscard]] std::size_t error() const noexcept;
@@ -56,13 +72,16 @@ namespace fsp
     [[nodiscard]] std::string dump(int offs = 0) const;
   private:
     using clock = std::chrono::steady_clock;
-    // Shared completion check used by both record_doc_close() and record_segment(), since either
+    // Shared completion check used by both record_doc_close() and end_segment(), since either
     // one can be the call that satisfies the last remaining condition -- whichever happens later
     // wins the CAS on last_seg_logged_ and is the one that reports completion.
     bool maybe_complete() noexcept;
 
     std::atomic<std::size_t> ok_{0};
     std::atomic<std::size_t> error_{0};
+    std::atomic<std::size_t> segments_seen_{0};         // incremented once per segment, in begin_segment() --
+                                                         // decoupled from ok_/error_ so is_last can be known
+                                                         // before the segment's semantic verdict is known
     std::atomic<std::size_t> expected_total_{0};        // set once, by record_doc_close()
     std::atomic<bool>        cut_finished_{false};      // set once, by record_doc_close()
     std::atomic<bool>        first_seg_logged_{false};  // guards first_seg_ against a double write
@@ -94,13 +113,25 @@ namespace fsp
     return completed;
   }
 
-  inline bool doc_counters::record_segment(bool semantically_ok) noexcept
+  inline doc_counters::segment_position doc_counters::begin_segment() noexcept
+  {
+    bool is_first       = false;
+    bool expected_first = false;
+    if (first_seg_logged_.compare_exchange_strong(expected_first, true, std::memory_order_acq_rel))
+    {
+      first_seg_ = clock::now();
+      is_first   = true;
+    }
+    const auto seen = segments_seen_.fetch_add(1, std::memory_order_acq_rel) + 1;
+    const bool is_last =
+      cut_finished_.load(std::memory_order_acquire) && seen == expected_total_.load(std::memory_order_acquire);
+    return {.is_first = is_first, .is_last = is_last};
+  }
+
+  inline bool doc_counters::end_segment(bool semantically_ok) noexcept
   {
     if (semantically_ok) ok_.fetch_add(1, std::memory_order_relaxed);
     else error_.fetch_add(1, std::memory_order_relaxed);
-
-    bool expected_first = false;
-    if (first_seg_logged_.compare_exchange_strong(expected_first, true, std::memory_order_acq_rel)) first_seg_ = clock::now();
 
     bool completed = maybe_complete();
     if (completed) last_seg_ = clock::now();
@@ -119,7 +150,7 @@ namespace fsp
   inline bool doc_counters::validation_failed() const noexcept { return validation_failed_.load(std::memory_order_acquire); }
 
   // doc_close_/last_seg_ are only ever written inside record_doc_close()/the completion branch
-  // of record_segment() -- for a document that never completes (e.g. cutting fails partway
+  // of end_segment() -- for a document that never completes (e.g. cutting fails partway
   // through, after some segments were already processed), they stay at their default epoch
   // value, which would make these subtractions wildly negative. Guard on the flag that actually
   // gates the write instead of assuming it happened.

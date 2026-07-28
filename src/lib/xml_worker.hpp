@@ -3,6 +3,7 @@
 #include "doc_set_dscr.hpp"
 #include "lock_queue.hpp"
 #include "parsing_util.hpp"
+#include "pipeline_hooks.hpp"
 #include "segment_result.hpp"
 #include "logger.hpp"
 #include "xml_segment.hpp"
@@ -16,6 +17,8 @@
 
 namespace fsp
 {
+  class pipeline; // forward declaration is enough -- only a reference is used here
+
   using str_t         = std::string;
   using segment_queue = lock_queue<xml_segment>;
   //   struct XmlTextReaderDeleter
@@ -53,12 +56,14 @@ namespace fsp
       std::mutex&         errors_mutex,  // mutex for managing errors structure
       const fsp_logger&   log,           // reference to logger
       const proc_data&    targets, // structure that holds information about cutting points and xpaths of the values we are looking for
-      str_t               parent_log_name // parent thread log thread name
+      str_t               parent_log_name, // parent thread log thread name
+      pipeline&           pl,             // for record_segment_done()/record_segment_failed() (doc_counters bookkeeping + hook dispatch)
+      pipeline_hooks&     hooks           // this worker thread's own hooks clone (see pipeline_worker)
     );
 
     //     // main functor method
     //     void              operator()(const std::stop_token& st, int worker_id);
-    [[nodiscard]] int process_one(std::size_t idx); // returns the segment's doc_ndx, for pipeline-level completion timing
+    int process_one(std::size_t idx); // returns the segment's doc_ndx; also records the segment's outcome (and runs the hook) internally
     void              flush_results();
   private:
     // Nekdanje statične funkcije zdaj kot članske metode
@@ -92,6 +97,8 @@ namespace fsp
     std::mutex&                  results_mutex_; //< mutex to lock results
     std::mutex&                  errors_mutex_;  //< mutex to lock erros
     const proc_data&             targets_;       //< targets to be processed
+    pipeline&                    pipeline_;      //< for record_segment_done()/record_segment_failed()
+    pipeline_hooks&              hooks_;         //< this worker thread's own hooks clone
                                                  //     UniqueXmlTextReader          reader_;        //< libxml2 reader
     const bool log_trace_ = log_.active(fsp::lvl_enum::trace);
     const bool log_debug_ = log_.active(fsp::lvl_enum::debug);

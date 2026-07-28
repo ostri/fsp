@@ -140,6 +140,7 @@ set(SOURCES
     ${CMAKE_SOURCE_DIR}/src/lib/xpath_el.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/segment_result.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/result_values.cpp
+    ${CMAKE_SOURCE_DIR}/src/lib/pipeline_hooks.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/logger.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/xml_worker.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/load_grammar.cpp

@@ -4,10 +4,12 @@
 
 namespace fsp
 {
-  pipeline_worker::pipeline_worker(pipeline& pl, const processor_config& cfg, const fsp_logger& log, str_t parent_log_name)
+  pipeline_worker::pipeline_worker(
+    pipeline& pl, const processor_config& cfg, const fsp_logger& log, str_t parent_log_name, pipeline_hooks& hooks)
   : pipeline_(pl)
   , log_(log)
   , parent_log_name_(std::move(parent_log_name))
+  , hooks_(hooks.clone())
   {
     cutter_    = std::make_unique<doc_cutter>(cfg, log_, pipeline_.pool(), pipeline_.ds_dscr());
     processor_ = std::make_unique<xml_worker>(pipeline_.pool(),
@@ -18,7 +20,9 @@ namespace fsp
                                               pipeline_.errors_mutex(),
                                               log_,
                                               cfg.targets,
-                                              parent_log_name_);
+                                              parent_log_name_,
+                                              pipeline_,
+                                              *hooks_);
     validator_ = std::make_unique<doc_validator>(log_, pipeline_.ds_dscr());
   }
 
@@ -34,6 +38,7 @@ namespace fsp
       return;
     }
     pipeline_.record_doc_open(doc_ndx);
+    hooks_->on_document_open(doc_ndx, pipeline_.ds_dscr()[doc_ndx], log_);
     if (auto res = cutter_->cut(doc_ndx); ! res)
     {
       // A malformed document is a per-document failure, not a fatal one: mark it invalid so
@@ -44,6 +49,7 @@ namespace fsp
     {
       pipeline_.record_doc_close(doc_ndx, cutter_->segments_found());
     }
+    hooks_->on_document_close(doc_ndx, pipeline_.ds_dscr()[doc_ndx].status(), pipeline_.ds_dscr()[doc_ndx], log_);
     pipeline_.notify_cut_done();
   }
 
@@ -66,6 +72,8 @@ namespace fsp
   void pipeline_worker::operator()(const std::stop_token& st, int worker_id)
   {
     log_.make_log_name(parent_log_name_, fmt::format("pipe-wrk.{:02}", worker_id));
+    const auto thread_name = log_.log_name();
+    hooks_->on_worker_start(worker_id, thread_name, log_);
     auto&             pool       = pipeline_.pool();
     const std::size_t num_shards = pool.num_shards();
     // Each P-capable thread is permanently assigned one shard (worker_id % num_shards) of the
@@ -108,10 +116,7 @@ namespace fsp
         if (pool.ready_queue_size_approx(shard) <= 0) continue;
         if (auto seg_ndx = pool.try_pop_ready(shard))
         {
-          auto doc_ndx = processor_->process_one(*seg_ndx);
-          // TODO: ostri - semantically_ok is a placeholder (always true) until the
-          // on_segment_processed hook exists -- its return value replaces this once wired in.
-          pipeline_.record_segment_done(static_cast<std::size_t>(doc_ndx), true);
+          processor_->process_one(*seg_ndx); // records the segment's outcome (and runs the hook) internally
           processed = true;
         }
       }
@@ -123,13 +128,9 @@ namespace fsp
       // this thread once its own shard closes.
       std::size_t seg_ndx = 0;
       if (pool.pop_segment_ndx(own_shard, seg_ndx) != queue_status::active) break;
-      {
-        auto doc_ndx = processor_->process_one(seg_ndx);
-        // TODO: ostri - semantically_ok is a placeholder (always true) until the
-        // on_segment_processed hook exists -- its return value replaces this once wired in.
-        pipeline_.record_segment_done(static_cast<std::size_t>(doc_ndx), true);
-      }
+      processor_->process_one(seg_ndx); // records the segment's outcome (and runs the hook) internally
     }
     processor_->flush_results();
+    hooks_->on_worker_end(worker_id, thread_name, log_);
   }
 } // namespace fsp

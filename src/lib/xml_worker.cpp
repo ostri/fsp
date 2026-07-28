@@ -1,5 +1,6 @@
 #include "xml_worker.hpp"
 #include "parsing_util.hpp"
+#include "pipeline.hpp"
 #include "segment_result.hpp"
 #include "xpath_helpers.hpp"
 #include <chrono>
@@ -33,8 +34,9 @@ namespace fsp
     std::mutex&         errors_mutex,   // mutex for managing errors structure
     const fsp_logger&   log,            // reference to logger
     const proc_data&    targets,        // structure that holds information about cutting points and xpaths of the values we are looking for
-    str_t               parent_log_name // parent thread log thread name
-    )
+    str_t               parent_log_name, // parent thread log thread name
+    pipeline&           pl,
+    pipeline_hooks&     hooks)
   : log_(log)
   , ds_dscr_(ds_dscr)
   , results_(results)
@@ -42,6 +44,8 @@ namespace fsp
   , results_mutex_(results_mutex)
   , errors_mutex_(errors_mutex)
   , targets_(targets)
+  , pipeline_(pl)
+  , hooks_(hooks)
   , parent_log_name_(std::move(parent_log_name))
   , sax_(std::make_unique<segment_sax>(log_))
   , pool_(pool)
@@ -457,6 +461,7 @@ namespace fsp
 
     if (auto res = process_segment(seg))
     {
+      pipeline_.record_segment_done(static_cast<std::size_t>(seg.doc_ndx()), res->seg_id(), res->values(), hooks_);
       if (loc_res_ok_.size() + 1 == loc_res_ok_.capacity()) loc_res_ok_.reserve(loc_res_ok_.size() * 2);
       loc_res_ok_.emplace_back(std::move(*res));
     }
@@ -464,6 +469,7 @@ namespace fsp
     {
       // res holds an error_info here, not a segment_result -- *res would be UB (dereferencing a
       // disengaged std::expected). Record the failure with the id-only constructor instead.
+      pipeline_.record_segment_failed(static_cast<std::size_t>(seg.doc_ndx()));
       if (loc_res_nak_.size() + 1 == loc_res_nak_.capacity()) loc_res_nak_.reserve(loc_res_nak_.size() * 2);
       loc_res_nak_.emplace_back(seg.id(), seg.subtree_type(), seg.doc_ndx());
     }
