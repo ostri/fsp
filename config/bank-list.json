@@ -1,0 +1,80 @@
+[
+  {
+    "name": "Banka Slovenije",
+    "bank_id": "01",
+    "bic": "BSLJSI2X",
+    "iban": "SI56 0100 0000 0100 090"
+  },
+  {
+    "name": "NLB d.d.",
+    "bank_id": "02",
+    "bic": "LJBASI2X",
+    "iban": "SI56 0290 0000 0200 020"
+  },
+  {
+    "name": "OTP banka d.d. (prej Nova KBM)",
+    "bank_id": "04",
+    "bic": "KBMASI2X",
+    "iban": "SI56 0400 0027 6256 911"
+  },
+  {
+    "name": "Gorenjska banka d.d.",
+    "bank_id": "07",
+    "bic": "GORESI2X",
+    "iban": "SI56 0700 0000 2911 448"
+  },
+  {
+    "name": "Banka Intesa Sanpaolo d.d.",
+    "bank_id": "10",
+    "bic": "BAKOSI2X",
+    "iban": "SI56 1011 1102 0304 044"
+  },
+  {
+    "name": "Deželna banka Slovenije d.d.",
+    "bank_id": "19",
+    "bic": "SZKBSI2X",
+    "iban": "SI56 1900 2000 1910 033"
+  },
+  {
+    "name": "UniCredit Banka Slovenija d.d.",
+    "bank_id": "29",
+    "bic": "BACXSI22",
+    "iban": "SI56 2900 0190 0030 037"
+  },
+  {
+    "name": "Addiko Bank d.d.",
+    "bank_id": "33",
+    "bic": "HAABSI22",
+    "iban": "SI56 3300 0330 0000 034"
+  },
+  {
+    "name": "Banka Sparkasse d.d.",
+    "bank_id": "34",
+    "bic": "KSPKSI22",
+    "iban": "SI56 3400 0500 0500 035"
+  },
+  {
+    "name": "SID - Slovenska izvozna in razvojna banka d.d.",
+    "bank_id": "38",
+    "bic": "SIDRSI22",
+    "iban": "SI56 0291 3001 2974 380"
+  },
+  {
+    "name": "Hranilnica LON d.d.",
+    "bank_id": "60",
+    "bic": "HLONSI22",
+    "iban": "SI56 6000 0000 6000 006"
+  },
+  {
+    "name": "Delavska hranilnica d.d.",
+    "bank_id": "61",
+    "bic": "HDELSI22",
+    "iban": "SI56 6100 0610 0000 062"
+  },
+  {
+    "name": "Primorska hranilnica Vipava d.d.",
+    "bank_id": "64",
+    "bic": "HKVISI22",
+    "iban": "SI56 6400 0000 6400 071"
+  }
+]
