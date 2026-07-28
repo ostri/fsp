@@ -26,14 +26,14 @@ namespace fsp
 {
   //   using xml_char = std::unique_ptr<xmlChar, xml_deleter>;
   xml_worker::xml_worker(
-    segment_pool&       pool,           // reference to segment pool
-    const doc_set_dscr& ds_dscr,        // reference to document set structure
-    vec_seg_result&     results,        // where to store correct segments
-    vec_seg_result&     errors,         // where to store non correct segmetns
-    std::mutex&         results_mutex,  // mutex for managing result structure
-    std::mutex&         errors_mutex,   // mutex for managing errors structure
-    const fsp_logger&   log,            // reference to logger
-    const proc_data&    targets,        // structure that holds information about cutting points and xpaths of the values we are looking for
+    segment_pool&       pool,          // reference to segment pool
+    const doc_set_dscr& ds_dscr,       // reference to document set structure
+    vec_seg_result&     results,       // where to store correct segments
+    vec_seg_result&     errors,        // where to store non correct segmetns
+    std::mutex&         results_mutex, // mutex for managing result structure
+    std::mutex&         errors_mutex,  // mutex for managing errors structure
+    const fsp_logger&   log,           // reference to logger
+    const proc_data&    targets,       // structure that holds information about cutting points and xpaths of the values we are looking for
     str_t               parent_log_name, // parent thread log thread name
     pipeline&           pl,
     pipeline_hooks&     hooks)
@@ -461,7 +461,7 @@ namespace fsp
 
     if (auto res = process_segment(seg))
     {
-      pipeline_.record_segment_done(static_cast<std::size_t>(seg.doc_ndx()), res->seg_id(), res->values(), hooks_);
+      pipeline_.record_segment_done(seg, *res, hooks_);
       if (loc_res_ok_.size() + 1 == loc_res_ok_.capacity()) loc_res_ok_.reserve(loc_res_ok_.size() * 2);
       loc_res_ok_.emplace_back(std::move(*res));
     }
@@ -469,7 +469,7 @@ namespace fsp
     {
       // res holds an error_info here, not a segment_result -- *res would be UB (dereferencing a
       // disengaged std::expected). Record the failure with the id-only constructor instead.
-      pipeline_.record_segment_failed(static_cast<std::size_t>(seg.doc_ndx()));
+      pipeline_.record_segment_failed(static_cast<std::size_t>(seg.doc_ndx()), seg.id());
       if (loc_res_nak_.size() + 1 == loc_res_nak_.capacity()) loc_res_nak_.reserve(loc_res_nak_.size() * 2);
       loc_res_nak_.emplace_back(seg.id(), seg.subtree_type(), seg.doc_ndx());
     }

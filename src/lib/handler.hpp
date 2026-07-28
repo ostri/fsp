@@ -106,6 +106,9 @@ namespace fsp
     int                           seg_type_          = -1; //< type/structure of the segment. document is split into segments.
     std::size_t                   frag_start_offset_ = 0;  //< byte offset of start of the fragment
     std::size_t                   counter_           = 0;  //< counter to obtain unique segment id within the file
+                                                            //< (reset per document in set_doc_ndx() -- this Handler
+                                                            //< is owned by one worker thread and reused across every
+                                                            //< document that thread cuts, not one Handler per document)
     const xercesc::SAX2XMLReader* parser_;                 //< pointer to related parser; only for getSrcOffs, not owner
     cstr_t                        doc_;                    //< xml document mapped as string view over mmap file
     const doc_set_dscr&           ds_dscr_;                //< structure of all documents to be processed
@@ -129,5 +132,5 @@ namespace fsp
   inline void        Handler::set_doc(cstr_t doc) { doc_ = doc; }
   inline cstr_t      Handler::doc() const { return doc_; }
   inline int         Handler::doc_ndx() const { return doc_ndx_; }
-  inline void        Handler::set_doc_ndx(int doc_ndx) { doc_ndx_ = doc_ndx; }
+  inline void        Handler::set_doc_ndx(int doc_ndx) { doc_ndx_ = doc_ndx; counter_ = 0; }
 } // namespace fsp

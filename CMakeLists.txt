@@ -138,6 +138,21 @@ function(add_log_config TARGET_NAME)
     configure_file(${FSP_LOG_TEMPLATE} ${CMAKE_BINARY_DIR}/log_${TARGET_NAME}_${FSP_LOG_KIND}.conf @ONLY)
 endfunction()
 
+# WORKAROUND (remove once GCC 16.2 ships): on this GCC 16.1.1 -freflection branch,
+# -fsanitize=undefined breaks consteval evaluation of annotation_text() in
+# src/lib/reflection.hpp -- reading a [[= "..."]] annotation back via
+# display_string_of()/define_static_array() three consteval calls deep
+# (proc_data_of -> classes_of/fields_of -> attr_of/field_attr_of) turns into
+# "not a constant expression" only under UBSan. -fsanitize=address and
+# -fsanitize=leak are unaffected, so only "undefined" needs suppressing, and only
+# for the translation units that actually instantiate proc_data_of<^^Namespace>()
+# (or similar) over a reflected schema namespace.
+function(disable_ubsan_for_reflection)
+    if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+        set_source_files_properties(${ARGN} PROPERTIES COMPILE_OPTIONS "-fno-sanitize=undefined")
+    endif()
+endfunction()
+
 set(SOURCES
     ${CMAKE_SOURCE_DIR}/src/lib/x_str.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/xerces_mgr.cpp
@@ -251,6 +266,7 @@ set(FSP_TARGET_${b_target}_LIBS
     spdlog::spdlog
     magic_enum::magic_enum
 )
+disable_ubsan_for_reflection(${CMAKE_SOURCE_DIR}/src/test/t_refl.cpp)
 add_fsp_target(${b_target} EXECUTABLE ${${b_target}_SOURCES})
 # -----------------------------------------------------------------------------
 # --- target: pacs8
@@ -269,6 +285,7 @@ set(FSP_TARGET_${b_target}_LIBS
     spdlog::spdlog
     magic_enum::magic_enum
 )
+disable_ubsan_for_reflection(${CMAKE_SOURCE_DIR}/src/test/pacs8.cpp)
 add_fsp_target(${b_target} EXECUTABLE ${${b_target}_SOURCES})
 add_log_config(${b_target})
 # -----------------------------------------------------------------------------
@@ -277,6 +294,7 @@ add_log_config(${b_target})
 set(b_target pacs8-hook) # name of the target
 set(${b_target}_SOURCES
     ${CMAKE_SOURCE_DIR}/src/test/pacs8-hook.cpp
+    ${CMAKE_SOURCE_DIR}/src/test/pacs8_cb.cpp
 )
 set(FSP_TARGET_${b_target}_INCLUDES
   ${CMAKE_SOURCE_DIR}/src/lib
@@ -288,6 +306,7 @@ set(FSP_TARGET_${b_target}_LIBS
     spdlog::spdlog
     magic_enum::magic_enum
 )
+disable_ubsan_for_reflection(${CMAKE_SOURCE_DIR}/src/test/pacs8-hook.cpp)
 add_fsp_target(${b_target} EXECUTABLE ${${b_target}_SOURCES})
 add_log_config(${b_target})
 # -----------------------------------------------------------------------------

@@ -36,12 +36,17 @@ namespace fsp
 
     // Called by whichever P-role thread is about to process one segment of this document,
     // BEFORE its outcome is known -- this is what lets on_seg_proc's is_first/is_last
-    // parameters be ready before the hook call itself. is_last here is best-effort: for a
-    // document small/fast enough that every one of its segments gets processed before cutting
-    // itself reports done, cut_finished() is still false for every one of them, so none can
-    // correctly claim is_last (see end_segment()/maybe_complete() for the authoritative,
-    // dual-path completion check used for internal bookkeeping instead).
-    [[nodiscard]] segment_position begin_segment() noexcept;
+    // parameters be ready before the hook call itself. seg_id is the segment's own position in
+    // the document (see xml_segment/segment_result), assigned sequentially by the single cutter
+    // thread that cut this document -- is_first/is_last are therefore document-order facts
+    // (seg_id == 0 / seg_id == last), NOT which P-thread happened to reach this call first/last
+    // (P-threads drain a shared queue, so processing order across threads does not follow seg_id
+    // order). is_last here is still best-effort in one respect: for a document small/fast enough
+    // that every one of its segments gets processed before cutting itself reports done,
+    // cut_finished() is still false for every one of them, so none can correctly claim is_last
+    // (see end_segment()/maybe_complete() for the authoritative, dual-path completion check used
+    // for internal bookkeeping instead).
+    [[nodiscard]] segment_position begin_segment(std::size_t seg_id) noexcept;
     // Called once the segment's outcome is known (semantically_ok is the on_seg_proc
     // hook's verdict, or false for a segment that failed technically and never reached the
     // hook at all -- not to be confused with technical extraction success in the ok() case).
@@ -80,9 +85,6 @@ namespace fsp
 
     std::atomic<std::size_t> ok_{0};
     std::atomic<std::size_t> error_{0};
-    std::atomic<std::size_t> segments_seen_{0};         // incremented once per segment, in begin_segment() --
-                                                         // decoupled from ok_/error_ so is_last can be known
-                                                         // before the segment's semantic verdict is known
     std::atomic<std::size_t> expected_total_{0};        // set once, by record_doc_close()
     std::atomic<bool>        cut_finished_{false};      // set once, by record_doc_close()
     std::atomic<bool>        first_seg_logged_{false};  // guards first_seg_ against a double write
@@ -114,19 +116,16 @@ namespace fsp
     return completed;
   }
 
-  inline doc_counters::segment_position doc_counters::begin_segment() noexcept
+  inline doc_counters::segment_position doc_counters::begin_segment(std::size_t seg_id) noexcept
   {
-    bool is_first       = false;
+    // first_seg_ timing is chronological (earliest processing activity across all P-threads for
+    // this doc), independent of which seg_id that turns out to be -- kept separate from the
+    // document-order is_first returned below, which the two used to conflate.
     bool expected_first = false;
-    if (first_seg_logged_.compare_exchange_strong(expected_first, true, std::memory_order_acq_rel))
-    {
-      first_seg_ = clock::now();
-      is_first   = true;
-    }
-    const auto seen = segments_seen_.fetch_add(1, std::memory_order_acq_rel) + 1;
-    const bool is_last =
-      cut_finished_.load(std::memory_order_acquire) && seen == expected_total_.load(std::memory_order_acquire);
-    return {.is_first = is_first, .is_last = is_last};
+    if (first_seg_logged_.compare_exchange_strong(expected_first, true, std::memory_order_acq_rel)) first_seg_ = clock::now();
+
+    const bool is_last = cut_finished_.load(std::memory_order_acquire) && seg_id + 1 == expected_total_.load(std::memory_order_acquire);
+    return {.is_first = seg_id == 0, .is_last = is_last};
   }
 
   inline bool doc_counters::end_segment(bool semantically_ok) noexcept

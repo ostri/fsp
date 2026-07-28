@@ -5,6 +5,8 @@
 #include "doc_set_dscr.hpp"
 #include "logger.hpp"
 #include "result_values.hpp"
+#include "segment_result.hpp"
+#include "xml_segment.hpp"
 #include <memory>
 #include <span>
 #include <string_view>
@@ -58,34 +60,38 @@ namespace fsp
 
     /** @brief The cutter thread for this specific document (cutting just started/just finished). */
     virtual void on_doc_open([[maybe_unused]] std::size_t       doc_ndx,
-                                  [[maybe_unused]] const doc_dscr&   dscr,
-                                  [[maybe_unused]] const fsp_logger& log)
+                             [[maybe_unused]] const doc_dscr&   dscr,
+                             [[maybe_unused]] const fsp_logger& log)
     {
     }
     virtual void on_doc_close([[maybe_unused]] std::size_t       doc_ndx,
-                                   [[maybe_unused]] doc_status        status,
-                                   [[maybe_unused]] const doc_dscr&   dscr,
-                                   [[maybe_unused]] const fsp_logger& log)
+                              [[maybe_unused]] doc_status        status,
+                              [[maybe_unused]] const doc_dscr&   dscr,
+                              [[maybe_unused]] const fsp_logger& log)
     {
     }
 
     /**
      * @brief A P-role thread just extracted values from one segment. is_first/is_last mark the
      * first/last segment of doc_ndx (mutually exclusive with a single-segment document, where
-     * both are true at once). Returns the segment's semantic verdict (true = semantically
-     * correct) -- the default just mirrors technical completeness (values.complete()), i.e.
-     * semantic == technical until a derived class adds real business logic.
+     * both are true at once). result bundles seg_id()/seg_type()/doc_ndx()/values() -- pass
+     * result.seg_type() and result.values() to fsp::materialize_variant<Namespace>() to get the
+     * segment back as the developer's own schema type instead of the generic, name-indexed
+     * result_values. segment is the raw cut this result came from (offset/length/ns/attrs of the
+     * top-level tag), for callers that want more than the extracted values. Returns the
+     * segment's semantic verdict (true = semantically correct) -- the default just mirrors
+     * technical completeness (result.values().complete()), i.e. semantic == technical until a
+     * derived class adds real business logic.
      * @note Called potentially millions of times per run -- always a genuine virtual call (see
      * pipeline_hooks_crtp's doc comment for why the earlier "detect override, skip the call"
      * idea was dropped).
      */
-    virtual bool on_seg_proc([[maybe_unused]] std::size_t       seg_id,
-                                      [[maybe_unused]] std::size_t       doc_ndx,
-                                      const result_values&               values,
-                                      [[maybe_unused]] bool              is_first,
-                                      [[maybe_unused]] bool              is_last,
-                                      [[maybe_unused]] const fsp_logger& log)
-    { return values.complete(); }
+    virtual bool on_seg_proc([[maybe_unused]] const xml_segment& segment,
+                             const segment_result&               result,
+                             [[maybe_unused]] bool               is_first,
+                             [[maybe_unused]] bool               is_last,
+                             [[maybe_unused]] const fsp_logger&  log)
+    { return result.values().complete(); }
   };
 
   /**

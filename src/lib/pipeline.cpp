@@ -49,19 +49,20 @@ namespace fsp
     if ((*doc_counters_)[doc_ndx].record_doc_close(segment_count)) log_doc_done(doc_ndx);
   }
 
-  bool pipeline::record_segment_done(std::size_t doc_ndx, std::size_t seg_id, const result_values& values, pipeline_hooks& hooks)
+  bool pipeline::record_segment_done(const xml_segment& segment, const segment_result& result, pipeline_hooks& hooks)
   {
+    const auto doc_ndx         = static_cast<std::size_t>(result.doc_ndx());
     auto&      counters        = (*doc_counters_)[doc_ndx];
-    const auto pos             = counters.begin_segment();
-    const bool semantically_ok = hooks.on_seg_proc(seg_id, doc_ndx, values, pos.is_first, pos.is_last, log_);
+    const auto pos             = counters.begin_segment(result.seg_id());
+    const bool semantically_ok = hooks.on_seg_proc(segment, result, pos.is_first, pos.is_last, log_);
     if (counters.end_segment(semantically_ok)) log_doc_done(doc_ndx);
     return semantically_ok;
   }
 
-  void pipeline::record_segment_failed(std::size_t doc_ndx)
+  void pipeline::record_segment_failed(std::size_t doc_ndx, std::size_t seg_id)
   {
     auto& counters = (*doc_counters_)[doc_ndx];
-    (void)counters.begin_segment(); // bookkeeping only (segments_seen_/first_seg_) -- no hook, no meaningful values
+    (void)counters.begin_segment(seg_id); // bookkeeping only (first_seg_ timing) -- no hook, no meaningful values
     if (counters.end_segment(false)) log_doc_done(doc_ndx);
   }
 

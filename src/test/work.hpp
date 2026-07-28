@@ -1,6 +1,8 @@
 #pragma once
 
 #include "reflection.hpp"
+#include <cstdint>
+#include <vector>
 
 /**
  * @brief pacs.008 segment schema, expressed as reflectable annotations instead
@@ -19,8 +21,13 @@
  *   "*path"   optional, zero or more values
  *   "+path"   required, one or more values
  *
- * Field types are placeholders -- the class exists to hang annotations on,
- * extraction reads only the annotation text, not the member's C++ type.
+ * proc_data_of()'s own extraction reads only the annotation text, never the member's C++
+ * type -- but fsp::materialize<T>()/materialize_variant() (see reflection.hpp) DO read it, to
+ * fill a real instance of this class from a segment's extracted values. So a field's C++ type
+ * must still agree with its xpath's own cardinality marker (std::vector<X> for an optional or
+ * repeated array xpath, a plain scalar for a single-valued one) even though nothing here
+ * enforces that automatically. Currently supported scalar element types are str_t and
+ * std::uint64_t; more are added incrementally (see materialize<T>()'s own doc comment).
  *
  * Classes deriving from fsp::seg_schema are the segment cut points; see
  * fsp::proc_data_of() in reflection.hpp for how this whole namespace is turned
@@ -40,11 +47,11 @@ namespace fsp::work
   {
   public:
     // clang-format off
-    [[= "x:GrpHdr/MsgId"]]                  str_t   msg_id;
-    [[= "GrpHdr/TtlIntrBkSttlmAmt"]]        int64_t amount_sum;
-    [[= "?GrpHdr/TtlIntrBkSttlmAmt/@Ccy"]]  str_t   currency;
-    [[= "?x:GrpHdr/CreDtTm"]]               str_t   msg_ts;
-    [[= "?GrpHdr/IntrBkSttlmDt"]]           str_t   value_date;
+    [[= "x:GrpHdr/MsgId"]]                  str_t         msg_id;
+    [[= "GrpHdr/TtlIntrBkSttlmAmt"]]        std::uint64_t amount_sum;
+    [[= "?GrpHdr/TtlIntrBkSttlmAmt/@Ccy"]]  str_t         currency;
+    [[= "?x:GrpHdr/CreDtTm"]]               str_t         msg_ts;
+    [[= "?GrpHdr/IntrBkSttlmDt"]]           str_t         value_date;
     // clang-format on
   };
 
@@ -52,14 +59,14 @@ namespace fsp::work
   {
   public:
     // clang-format off
-    [[= "CdtTrfTxInf/PmtId/TxId"]]                       str_t   txn_id;
-    [[= "CdtTrfTxInf/DbtrAcct/Id/IBAN"]]                 int64_t debtor_iban;
-    [[= "CdtTrfTxInf/DbtrAgt/FinInstnId/BICFI"]]         str_t   debtor_bic;
-    [[= "CdtTrfTxInf/CdtrAcct/Id/IBAN"]]                 int64_t creditor_iban;
-    [[= "CdtTrfTxInf/CdtrAgt/FinInstnId/BICFI"]]         str_t   creditor_bic;
-    [[= "CdtTrfTxInf/IntrBkSttlmAmt"]]                   str_t   amount;
-    [[= "?CdtTrfTxInf/IntrBkSttlmAmt/@Ccy"]]             str_t   currency;
-    [[= "*CdtTrfTxInf/InstgAgt/FinInstnId/BICFI"]]       str_t   instr_agent;
+    [[= "CdtTrfTxInf/PmtId/TxId"]]                       str_t              txn_id;
+    [[= "CdtTrfTxInf/DbtrAcct/Id/IBAN"]]                 str_t              debtor_iban;
+    [[= "CdtTrfTxInf/DbtrAgt/FinInstnId/BICFI"]]         str_t              debtor_bic;
+    [[= "CdtTrfTxInf/CdtrAcct/Id/IBAN"]]                 str_t              creditor_iban;
+    [[= "CdtTrfTxInf/CdtrAgt/FinInstnId/BICFI"]]         str_t              creditor_bic;
+    [[= "CdtTrfTxInf/IntrBkSttlmAmt"]]                   std::uint64_t      amount;
+    [[= "?CdtTrfTxInf/IntrBkSttlmAmt/@Ccy"]]             str_t              currency;
+    [[= "*CdtTrfTxInf/InstgAgt/FinInstnId/BICFI"]]       std::vector<str_t> instr_agent;
     // clang-format on
   };
 } // namespace fsp::work

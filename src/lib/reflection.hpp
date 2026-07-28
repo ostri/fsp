@@ -1,11 +1,15 @@
 #pragma once
 #include "compile_error.hpp"
 #include "parsing_util.hpp"
+#include "result_values.hpp"
 #include "xml_attr.hpp"
 #include <array>
+#include <charconv>
+#include <cstdint>
 #include <meta>
 #include <string_view>
 #include <type_traits>
+#include <variant>
 #include <vector>
 
 // convenience aliases used by schema classes (e.g. work.hpp) to type their
@@ -217,5 +221,141 @@ namespace fsp
     }
     return proc_data{.targets = fsp::build(targets_raw.span(), ns_arr), .xpaths = std::move(xpaths)};
   }
+
+  /** @brief True iff FieldType is a std::vector<X> -- an optional-or-repeated-cardinality schema field. */
+  template <typename>
+  struct is_vector : std::false_type
+  {
+  };
+  template <typename X>
+  struct is_vector<std::vector<X>> : std::true_type
+  {
+  };
+  template <typename FieldType>
+  inline constexpr bool is_vector_v = is_vector<FieldType>::value;
+
+  /**
+   * @brief Converts one extracted string value into a schema class field's own (scalar)
+   * C++ type.
+   * @details Materialize's only supported scalar element types for now are str_t (passed
+   * through as-is) and std::uint64_t (parsed via std::from_chars). Other C++ types are
+   * rejected at compile time -- support is added incrementally as
+   * materialize()/materialize_variant() grow to cover more of a schema class's field types
+   * (optional<>, signed integers, ...).
+   * @tparam FieldType the target field's own declared C++ type (or a vector field's own
+   * value_type)
+   */
+  template <typename FieldType>
+  FieldType convert_scalar(cstr_t s)
+  {
+    if constexpr (std::is_same_v<FieldType, str_t>) return str_t(s);
+    else if constexpr (std::is_same_v<FieldType, std::uint64_t>)
+    {
+      std::uint64_t v = 0;
+      std::from_chars(s.data(), s.data() + s.size(), v);
+      return v;
+    }
+    else static_assert(sizeof(FieldType) == 0, "materialize: unsupported field type (only str_t and std::uint64_t so far)");
+  }
+
+  /**
+   * @brief Reflectively fills a schema class instance from one segment's extracted values.
+   * @details Walks T's own non-static data members and, for each one found() in values,
+   * converts the string value(s) into that member's own C++ type (see convert_scalar()) and
+   * assigns it. A member not found() in values is left at its default-constructed value.
+   * Field names are matched by the member's own identifier, the same name field_attr_of()
+   * used to build the raw_attr the value was extracted under.
+   *
+   * A std::vector<X> field is treated as an optional-or-repeated-cardinality schema field and
+   * filled via values.values(name) -- REQUIRED: T's own C++ field type must agree with the
+   * schema's own cardinality for that xpath (vector<> for an optional or repeated array
+   * xpath, scalar for a single-valued one). result_values::value()/values() don't cross-check
+   * this themselves (see result_values.hpp), so a scalar field wrongly declared for an array
+   * xpath reads out of bounds instead of failing cleanly.
+   * @tparam T a schema class (see work.hpp) whose fields are all currently either str_t,
+   * std::uint64_t, or std::vector<str_t>/std::vector<std::uint64_t>
+   * @param values one segment's extracted values, as produced for T's own subtree_type()
+   */
+  template <typename T>
+  T materialize(const result_values& values)
+  {
+    T                     out{};
+    static constexpr auto ctx     = std::meta::access_context::unchecked();
+    static constexpr auto members = std::define_static_array(std::meta::nonstatic_data_members_of(^^T, ctx));
+    template for (constexpr auto m : members)
+    {
+      constexpr auto name = std::meta::identifier_of(m);
+      if (values.found(name))
+      {
+        using field_t = typename[:std::meta::type_of(m):];
+        if constexpr (is_vector_v<field_t>)
+        {
+          for (const auto& s : values.values(name)) out.[:m:].push_back(convert_scalar<typename field_t::value_type>(s));
+        }
+        else out.[:m:] = convert_scalar<field_t>(values.value(name));
+      }
+    }
+    return out;
+  }
+
+  /**
+   * @brief Collects reflections of every class in Namespace that derives from Base, in
+   * declaration order -- the same set classes_of()/proc_data_of() walk, but returning the
+   * classes' own std::meta::info instead of their annotation, for variant_of_t() to turn
+   * into a parameter pack.
+   * @tparam Namespace reflection of the namespace holding the schema classes
+   * @tparam Base      marker base class identifying segment-schema classes
+   */
+  template <std::meta::info Namespace, typename Base = seg_schema>
+  consteval auto seg_schema_infos_of()
+  {
+    static constexpr auto        ctx     = std::meta::access_context::unchecked();
+    static constexpr auto        members = std::define_static_array(std::meta::members_of(Namespace, ctx));
+    std::vector<std::meta::info> out;
+    template for (constexpr auto m : members)
+    {
+      if constexpr (std::meta::is_type(m) && std::meta::has_identifier(m))
+      {
+        if constexpr (std::is_base_of_v<Base, typename[:m:]>) out.push_back(m);
+      }
+    }
+    return out;
+  }
+
+  /**
+   * @brief The union of every one of Namespace's schema classes (in declaration order) as a
+   * single std::variant -- e.g. variant_of_t<^^work> is std::variant<pacs8_header, pacs8_txn>.
+   * @tparam Namespace reflection of the namespace holding the schema classes
+   * @tparam Base      marker base class identifying segment-schema classes
+   */
+  template <std::meta::info Namespace, typename Base = seg_schema>
+  using variant_of_t = typename[:std::meta::substitute(^^std::variant, std::define_static_array(seg_schema_infos_of<Namespace, Base>())):];
+
+  /** @brief Pack-deduction helper: recovers Ts... from a variant_of_t<Namespace, Base> pointer. */
+  template <typename... Ts>
+  std::variant<Ts...> materialize_variant_impl(int seg_type, const result_values& values, std::variant<Ts...>*)
+  {
+    std::variant<Ts...> out;
+    int                 i        = 0;
+    bool                assigned = false;
+    ((i++ == seg_type ? (out = materialize<Ts>(values), assigned = true) : false), ...);
+    if (! assigned) throw compile_error("materialize_variant: seg_type out of range for Namespace's schema classes");
+    return out;
+  }
+
+  /**
+   * @brief Materializes one segment's values directly into the developer's own schema class,
+   * wrapped in the union of every schema class Namespace declares -- what a caller's
+   * on_seg_proc() would naturally want instead of the generic, name-indexed result_values.
+   * @details seg_type must be the same declaration-order index proc_data_of<Namespace>()
+   * assigned to the segment's own schema class (i.e. segment_result::seg_type()).
+   * @tparam Namespace reflection of the namespace holding the schema classes
+   * @tparam Base      marker base class identifying segment-schema classes
+   * @param seg_type declaration-order index of the segment's own schema class within Namespace
+   * @param values   the segment's extracted values, as produced for that schema class
+   */
+  template <std::meta::info Namespace, typename Base = seg_schema>
+  variant_of_t<Namespace, Base> materialize_variant(int seg_type, const result_values& values)
+  { return materialize_variant_impl(seg_type, values, static_cast<variant_of_t<Namespace, Base>*>(nullptr)); }
 
 }; // namespace fsp
