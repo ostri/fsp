@@ -6,7 +6,6 @@
 #include "logger.hpp"
 #include "segment_result.hpp"
 #include <vector>
-#include <string>
 
 namespace fsp
 {
@@ -16,7 +15,7 @@ namespace fsp
   {
   public:
     explicit process_docs(processor_config cfg);
-    process_docs(processor_config cfg, const str_t& parent_log_name);
+    //    process_docs(processor_config cfg, const str_t& parent_log_name);
     ~process_docs()                              = default;
     process_docs(const process_docs&)            = delete;
     process_docs(process_docs&&)                 = delete;
@@ -37,14 +36,14 @@ namespace fsp
     // NOLINTEND(cppcoreguidelines-avoid-const-or-ref-data-members)
   };
 
-  inline process_docs::process_docs(processor_config cfg)
-  : process_docs(std::move(cfg), "main")
-  {
-  }
+  // inline process_docs::process_docs(processor_config cfg)
+  // : process_docs(std::move(cfg), "main")
+  // {
+  // }
 
-  inline process_docs::process_docs(processor_config cfg, const str_t& parent_log_name)
-  : log_(cfg.log_config, parent_log_name)
-  , impl_(std::move(cfg), log_, parent_log_name)
+  inline process_docs::process_docs(processor_config cfg)
+  : log_(cfg.log_config, cfg.program_name)
+  , impl_(std::move(cfg), log_, cfg.program_name)
   {
   }
 

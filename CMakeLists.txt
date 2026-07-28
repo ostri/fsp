@@ -4,7 +4,6 @@ project(fsp LANGUAGES CXX)
 #
 # for profiling
 # cmake -B build-profile -DCMAKE_BUILD_TYPE=Profile
-# cmake --build build-profile --target fsp
 #
 
 # --- 1. General project settings ---
@@ -189,27 +188,6 @@ set(FSP_TARGET_${b_target}_LIBS
     LibXml2::LibXml2
 )
 add_fsp_target(fsp_lib STATIC ${fsp_lib_SOURCES})
-#
-# target: fsp
-#
-set(b_target fsp) # name of the target
-set(${b_target}_SOURCES
-    ${CMAKE_SOURCE_DIR}/src/main.cpp
-)
-# Additional libraries for main program
-set(FSP_TARGET_${PROJECT_NAME}_LIBS
-    fsp_lib
-    fmt::fmt
-    spdlog::spdlog
-    magic_enum::magic_enum
-    XercesC::XercesC
-    LibXml2::LibXml2
-)
-# If main needs any extra include paths
-# set(FSP_TARGET_${PROJECT_NAME}_INCLUDES ${CMAKE_SOURCE_DIR}/src/extra)
-
-add_fsp_target(${b_target} EXECUTABLE ${${b_target}_SOURCES})
-add_log_config(${b_target})
 #
 # --- target: validate --------------------------------------------------
 #

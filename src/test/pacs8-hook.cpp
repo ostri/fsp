@@ -148,8 +148,7 @@ int main(int argc, const char* argv[])
 {
   using str_t = std::string;
   if (argc == 1) return help(*argv);
-  std::vector<str_t> args(argv, argv + argc); // NOLINT (cppcoreguidelines-pro-bounds-pointer-arithmetic)
-  args.erase(args.begin());
+  std::vector<str_t> args(argv + 1, argv + argc); // NOLINT (cppcoreguidelines-pro-bounds-pointer-arithmetic)
   try
   {
     str_t              xsd_file;
@@ -162,26 +161,20 @@ int main(int argc, const char* argv[])
       else files.push_back(fn);
     };
 
-    // Every class in namespace `fsp::work` deriving from fsp::seg_schema (see
-    // work.hpp) is one segment cut point; its own [[= "name=path"]] annotation
-    // is the target entry, its annotated fields are the xpaths to extract.
-    // fsp::proc_data_of() (see reflection.hpp) walks the namespace via C++26
-    // reflection and builds the same fsp::proc_data this file used to build by
-    // hand from fetch_targets()/fetch_hdr()/fetch_txn().
     static const auto all = fsp::proc_data_of<^^fsp::work>();
     assert(all.targets.size() == all.xpaths.size());
-    //  Configure logging -- see fsp::load_logger_config() for the LOG_CONFIG env var /
-    //  log_<program>_debug.log / _release.log lookup chain.
-    auto log_cfg = fsp::load_logger_config(fs::path(argv[0]).filename().string()); // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic)
+    auto log_cfg =
+      fsp::load_logger_config(fs::path(argv[0]).filename().string()); // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic)
 
     const auto no_of_cores = 16U; // number of paralell worker threads
 
     auto cfg = fsp::processor_config{//
-                                     .targets    = all,
-                                     .num_docs   = no_of_cores,
-                                     .log_config = log_cfg};
+                                     .targets        = all,
+                                     .num_of_workers = no_of_cores,
+                                     .log_config     = log_cfg,
+                                     .program_name   = *argv};
 
-    auto     p = fsp::process_docs(cfg, "pacs8-hook");
+    auto     p = fsp::process_docs(cfg);
     pacs8_cb hooks;
     auto     res = p.process_files(files, xsd_file, hooks);
     if (! res)

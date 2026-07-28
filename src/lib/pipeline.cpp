@@ -51,8 +51,8 @@ namespace fsp
 
   bool pipeline::record_segment_done(std::size_t doc_ndx, std::size_t seg_id, const result_values& values, pipeline_hooks& hooks)
   {
-    auto&      counters       = (*doc_counters_)[doc_ndx];
-    const auto pos            = counters.begin_segment();
+    auto&      counters        = (*doc_counters_)[doc_ndx];
+    const auto pos             = counters.begin_segment();
     const bool semantically_ok = hooks.on_seg_proc(seg_id, doc_ndx, values, pos.is_first, pos.is_last, log_);
     if (counters.end_segment(semantically_ok)) log_doc_done(doc_ndx);
     return semantically_ok;
@@ -122,7 +122,7 @@ namespace fsp
     if (! ds_dscr_.has_grammar()) log_.info("No XSD grammar available -- V (validation) is disabled for this run.");
     else if (cut_with_validation) log_.info("cut_with_validation active -- C validates while cutting, separate V pass skipped.");
 
-    auto requested_threads = cfg_.num_docs;
+    auto requested_threads = cfg_.num_of_workers;
     if (requested_threads == 0) requested_threads = std::thread::hardware_concurrency();
     if (requested_threads == 0) requested_threads = 1;
 
@@ -241,14 +241,16 @@ namespace fsp
     hooks.on_run_start(ds_dscr_, log_);
 
     const auto doc_count = xml_paths.size();
-    const auto plan       = plan_run(doc_count);
+    const auto plan      = plan_run(doc_count);
 
     docs_remaining_to_cut_.store(doc_count, std::memory_order_relaxed);
     doc_counters_.emplace(doc_count);
     seed_queues(doc_count, plan.run_validation);
 
-    log_.info(fmt::format(
-      "Pipeline: {} documents, {} hybrid worker threads (max {} cutting concurrently).", doc_count, plan.num_parallel, max_concurrent_cutters_));
+    log_.info(fmt::format("Pipeline: {} documents, {} hybrid worker threads (max {} cutting concurrently).",
+                          doc_count,
+                          plan.num_parallel,
+                          max_concurrent_cutters_));
 
     auto worker_state = start_workers(plan.num_parallel, hooks);
     if (! worker_state) return std::unexpected(worker_state.error());
