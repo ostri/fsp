@@ -184,7 +184,7 @@ namespace fsp
                                                   // level_ too
   }
 
-  logger_config load_logger_config()
+  logger_config load_logger_config(std::string_view program_name)
   {
     // Safe: called once at startup, before any worker thread exists.
     if (const char* env_path = std::getenv("LOG_CONFIG"); env_path != nullptr && *env_path != '\0') // NOLINT(concurrency-mt-unsafe)
@@ -193,7 +193,7 @@ namespace fsp
       std::cerr << "LOG_CONFIG='" << env_path << "' could not be read -- falling back.\n";
     }
 
-    const auto* fallback_path = is_debug() ? "log_debug.log" : "log_release.log";
+    const auto fallback_path = fmt::format("log_{}_{}.conf", program_name, is_debug() ? "debug" : "release");
     if (auto cfg = parse_logger_config_file(fallback_path)) return *cfg;
 
     return logger_config{.enable_console = true, .enable_file = false, .log_level = spdlog::level::info};

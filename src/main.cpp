@@ -19,6 +19,7 @@
 #include "parsing_util.hpp"
 #include "process_docs.hpp"
 #include "xml_attr.hpp"
+#include <filesystem>
 #include <fmt/format.h>
 #include <iostream>
 #include <spdlog/common.h>
@@ -93,8 +94,9 @@ int main(int argc, const char* argv[])
     std::vector<std::string> files;
     files.push_back(xml_file);
     //  Configure logging -- see fsp::load_logger_config() for the LOG_CONFIG env var /
-    //  log_debug.log / log_release.log lookup chain.
-    auto log_cfg = fsp::load_logger_config();
+    //  log_<program>_debug.log / _release.log lookup chain.
+    auto log_cfg =
+      fsp::load_logger_config(std::filesystem::path(argv[0]).filename().string()); // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic)
 
     const auto no_of_workers = 20U;                  // number of paralell workers
     auto       cfg           = fsp::processor_config{//

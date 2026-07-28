@@ -120,16 +120,23 @@ function(add_fsp_target TARGET_NAME TYPE)
     endif()
 endfunction()
 
-# Copies the build-type-appropriate logger config (config/log_debug.log or config/log_release.log,
-# see fsp::load_logger_config() in src/lib/logger.cpp) next to TARGET_NAME's executable on every
-# build, so it can be found via a plain relative filename when the program runs from that directory.
-function(add_log_config_copy TARGET_NAME)
-    add_custom_command(TARGET ${TARGET_NAME} POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                "$<IF:$<CONFIG:Debug>,${CMAKE_SOURCE_DIR}/config/log_debug.log,${CMAKE_SOURCE_DIR}/config/log_release.log>"
-                "$<TARGET_FILE_DIR:${TARGET_NAME}>"
-        COMMENT "Copying log config for ${TARGET_NAME}"
-    )
+# Generates TARGET_NAME's logger config from the checked-in template
+# (config/log_debug.conf.in or config/log_release.conf.in, picked by the current
+# CMAKE_BUILD_TYPE), substituting @PROGRAM_NAME@ for the target's own name, into
+# log_<TARGET_NAME>_<debug|release>.conf in the build directory -- see
+# fsp::load_logger_config() in src/lib/logger.cpp for the matching runtime lookup.
+# configure_file() also makes CMake re-run (and thus regenerate this file) whenever the
+# template changes, even without an explicit `cmake ..`.
+function(add_log_config TARGET_NAME)
+    set(PROGRAM_NAME ${TARGET_NAME})
+    if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+        set(FSP_LOG_TEMPLATE ${CMAKE_SOURCE_DIR}/config/log_debug.conf.in)
+        set(FSP_LOG_KIND debug)
+    else()
+        set(FSP_LOG_TEMPLATE ${CMAKE_SOURCE_DIR}/config/log_release.conf.in)
+        set(FSP_LOG_KIND release)
+    endif()
+    configure_file(${FSP_LOG_TEMPLATE} ${CMAKE_BINARY_DIR}/log_${TARGET_NAME}_${FSP_LOG_KIND}.conf @ONLY)
 endfunction()
 
 set(SOURCES
@@ -203,7 +210,7 @@ set(FSP_TARGET_${PROJECT_NAME}_LIBS
 # set(FSP_TARGET_${PROJECT_NAME}_INCLUDES ${CMAKE_SOURCE_DIR}/src/extra)
 
 add_fsp_target(${b_target} EXECUTABLE ${${b_target}_SOURCES})
-add_log_config_copy(${b_target})
+add_log_config(${b_target})
 #
 # --- target: validate --------------------------------------------------
 #
@@ -286,7 +293,7 @@ set(FSP_TARGET_${b_target}_LIBS
     magic_enum::magic_enum
 )
 add_fsp_target(${b_target} EXECUTABLE ${${b_target}_SOURCES})
-add_log_config_copy(${b_target})
+add_log_config(${b_target})
 # -----------------------------------------------------------------------------
 # --- target: pacs8-hook (same as pacs8, but wires an explicit custom pipeline_hooks class)
 # -----------------------------------------------------------------------------
@@ -305,7 +312,7 @@ set(FSP_TARGET_${b_target}_LIBS
     magic_enum::magic_enum
 )
 add_fsp_target(${b_target} EXECUTABLE ${${b_target}_SOURCES})
-add_log_config_copy(${b_target})
+add_log_config(${b_target})
 # -----------------------------------------------------------------------------
 # --- target: validator
 # -----------------------------------------------------------------------------

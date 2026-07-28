@@ -109,10 +109,14 @@ namespace fsp
   /**
    * @brief Loads a logger_config, trying in order:
    * 1. LOG_CONFIG environment variable -> path to a config file (if set and non-empty).
-   * 2. log_debug.log / log_release.log (matching is_debug()/is_release()) in the current
-   *    working directory, if LOG_CONFIG was unset, empty, or pointed at a file that couldn't
-   *    be read.
+   * 2. log_<program_name>_debug.conf / log_<program_name>_release.conf (matching
+   *    is_debug()/is_release()) in the current working directory, if LOG_CONFIG was unset,
+   *    empty, or pointed at a file that couldn't be read.
    * 3. Hardcoded fallback if neither file could be read: console logging, level info.
+   * @param program_name Identifies the calling program (e.g. "pacs8", "pacs8-hook", "fsp") --
+   * used only to pick the right fallback config file in step 2, so each program can have its own
+   * log_file_path (see config/log_debug.conf.in/log_release.conf.in, generated per-program by
+   * CMake into log_<program_name>_debug.conf/_release.conf).
    */
-  [[nodiscard]] logger_config load_logger_config();
+  [[nodiscard]] logger_config load_logger_config(std::string_view program_name);
 } // namespace fsp
