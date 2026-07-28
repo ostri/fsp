@@ -1,6 +1,7 @@
 #include "logger.hpp"
 #include <spdlog/pattern_formatter.h>
 #include <cstdlib>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <optional>
@@ -193,7 +194,10 @@ namespace fsp
       std::cerr << "LOG_CONFIG='" << env_path << "' could not be read -- falling back.\n";
     }
 
-    const auto fallback_path = fmt::format("log_{}_{}.conf", program_name, is_debug() ? "debug" : "release");
+    // program_name is argv[0] verbatim (e.g. "./pacs8-cb"); strip any directory
+    // component so the lookup filename doesn't get mangled into a bogus path.
+    const auto program_stem  = std::filesystem::path(program_name).filename().string();
+    const auto fallback_path = fmt::format("log_{}_{}.conf", program_stem, is_debug() ? "debug" : "release");
     if (auto cfg = parse_logger_config_file(fallback_path)) return *cfg;
 
     return logger_config{.enable_console = true, .enable_file = false, .log_level = spdlog::level::info};
