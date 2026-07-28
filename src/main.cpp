@@ -1,23 +1,6 @@
-// #include <cstdint>
-// #include <meta>
-// #include <string_view>
-
-// #include "work.hpp"
-// #include "fmt/format.h"
-
-
-// int main()
-// {
-//   // fsp::print_namespace<^^work>();
-//   constexpr auto x = fsp::reflex<^^work>();
-//   static_assert(x.ns() == "work", "namespace name error");
-//   str_t msg = fmt::format("namespace: {}\n", x.ns());
-//   fmt::print("{}", msg);
-//   return 0;
-// }
-
 #include "parsing_util.hpp"
 #include "process_docs.hpp"
+#include "work.hpp"
 #include "xml_attr.hpp"
 #include <filesystem>
 #include <fmt/format.h>
@@ -41,54 +24,13 @@ int main(int argc, const char* argv[])
     const fsp::str_t xml_file(argv[1]);                  // NOLINT
     const fsp::str_t xsd_file(argc == 3 ? argv[2] : ""); // NOLINT
 
-    // clang-format off
-    static constexpr auto ns = std::to_array<fsp::ns>({
-      {.prefix = "",   .uri = "urn:iso:std:iso:20022:tech:xsd:pacs.008.001.08"}, // default namespace
-      {.prefix = "x",  .uri = "urn:iso:std:iso:20022:tech:xsd:pacs.008.001.08"}, // default namespace
-      {.prefix = "xy", .uri = "krneki"},      // explicitly defined namespace and prefix
-    });
-    // --- targets --------------------------------------------------------------
-    static constexpr auto targets_raw = std::to_array<fsp::raw_attr>({
-      {.name="header",      .path="/x:Document/FIToFICstmrCdtTrf/x:GrpHdr"},
-      {.name="transaction", .path="/Document/x:FIToFICstmrCdtTrf/x:CdtTrfTxInf"},
-    });
-    // --- attributes in header -------------------------------------------------
-    static constexpr auto xpath_hdr = std::to_array<fsp::raw_attr>({
-      {.name="msg_id",     .path="x:GrpHdr/MsgId"},
-      {.name="amount_sum", .path="GrpHdr/TtlIntrBkSttlmAmt"},
-      {.name="currency",   .path="GrpHdr/TtlIntrBkSttlmAmt/@Ccy", .is_opt=true},
-      {.name="msg_ts",     .path="x:GrpHdr/CreDtTm",              .is_opt=true},
-      {.name="value_date", .path="GrpHdr/IntrBkSttlmDt",          .is_opt=true},
-    });
-    // --- attributes in transaction --------------------------------------------
-    static constexpr auto xpath_txn = std::to_array<fsp::raw_attr>({
-      {.name="txn_id",        .path="CdtTrfTxInf/PmtId/TxId"},
-      {.name="debtor.iban",   .path="CdtTrfTxInf/DbtrAcct/Id/IBAN"},
-      {.name="debtor.bic",    .path="CdtTrfTxInf/DbtrAgt/FinInstnId/BICFI"},
-      {.name="creditor.iban", .path="CdtTrfTxInf/CdtrAcct/Id/IBAN"},
-      {.name="creditor.bic",  .path="CdtTrfTxInf/CdtrAgt/FinInstnId/BICFI"},
-      {.name="amount",        .path="CdtTrfTxInf/IntrBkSttlmAmt"},
-      {.name="currency",      .path="CdtTrfTxInf/IntrBkSttlmAmt/@Ccy",        .is_opt=true},
-      {.name="instr.agent",   .path="CdtTrfTxInf/InstgAgt/FinInstnId/*BICFI", .is_opt=true},
-    });
-    // clang-format on
-
-    static constexpr auto targets = fsp::build(targets_raw, ns);
-    static_assert(targets.size() == targets_raw.size(), "split xpaths are not ok.");
-    //    static_assert(targets.min(0) == "Document", "Should be document");
-    //    static_assert(targets.max(0) == "Document", "Should be document");
-    //    static_assert(targets.min(1) == "FIToFICstmrCdtTrf", "Should be FIToFICstmrCdtTrf");
-    //    static_assert(targets.max(1) == "FIToFICstmrCdtTrf", "Should be FIToFICstmrCdtTrf");
-    //    static_assert(targets.min(2) == "CdtTrfTxInf", "Should be CdtTrfTxInf");
-    //    static_assert(targets.max(2) == "GrpHdr", "Should be GrpHdr");
-    static constexpr auto hdr = fsp::build(xpath_hdr, ns);
-    static constexpr auto txn = fsp::build(xpath_txn, ns);
-    static_assert(txn.size() == xpath_txn.size(), "split xpaths are not ok.");
-    //    static_assert(txn.min(0) == "CdtTrfTxInf", "Should be CdtTrfTxInf");
-    //    static_assert(txn.max(0) == "CdtTrfTxInf", "Should be CdtTrfTxInf");
-    //    static_assert(txn.min(2) == "FinInstnId", "Should be FinInstnId");
-    // static_assert(txn.max(2) == "TxId", "Should be TxId");
-    static const auto all = fsp::proc_data{.targets = targets, .xpaths = {hdr, txn}};
+    // Every class in namespace `fsp::work` deriving from fsp::seg_schema (see
+    // work.hpp) is one segment cut point; its own [[= "name=path"]] annotation
+    // is the target entry, its annotated fields are the xpaths to extract.
+    // fsp::proc_data_of() (see reflection.hpp) walks the namespace via C++26
+    // reflection and builds the same fsp::proc_data this file used to build by
+    // hand from targets_raw/xpath_hdr/xpath_txn.
+    static const auto all = fsp::proc_data_of<^^fsp::work>();
 
     assert(all.targets.size() == all.xpaths.size());
     std::vector<fsp::str_t> files;

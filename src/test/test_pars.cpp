@@ -16,9 +16,9 @@ namespace fsp
     {.name="creditor_.iban_", .path="CdtTrfTxInf/CdtrAcct/Id/IBAN"},
     {.name="creditor_.bic_",  .path="CdtTrfTxInf/CdtrAgt/FinInstnId/BICFI"},
     {.name="amount_",         .path="CdtTrfTxInf/IntrBkSttlmAmt"},
-    {.name="currency_",       .path="CdtTrfTxInf/IntrBkSttlmAmt/@Ccy",        .is_opt=true},
-    {.name="value_date_",     .path="CdtTrfTxInf/IntrBkSttlmDt",              .is_opt=true},
-    {.name="remmitance_",     .path="CdtTrfTxInf/RmtInf/Strd/RfrdDocInf/*Nb", .is_opt=true},
+    {.name="currency_",       .path="?CdtTrfTxInf/IntrBkSttlmAmt/@Ccy"},
+    {.name="value_date_",     .path="?CdtTrfTxInf/IntrBkSttlmDt"},
+    {.name="remmitance_",     .path="*CdtTrfTxInf/RmtInf/Strd/RfrdDocInf/Nb"},
   });
   // clang-format on
   // NOLINTNEXTLINE(cert-err58-cpp)

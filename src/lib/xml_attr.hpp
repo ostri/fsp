@@ -22,6 +22,22 @@ namespace fsp
   };
 
   // --- raw attribute definition (compile-time) ----------------------------------------
+  /**
+   * @brief path may carry markers understood natively by xml_attr's parsing,
+   * in addition to the raw is_opt flag below (kept for hand-written tables
+   * that don't use markers at all):
+   *
+   *   "path"     required, exactly one value, tag
+   *   "?path"    optional, zero or one value             (leading, whole-path)
+   *   "*path"    optional, zero or more values           (leading, whole-path)
+   *   "+path"    required, one or more values            (leading, whole-path)
+   *   ".../@tag" or ".../@ns:tag"   tag is an attribute, not an element -- '@'
+   *              is looked for on whichever segment carries it (conventionally
+   *              the last one, mimicking xpath's ".../@Ccy"), not just position 0
+   *              of the whole string.
+   *
+   * The two are independent and combine freely, e.g. "*CdtTrfTxInf/.../@Ccy".
+   */
   struct raw_attr
   {
     constexpr bool operator==(const raw_attr& o) const { return (o.name == name) && (o.path == path); }
@@ -101,15 +117,23 @@ namespace fsp
       if (segment.empty()) continue;
       if (result.size >= max_xpath_len) throw compile_error("xpath exceeds max_xpath_len");
       xpath_el element{};
-      auto     colon_pos = segment.find(':');
+      // '@' marks this segment as an attribute (mimicking xpath's ".../@Ccy");
+      // strip it up front so the rest parses exactly like a normal element --
+      // this also makes "@ns:tag" (attribute with an explicit prefix) work,
+      // which the old "check only when there's no colon" version could not.
+      bool is_attr_segment = segment.starts_with('@');
+      if (is_attr_segment) segment = segment.substr(1);
+
+      auto colon_pos = segment.find(':');
       if (colon_pos != cstr_t::npos)
       { // we found the colon in segment
         element.ns  = uri_from_prefix(segment.substr(0, colon_pos), ns_arr);
         element.tag = segment.substr(colon_pos + 1);
       }
       else
-      { // there is no colon in segment
-        element.ns  = segment.starts_with('@') ? "" : uri_from_prefix("", ns_arr);
+      { // there is no colon in segment: elements fall back to the default
+        // namespace, unprefixed attributes never do (XML namespace rules)
+        element.ns  = is_attr_segment ? cstr_t{} : uri_from_prefix("", ns_arr);
         element.tag = segment;
       }
       // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-constant-array-index)
@@ -160,26 +184,49 @@ namespace fsp
 
   constexpr xml_attr::xml_attr(std::size_t original_ndx, const raw_attr& raw, std::span<const ns> ns_arr)
   : name_(raw.name)
-  , path_(trim_xpath(raw.path))
-  , is_opt_(raw.is_opt)
   , original_ndx_(original_ndx)
   {
+    // leading whole-path cardinality marker: ?, * or + (see raw_attr comment above)
+    cstr_t working      = raw.path;
+    bool   marker_opt   = false;
+    bool   marker_array = false;
+    if (! working.empty())
+    {
+      char c = working.front();
+      if (c == '?' || c == '*' || c == '+')
+      {
+        marker_opt   = (c == '?' || c == '*');
+        marker_array = (c == '*' || c == '+');
+        working      = working.substr(1);
+      }
+    }
+    path_   = trim_xpath(working);
+    is_opt_ = raw.is_opt || marker_opt;
+
+    // '@' anywhere in the (marker-stripped) path means it resolves to an
+    // attribute -- parse_xpath_to_elements() already found and consumed it
+    // per-segment, this just tells us whether the *last* element is that one.
+    bool marker_attr = path_.contains('@');
+
     auto parsed = parse_xpath_to_elements(path_, ns_arr);
     xpath_size_ = parsed.size;
     // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic)
     std::copy(parsed.elements.begin(), parsed.elements.begin() + xpath_size_, xpath_.begin());
     auto  last_pos = xpath_size_ - 1;  // index of last element in the xpath
     auto& last_el  = xpath_[last_pos]; // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index)
-    if (last_el.tag.starts_with('@'))
+    if (marker_attr)
     {
-      attr_ = xpath_el{.ns = last_el.ns, .tag = last_el.tag.substr(1)}; // strip '@'
+      attr_ = last_el; // ns/tag already resolved correctly (no '@') by parse_xpath_to_elements
       xpath_size_--;
     }
-    else if (last_el.tag.starts_with('*'))
-    {
+    else if (marker_array || last_el.tag.starts_with('*'))
+    { // last_el.tag.starts_with('*') is the old per-segment convention, kept
+      // for hand-written raw_attr tables that embed '*' instead of using the
+      // leading marker (e.g. ".../*BICFI")
       is_array_ = true;
-      // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-constant-array-index)
-      xpath_[last_pos] = xpath_el{.ns = last_el.ns, .tag = last_el.tag.substr(1)}; // strip '*'
+      if (last_el.tag.starts_with('*'))
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-constant-array-index)
+        xpath_[last_pos] = xpath_el{.ns = last_el.ns, .tag = last_el.tag.substr(1)}; // strip '*'
     }
   }
 

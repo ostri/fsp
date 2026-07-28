@@ -1,67 +1,25 @@
 #include "work.hpp"
-#include <meta>
 #include <array>
-#include <string_view>
 #include <iostream>
+#include <meta>
+#include <string_view>
+#include <type_traits>
 
 // ---- Podatkovna struktura, v katero shranimo rezultat xpath anotacije ----
 
-struct field_info
-{
-  cstr_t name;
-  cstr_t xpath; // surov display_string_of niz anotacije, npr. [[=(const char*)"x:GrpHdr/MsgId"]]
-};
-
 struct class_info
 {
-  cstr_t                     name;
-  cstr_t                     xpath; // surov display_string_of niz anotacije razreda
-  std::array<field_info, 32> fields{};
-  std::size_t                field_count = 0;
+  fsp::raw_attr                 target;
+  std::array<fsp::raw_attr, 32> fields{};
+  std::size_t                   field_count = 0;
 };
 
-// Prebere prvo anotacijo danega elementa (razred ali polje) kot surov
-// display_string_of niz. std::meta::extract<T>(...) na tej (eksperimentalni)
-// reflection veji GCC ne deluje zanesljivo za noben kazalčni tip, zato
-// uporabimo dokazano delujoč meta::display_string_of() (glej reflection.hpp).
-// POZOR: razčlenitev narekovajev (iskanje ") NE sme potekati tukaj, znotraj
-// consteval funkcije - cstr_t::find() na tem posebnem
-// "reflect_constant" nizu v prevajalnem času ni podprt ('not a constant
-// expression'). Zato tu vrnemo samo surov niz; razčlenitev naredimo kasneje,
-// v main(), kjer teče kot navadna izvajalna (runtime) koda.
-template <std::meta::info Item>
-consteval cstr_t read_xpath()
-{
-  constexpr auto anns = std::define_static_array(std::meta::annotations_of(Item));
-  if constexpr (anns.empty()) { return ""; }
-  else
-  {
-    // display_string_of vrne str_t; z define_static_array mu damo
-    // statično dobo trajanja, da lahko iz njega varno vrnemo string_view.
-    constexpr auto disp_chars = std::define_static_array(std::meta::display_string_of(anns[0]));
-    return cstr_t(disp_chars.data(), disp_chars.size());
-  }
-}
-
-// Zgradi seznam polj razreda skupaj z njihovimi xpath potmi
-template <std::meta::info Class>
-consteval auto get_fields_with_xpath()
-{
-  constexpr auto        ctx     = std::meta::access_context::unchecked();
-  static constexpr auto members = std::define_static_array(std::meta::nonstatic_data_members_of(Class, ctx));
-
-  std::array<field_info, 32> result{};
-  std::size_t                count = 0;
-
-  template for (constexpr auto m : members) { result[count++] = field_info{std::meta::identifier_of(m), read_xpath<m>()}; }
-
-  return result;
-}
-
-// Zgradi seznam razredov v podanem imenskem prostoru, za vsak razred pa
-// shrani njegov xpath in seznam polj z njihovimi xpath potmi
+// Zgradi seznam razredov v podanem imenskem prostoru, ki dedujejo od
+// fsp::seg_schema, za vsak razred pa shrani njegov target-raw_attr in
+// raw_attr tabelo polj -- isti podatki, ki jih fsp::proc_data_of() uporabi
+// za zgraditev fsp::proc_data (glej reflection.hpp), tu samo za izpis.
 template <std::meta::info Ns>
-consteval auto get_classes_with_xpath()
+consteval auto get_classes()
 {
   constexpr auto        ctx     = std::meta::access_context::unchecked();
   static constexpr auto members = std::define_static_array(std::meta::members_of(Ns, ctx));
@@ -73,59 +31,54 @@ consteval auto get_classes_with_xpath()
   {
     if constexpr (std::meta::is_type(m) && std::meta::has_identifier(m))
     {
-      class_info ci{};
-      ci.name  = std::meta::identifier_of(m);
-      ci.xpath = read_xpath<m>();
+      // gnezden if constexpr: typename[:m:] se preveri za CEL if-constexpr
+      // pogoj tudi, ko is_type(m) ni izpolnjen, zato mora biti ločen (glej
+      // enako opombo pri fsp::classes_of() v reflection.hpp).
+      if constexpr (std::is_base_of_v<fsp::seg_schema, typename[:m:]>)
+      {
+        class_info ci{};
+        ci.target = fsp::attr_of<m>();
 
-      constexpr auto fields = get_fields_with_xpath<m>();
-      for (std::size_t i = 0; i < fields.size() && ! fields[i].name.empty(); ++i) { ci.fields[ci.field_count++] = fields[i]; }
+        constexpr auto raw_fields = fsp::fields_of<m>();
+        for (std::size_t i = 0; i < raw_fields.size(); ++i) ci.fields[ci.field_count++] = raw_fields[i];
 
-      result[count++] = ci;
+        result[count++] = ci;
+      }
     }
   }
 
   return result;
 }
 
-// Iz surovega display_string_of niza (npr. [[=(const char*)"x:GrpHdr/MsgId"]])
-// izlušči del med prvim parom narekovajev. Teče kot navadna (runtime) koda -
-// namenoma NI consteval/constexpr klicana v prevajalnem času.
-cstr_t extract_quoted(cstr_t disp)
+namespace
 {
-  auto first = disp.find('"');
-  if (first == cstr_t::npos) { return disp; }
-  auto second = disp.find('"', first + 1);
-  if (second == cstr_t::npos) { return disp; }
-  return disp.substr(first + 1, second - first - 1);
-}
-template <std::meta::info Ns>
-consteval auto get_ns_annotation()
-{
-  static constexpr auto            anns = std::define_static_array(std::meta::annotations_of(Ns));
-  std::size_t                      size = 0;
-  std::array<fsp::ns, anns.size()> res;
-  template for (constexpr auto& el : anns) res[size++] = std::meta::constant_of(el);
-  return res;
-}
+  // "1" / "0..1" / "1..*" / "0..*" -- glede na is_opt()/is_array(), ki ju
+  // fsp::xml_attr izpelje iz istega raw_attr, ki ga uporablja prava cevovodna
+  // koda (glej fsp::field_attr_of() v reflection.hpp za pomen ?, *, + markerjev).
+  std::string_view cardinality(const fsp::xml_attr& a)
+  {
+    if (a.is_array()) return a.is_opt() ? "0..*" : "1..*";
+    return a.is_opt() ? "0..1" : "1";
+  }
+
+  void print_row(std::string_view indent, const fsp::raw_attr& raw)
+  {
+    fsp::xml_attr a(0, raw, fsp::work::ns);
+    std::cout << indent << raw.name << "  ->  " << a.full_xpath_with_uri() << "  [" << (a.is_attr() ? "attr" : "tag") << ", "
+              << cardinality(a) << "]\n";
+  }
+} // namespace
+
 int main()
 {
-  constexpr auto classes = get_classes_with_xpath<^^work>();
+  constexpr auto classes = get_classes<^^fsp::work>();
 
   std::cout << "Razredi z xpath anotacijo:\n";
   for (const auto& ci : classes)
   {
-    if (ci.name.empty()) break;
+    if (ci.target.name.empty()) break;
 
-    std::cout << ci.name;
-    if (! ci.xpath.empty()) { std::cout << "  ->  " << extract_quoted(ci.xpath); }
-    std::cout << '\n';
-
-    for (std::size_t i = 0; i < ci.field_count; ++i)
-    {
-      const auto& f = ci.fields[i];
-      std::cout << "    " << f.name;
-      if (! f.xpath.empty()) { std::cout << "  ->  " << extract_quoted(f.xpath); }
-      std::cout << '\n';
-    }
+    print_row("", ci.target);
+    for (std::size_t i = 0; i < ci.field_count; ++i) print_row("    ", ci.fields[i]);
   }
 }

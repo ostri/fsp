@@ -1,6 +1,7 @@
 #include "parsing_util.hpp"
 #include "pipeline_hooks.hpp"
 #include "process_docs.hpp"
+#include "work.hpp"
 #include "xml_attr.hpp"
 #include <chrono>
 #include <fmt/format.h>
@@ -12,52 +13,6 @@
 #include <filesystem>
 namespace
 {
-  static constexpr auto fetch_ns()
-  {
-    // clang-format off
-  return std::to_array<fsp::ns>({
-    {.prefix = "",   .uri = "urn:iso:std:iso:20022:tech:xsd:pacs.008.001.08"}, // default namespace
-    {.prefix = "x",  .uri = "urn:iso:std:iso:20022:tech:xsd:pacs.008.001.08"}, // default namespace
-    {.prefix = "xy", .uri = "krneki"},      // explicitly defined namespace and prefix
-  });
-    // clang-format on
-  }
-  static constexpr auto fetch_targets()
-  {
-    // clang-format off
-  return std::to_array<fsp::raw_attr>({
-    {.name="header",      .path="/x:Document/FIToFICstmrCdtTrf/x:GrpHdr"},
-    {.name="transaction", .path="/Document/x:FIToFICstmrCdtTrf/x:CdtTrfTxInf"},
-  });
-    // clang-format on
-  }
-  static constexpr auto fetch_hdr()
-  {
-    // clang-format off
-    return std::to_array<fsp::raw_attr>({
-      {.name="msg_id",     .path="x:GrpHdr/MsgId"},
-      {.name="amount_sum", .path="GrpHdr/TtlIntrBkSttlmAmt"},
-      {.name="currency",   .path="GrpHdr/TtlIntrBkSttlmAmt/@Ccy", .is_opt=true},
-      {.name="msg_ts",     .path="x:GrpHdr/CreDtTm",              .is_opt=true},
-      {.name="value_date", .path="GrpHdr/IntrBkSttlmDt",          .is_opt=true},
-    });
-    // clang-format on
-  }
-  static constexpr auto fetch_txn()
-  {
-    // clang-format off
-    return std::to_array<fsp::raw_attr>({
-      {.name="txn_id",        .path="CdtTrfTxInf/PmtId/TxId"},
-      {.name="debtor.iban",   .path="CdtTrfTxInf/DbtrAcct/Id/IBAN"},
-      {.name="debtor.bic",    .path="CdtTrfTxInf/DbtrAgt/FinInstnId/BICFI"},
-      {.name="creditor.iban", .path="CdtTrfTxInf/CdtrAcct/Id/IBAN"},
-      {.name="creditor.bic",  .path="CdtTrfTxInf/CdtrAgt/FinInstnId/BICFI"},
-      {.name="amount",        .path="CdtTrfTxInf/IntrBkSttlmAmt"},
-      {.name="currency",      .path="CdtTrfTxInf/IntrBkSttlmAmt/@Ccy",        .is_opt=true},
-      {.name="instr.agent",   .path="CdtTrfTxInf/InstgAgt/FinInstnId/*BICFI", .is_opt=true},
-    });
-    // clang-format on
-  }
   int help(const char* prog_name)
   {
     static constexpr auto* msg = "Usage: {0} <xml_file>* [<xsd_file>] \n"
@@ -207,18 +162,13 @@ int main(int argc, const char* argv[])
       else files.push_back(fn);
     };
 
-    constexpr auto        ns          = fetch_ns();
-    constexpr auto        targets_raw = fetch_targets();
-    constexpr auto        xpath_hdr   = fetch_hdr();
-    constexpr auto        xpath_txn   = fetch_txn();
-    static constexpr auto targets     = fsp::build(targets_raw, ns);
-    static constexpr auto hdr         = fsp::build(xpath_hdr, ns);
-    static constexpr auto txn         = fsp::build(xpath_txn, ns);
-    static const auto     all         = fsp::proc_data{.targets = targets, .xpaths = {hdr, txn}};
-    {
-      static_assert(targets.size() == targets_raw.size(), "split xpaths are not ok.");
-      static_assert(txn.size() == xpath_txn.size(), "split xpaths are not ok.");
-    }
+    // Every class in namespace `fsp::work` deriving from fsp::seg_schema (see
+    // work.hpp) is one segment cut point; its own [[= "name=path"]] annotation
+    // is the target entry, its annotated fields are the xpaths to extract.
+    // fsp::proc_data_of() (see reflection.hpp) walks the namespace via C++26
+    // reflection and builds the same fsp::proc_data this file used to build by
+    // hand from fetch_targets()/fetch_hdr()/fetch_txn().
+    static const auto all = fsp::proc_data_of<^^fsp::work>();
     assert(all.targets.size() == all.xpaths.size());
     //  Configure logging -- see fsp::load_logger_config() for the LOG_CONFIG env var /
     //  log_<program>_debug.log / _release.log lookup chain.
