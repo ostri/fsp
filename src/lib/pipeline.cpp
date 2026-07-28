@@ -53,7 +53,7 @@ namespace fsp
   {
     auto&      counters       = (*doc_counters_)[doc_ndx];
     const auto pos            = counters.begin_segment();
-    const bool semantically_ok = hooks.on_segment_processed(seg_id, doc_ndx, values, pos.is_first, pos.is_last, log_);
+    const bool semantically_ok = hooks.on_seg_proc(seg_id, doc_ndx, values, pos.is_first, pos.is_last, log_);
     if (counters.end_segment(semantically_ok)) log_doc_done(doc_ndx);
     return semantically_ok;
   }

@@ -38,7 +38,7 @@ namespace fsp
       return;
     }
     pipeline_.record_doc_open(doc_ndx);
-    hooks_->on_document_open(doc_ndx, pipeline_.ds_dscr()[doc_ndx], log_);
+    hooks_->on_doc_open(doc_ndx, pipeline_.ds_dscr()[doc_ndx], log_);
     if (auto res = cutter_->cut(doc_ndx); ! res)
     {
       // A malformed document is a per-document failure, not a fatal one: mark it invalid so
@@ -49,7 +49,7 @@ namespace fsp
     {
       pipeline_.record_doc_close(doc_ndx, cutter_->segments_found());
     }
-    hooks_->on_document_close(doc_ndx, pipeline_.ds_dscr()[doc_ndx].status(), pipeline_.ds_dscr()[doc_ndx], log_);
+    hooks_->on_doc_close(doc_ndx, pipeline_.ds_dscr()[doc_ndx].status(), pipeline_.ds_dscr()[doc_ndx], log_);
     pipeline_.notify_cut_done();
   }
 
@@ -73,7 +73,7 @@ namespace fsp
   {
     log_.make_log_name(parent_log_name_, fmt::format("pipe-wrk.{:02}", worker_id));
     const auto thread_name = log_.log_name();
-    hooks_->on_worker_start(worker_id, thread_name, log_);
+    hooks_->on_wrk_start(worker_id, thread_name, log_);
     auto&             pool       = pipeline_.pool();
     const std::size_t num_shards = pool.num_shards();
     // Each P-capable thread is permanently assigned one shard (worker_id % num_shards) of the
@@ -131,6 +131,6 @@ namespace fsp
       processor_->process_one(seg_ndx); // records the segment's outcome (and runs the hook) internally
     }
     processor_->flush_results();
-    hooks_->on_worker_end(worker_id, thread_name, log_);
+    hooks_->on_wrk_end(worker_id, thread_name, log_);
   }
 } // namespace fsp

@@ -9,7 +9,7 @@ namespace fsp
 {
   // Per-document runtime facts collected while processing one document: how many of its segments
   // turned out semantically correct vs. in error (via begin_segment()/end_segment(), driven by
-  // the on_segment_processed hook's verdict), plus end-to-end timing for the cutting phase
+  // the on_seg_proc hook's verdict), plus end-to-end timing for the cutting phase
   // (open/close) and the segment-processing phase (first/last segment). Replaces the old
   // doc_timing_t, which only tracked timing -- this consolidates timing and outcome counts into
   // one per-document structure. No session-wide totals are kept here or anywhere alongside it:
@@ -34,14 +34,14 @@ namespace fsp
     bool record_doc_close(std::size_t total_segments) noexcept;
 
     // Called by whichever P-role thread is about to process one segment of this document,
-    // BEFORE its outcome is known -- this is what lets on_segment_processed's is_first/is_last
+    // BEFORE its outcome is known -- this is what lets on_seg_proc's is_first/is_last
     // parameters be ready before the hook call itself. is_last here is best-effort: for a
     // document small/fast enough that every one of its segments gets processed before cutting
     // itself reports done, cut_finished() is still false for every one of them, so none can
     // correctly claim is_last (see end_segment()/maybe_complete() for the authoritative,
     // dual-path completion check used for internal bookkeeping instead).
     [[nodiscard]] segment_position begin_segment() noexcept;
-    // Called once the segment's outcome is known (semantically_ok is the on_segment_processed
+    // Called once the segment's outcome is known (semantically_ok is the on_seg_proc
     // hook's verdict, or false for a segment that failed technically and never reached the
     // hook at all -- not to be confused with technical extraction success in the ok() case).
     // Returns true if this call is the one that completes the document (cutting already

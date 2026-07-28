@@ -32,7 +32,7 @@ namespace fsp
     [[nodiscard]] std::size_t syntactically_incorrect_docs() const noexcept;
     // "Semantically correct/incorrect" only makes sense for documents that are syntactically
     // correct (see above) -- correct means every one of its segments passed the
-    // on_segment_processed verdict (error() == 0), incorrect means at least one did not. A
+    // on_seg_proc verdict (error() == 0), incorrect means at least one did not. A
     // syntactically incorrect document counts toward neither (semantically_correct_docs() +
     // semantically_incorrect_docs() == syntactically_correct_docs()).
     [[nodiscard]] std::size_t semantically_correct_docs() const noexcept;

@@ -274,6 +274,24 @@ set(FSP_TARGET_${b_target}_LIBS
 )
 add_fsp_target(${b_target} EXECUTABLE ${${b_target}_SOURCES})
 # -----------------------------------------------------------------------------
+# --- target: pacs8-hook (same as pacs8, but wires an explicit custom pipeline_hooks class)
+# -----------------------------------------------------------------------------
+set(b_target pacs8-hook) # name of the target
+set(${b_target}_SOURCES
+    ${CMAKE_SOURCE_DIR}/src/test/pacs8-hook.cpp
+)
+set(FSP_TARGET_${b_target}_INCLUDES
+  ${CMAKE_SOURCE_DIR}/src/lib
+  ${CMAKE_SOURCE_DIR}/src/test
+  )
+set(FSP_TARGET_${b_target}_LIBS
+    fsp_lib
+    fmt::fmt
+    spdlog::spdlog
+    magic_enum::magic_enum
+)
+add_fsp_target(${b_target} EXECUTABLE ${${b_target}_SOURCES})
+# -----------------------------------------------------------------------------
 # --- target: validator
 # -----------------------------------------------------------------------------
 set(b_target validator) # name of the target

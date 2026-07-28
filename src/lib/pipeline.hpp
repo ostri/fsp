@@ -52,7 +52,7 @@ namespace fsp
     // benchmarking, and the running total dumped at the end of process_files()).
     void                                 record_doc_open(std::size_t doc_ndx);
     void                                 record_doc_close(std::size_t doc_ndx, std::size_t segment_count);
-    // Runs the on_segment_processed hook and folds the resulting verdict into doc_counters.
+    // Runs the on_seg_proc hook and folds the resulting verdict into doc_counters.
     // Returns that verdict.
     bool record_segment_done(std::size_t doc_ndx, std::size_t seg_id, const result_values& values, pipeline_hooks& hooks);
     // For a segment that failed technically (never reached process_segment()'s value extraction,
