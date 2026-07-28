@@ -39,22 +39,30 @@ int main(int argc, const char* argv[])
     assert(p.get_results().size() + p.get_errors().size() == res->total_segments());
 
     fmt::print("\n=== Document Statistics ===\n"
-               "  Total documents:              {:5}\n"
-               "  Total segments processed:     {:5}\n"
-               "    ok:                         {:5}\n"
-               "    error:                      {:5}\n"
+               "{:<33}{:>10}\n"
+               "{:<33}{:>10}\n"
+               "{:<33}{:>10}\n"
+               "{:<33}{:>10}\n"
                "\n"
-               "  Syntactically correct docs:   {:5}\n"
-               "  Syntactically incorrect docs: {:5}\n"
-               "  Semantically correct docs:    {:5}\n"
-               "  Semantically incorrect docs:  {:5}\n",
+               "{:<33}{:>10}\n"
+               "{:<33}{:>10}\n"
+               "{:<33}{:>10}\n"
+               "{:<33}{:>10}\n",
+               "  Total documents:",
                res->total_docs(),
+               "  Total segments processed:",
                res->total_segments(),
+               "    ok:",
                res->total_segments_ok(),
+               "    error:",
                res->total_segments_error(),
+               "  Syntactically correct docs:",
                res->syntactically_correct_docs(),
+               "  Syntactically incorrect docs:",
                res->syntactically_incorrect_docs(),
+               "  Semantically correct docs:",
                res->semantically_correct_docs(),
+               "  Semantically incorrect docs:",
                res->semantically_incorrect_docs());
   }
   catch (const std::exception& e)

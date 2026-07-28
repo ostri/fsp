@@ -102,27 +102,27 @@ bool pacs8_cb::on_seg_proc([[maybe_unused]] const fsp::xml_segment& segment,
     {
       if constexpr (std::is_same_v<T, fsp::work::pacs8_header>)
       {
-        log.info(fmt::format("[pacs8_cb] {:12}: seg_id={} doc_ndx={} is_first={} is_last={} ok={} header: msg_id='{}' amount_sum={}",
-                             "on_seg_proc",
-                             seg_id,
-                             result.doc_ndx(),
-                             is_first,
-                             is_last,
-                             ok,
-                             s.msg_id,
-                             s.amount_sum));
+        log.debug(fmt::format("[pacs8_cb] {:12}: seg_id={} doc_ndx={} is_first={} is_last={} ok={} header: msg_id='{}' amount_sum={}",
+                              "on_seg_proc",
+                              seg_id,
+                              result.doc_ndx(),
+                              is_first,
+                              is_last,
+                              ok,
+                              s.msg_id,
+                              s.amount_sum));
       }
       else if constexpr (std::is_same_v<T, fsp::work::pacs8_txn>)
       {
-        log.info(fmt::format("[pacs8_cb] {:12}: seg_id={} doc_ndx={} is_first={} is_last={} ok={} txn: txn_id='{}' debtor_iban={}",
-                             "on_seg_proc",
-                             seg_id,
-                             result.doc_ndx(),
-                             is_first,
-                             is_last,
-                             ok,
-                             s.txn_id,
-                             s.debtor_iban));
+        log.debug(fmt::format("[pacs8_cb] {:12}: seg_id={} doc_ndx={} is_first={} is_last={} ok={} txn: txn_id='{}' debtor_iban={}",
+                              "on_seg_proc",
+                              seg_id,
+                              result.doc_ndx(),
+                              is_first,
+                              is_last,
+                              ok,
+                              s.txn_id,
+                              s.debtor_iban));
       }
       else static_assert(sizeof(T) == 0, "on_seg_proc: unhandled fsp::work schema type -- add a branch above");
     },
