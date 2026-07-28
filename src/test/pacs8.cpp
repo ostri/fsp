@@ -38,24 +38,24 @@ int main(int argc, const char* argv[])
     assert(args.files.size() == res->total_docs());
     assert(p.get_results().size() + p.get_errors().size() == res->total_segments());
 
-    std::cout << fmt::format("\n=== Document Statistics ===\n"
-                             "  Total documents:              {:5}\n"
-                             "  Total segments processed:     {:5}\n"
-                             "    ok:                         {:5}\n"
-                             "    error:                      {:5}\n"
-                             "\n"
-                             "  Syntactically correct docs:   {:5}\n"
-                             "  Syntactically incorrect docs: {:5}\n"
-                             "  Semantically correct docs:    {:5}\n"
-                             "  Semantically incorrect docs:  {:5}\n",
-                             res->total_docs(),
-                             res->total_segments(),
-                             res->total_segments_ok(),
-                             res->total_segments_error(),
-                             res->syntactically_correct_docs(),
-                             res->syntactically_incorrect_docs(),
-                             res->semantically_correct_docs(),
-                             res->semantically_incorrect_docs());
+    fmt::print("\n=== Document Statistics ===\n"
+               "  Total documents:              {:5}\n"
+               "  Total segments processed:     {:5}\n"
+               "    ok:                         {:5}\n"
+               "    error:                      {:5}\n"
+               "\n"
+               "  Syntactically correct docs:   {:5}\n"
+               "  Syntactically incorrect docs: {:5}\n"
+               "  Semantically correct docs:    {:5}\n"
+               "  Semantically incorrect docs:  {:5}\n",
+               res->total_docs(),
+               res->total_segments(),
+               res->total_segments_ok(),
+               res->total_segments_error(),
+               res->syntactically_correct_docs(),
+               res->syntactically_incorrect_docs(),
+               res->semantically_correct_docs(),
+               res->semantically_incorrect_docs());
   }
   catch (const std::exception& e)
   {
