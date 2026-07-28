@@ -8,14 +8,14 @@
 
 struct field_info
 {
-  std::string_view name;
-  std::string_view xpath; // surov display_string_of niz anotacije, npr. [[=(const char*)"x:GrpHdr/MsgId"]]
+  cstr_t name;
+  cstr_t xpath; // surov display_string_of niz anotacije, npr. [[=(const char*)"x:GrpHdr/MsgId"]]
 };
 
 struct class_info
 {
-  std::string_view           name;
-  std::string_view           xpath; // surov display_string_of niz anotacije razreda
+  cstr_t                     name;
+  cstr_t                     xpath; // surov display_string_of niz anotacije razreda
   std::array<field_info, 32> fields{};
   std::size_t                field_count = 0;
 };
@@ -25,21 +25,21 @@ struct class_info
 // reflection veji GCC ne deluje zanesljivo za noben kazalčni tip, zato
 // uporabimo dokazano delujoč meta::display_string_of() (glej reflection.hpp).
 // POZOR: razčlenitev narekovajev (iskanje ") NE sme potekati tukaj, znotraj
-// consteval funkcije - std::string_view::find() na tem posebnem
+// consteval funkcije - cstr_t::find() na tem posebnem
 // "reflect_constant" nizu v prevajalnem času ni podprt ('not a constant
 // expression'). Zato tu vrnemo samo surov niz; razčlenitev naredimo kasneje,
 // v main(), kjer teče kot navadna izvajalna (runtime) koda.
 template <std::meta::info Item>
-consteval std::string_view read_xpath()
+consteval cstr_t read_xpath()
 {
   constexpr auto anns = std::define_static_array(std::meta::annotations_of(Item));
   if constexpr (anns.empty()) { return ""; }
   else
   {
-    // display_string_of vrne std::string; z define_static_array mu damo
+    // display_string_of vrne str_t; z define_static_array mu damo
     // statično dobo trajanja, da lahko iz njega varno vrnemo string_view.
     constexpr auto disp_chars = std::define_static_array(std::meta::display_string_of(anns[0]));
-    return std::string_view(disp_chars.data(), disp_chars.size());
+    return cstr_t(disp_chars.data(), disp_chars.size());
   }
 }
 
@@ -90,12 +90,12 @@ consteval auto get_classes_with_xpath()
 // Iz surovega display_string_of niza (npr. [[=(const char*)"x:GrpHdr/MsgId"]])
 // izlušči del med prvim parom narekovajev. Teče kot navadna (runtime) koda -
 // namenoma NI consteval/constexpr klicana v prevajalnem času.
-std::string_view extract_quoted(std::string_view disp)
+cstr_t extract_quoted(cstr_t disp)
 {
   auto first = disp.find('"');
-  if (first == std::string_view::npos) { return disp; }
+  if (first == cstr_t::npos) { return disp; }
   auto second = disp.find('"', first + 1);
-  if (second == std::string_view::npos) { return disp; }
+  if (second == cstr_t::npos) { return disp; }
   return disp.substr(first + 1, second - first - 1);
 }
 template <std::meta::info Ns>

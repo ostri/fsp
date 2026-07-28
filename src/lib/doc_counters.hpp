@@ -7,6 +7,7 @@
 
 namespace fsp
 {
+  using str_t = std::string;
   // Per-document runtime facts collected while processing one document: how many of its segments
   // turned out semantically correct vs. in error (via begin_segment()/end_segment(), driven by
   // the on_seg_proc hook's verdict), plus end-to-end timing for the cutting phase
@@ -69,7 +70,7 @@ namespace fsp
     [[nodiscard]] std::chrono::milliseconds total_latency() const noexcept; // doc open -> last segment
 
     // Prints every field as "name: value", one pair per line, each line indented by offs spaces.
-    [[nodiscard]] std::string dump(int offs = 0) const;
+    [[nodiscard]] str_t dump(int offs = 0) const;
   private:
     using clock = std::chrono::steady_clock;
     // Shared completion check used by both record_doc_close() and end_segment(), since either
@@ -172,9 +173,9 @@ namespace fsp
     return std::chrono::duration_cast<std::chrono::milliseconds>(last_seg_ - doc_open_);
   }
 
-  inline std::string doc_counters::dump(int offs) const
+  inline str_t doc_counters::dump(int offs) const
   {
-    auto       leading = std::string(offs, ' ');
+    auto       leading = str_t(offs, ' ');
     const auto kilo    = 1000.0;
     return fmt::format(R"({0} segments [ok: {1:4} err: {2:4} Σ: {3:4}] threads [C: {4:.3f} sec P: {5:.3f} sec Σ: {6:.3f} sec])",
                        leading,

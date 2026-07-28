@@ -8,6 +8,7 @@
 
 namespace fsp
 {
+  using str_t = std::string;
   // Error handler for validation with UTF-8 support
   class EH : public xercesc::ErrorHandler
   {
@@ -22,11 +23,11 @@ namespace fsp
   private:
     bool        hasErrors{};
     bool        quietMode;
-    std::string lastErrorLocation;
-    std::string lastErrorMessage;
+    str_t       lastErrorLocation;
+    str_t       lastErrorMessage;
     void        handleError(const char* type, const xercesc::SAXParseException& exc);
   };
-  bool validateXML(const std::string& xmlFile, const std::string& xsdFile, bool quietMode);
+  bool validateXML(const str_t& xmlFile, const str_t& xsdFile, bool quietMode);
   void printUsage(const char* programName);
 }; // namespace fsp
 

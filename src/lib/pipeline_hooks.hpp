@@ -51,16 +51,10 @@ namespace fsp
     }
 
     /** @brief The pipeline_worker thread itself, once at start and once at end of its lifetime. */
-    virtual void on_wrk_start([[maybe_unused]] int               worker_id,
-                                 [[maybe_unused]] std::string_view  thread_name,
-                                 [[maybe_unused]] const fsp_logger& log)
+    virtual void on_wrk_start([[maybe_unused]] int worker_id, [[maybe_unused]] cstr_t thread_name, [[maybe_unused]] const fsp_logger& log)
     {
     }
-    virtual void on_wrk_end([[maybe_unused]] int               worker_id,
-                               [[maybe_unused]] std::string_view  thread_name,
-                               [[maybe_unused]] const fsp_logger& log)
-    {
-    }
+    virtual void on_wrk_end([[maybe_unused]] int worker_id, [[maybe_unused]] cstr_t thread_name, [[maybe_unused]] const fsp_logger& log) { }
 
     /** @brief The cutter thread for this specific document (cutting just started/just finished). */
     virtual void on_doc_open([[maybe_unused]] std::size_t       doc_ndx,

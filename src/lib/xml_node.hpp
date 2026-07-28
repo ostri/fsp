@@ -5,6 +5,7 @@
 namespace fsp
 {
   using cstr_t = std::string_view;
+  using str_t  = std::string;
   class xml_node
   {
   public:
@@ -16,11 +17,11 @@ namespace fsp
     xml_node& operator=(const xml_node&) = default;
     xml_node& operator=(xml_node&&)      = default;
     xml_node(const char* uri, const char* tag);
-    [[nodiscard]] std::string uri() const;
-    [[nodiscard]] std::string tag() const;
-    [[nodiscard]] std::string dump(int offs = 0);
+    [[nodiscard]] str_t uri() const;
+    [[nodiscard]] str_t tag() const;
+    [[nodiscard]] str_t dump(int offs = 0);
   private:
-    std::string tag_;
-    std::string uri_;
+    str_t tag_;
+    str_t uri_;
   };
 } // namespace fsp

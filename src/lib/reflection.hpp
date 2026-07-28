@@ -8,7 +8,8 @@
 // parsing_util.hpp je IZKLJUČEN – povzroča napako pri prevajanju in
 // ni potreben za delovanje refleksije.
 
-using str_t = std::string;
+using str_t  = std::string;
+using cstr_t = std::string_view;
 
 namespace fsp
 {
@@ -125,14 +126,14 @@ namespace fsp
       constexpr auto anns = std::meta::annotations_of(Namespace);
       // POPRAVEK 1: anns.size() namesto std::std::meta::size_of(anns)
       //   size_of(info) pričakuje info, ne vector<info>
-      std::array<std::string_view, anns.size()> out{};
+      std::array<cstr_t, anns.size()> out{};
       // POPRAVEK 2: navadna for zanka z indeksom namesto "template for" s C-style obliko
       //   "template for" podpira SAMO range-based obliko, ne C-style (init; cond; incr)
       for (std::size_t i = 0; i < anns.size(); ++i) out[i] = std::meta::display_string_of(anns[i]);
       return out;
     }
 
-    [[nodiscard]] consteval std::string_view ns() const { return ns_; }
+    [[nodiscard]] consteval cstr_t ns() const { return ns_; }
   private:
     static constexpr auto ns_            = cstr_t(std::meta::display_string_of(Namespace));
     static constexpr auto ns_annotation_ = build_ns_annotations<Namespace>();

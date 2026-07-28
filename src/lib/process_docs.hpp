@@ -23,9 +23,9 @@ namespace fsp
     process_docs& operator=(const process_docs&) = delete;
     process_docs& operator=(process_docs&&)      = delete;
 
-    [[nodiscard]] result<doc_set_counter>  process_files(const std::vector<std::string>& xml_paths,
-                                                         const std::string&              xsd_path,
-                                                         pipeline_hooks&                 hooks = default_pipeline_hooks);
+    [[nodiscard]] result<doc_set_counter>  process_files(const std::vector<str_t>& xml_paths,
+                                                         cstr_t                    xsd_path,
+                                                         pipeline_hooks&           hooks = default_pipeline_hooks);
     [[nodiscard]] const vec_seg_result&    get_results() const;
     [[nodiscard]] const vec_seg_result&    get_errors() const;
     [[nodiscard]] std::vector<std::size_t> failed_document_indices() const;
@@ -48,8 +48,7 @@ namespace fsp
   {
   }
 
-  inline result<doc_set_counter> process_docs::process_files(
-    const std::vector<std::string>& xml_paths, const std::string& xsd_path, pipeline_hooks& hooks)
+  inline result<doc_set_counter> process_docs::process_files(const std::vector<str_t>& xml_paths, cstr_t xsd_path, pipeline_hooks& hooks)
   { return impl_.process_files(xml_paths, xsd_path, hooks); }
   inline const vec_seg_result&    process_docs::get_results() const { return impl_.get_results(); }
   inline const vec_seg_result&    process_docs::get_errors() const { return impl_.get_errors(); }

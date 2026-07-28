@@ -16,8 +16,8 @@ namespace fsp
   using cstr_t = std::string_view;
   struct xml_path_el
   { // NOLINTBEGIN(misc-non-private-member-variables-in-classes)
-    std::string_view uri;
-    std::string_view tag;
+    cstr_t           uri;
+    cstr_t           tag;
     bool             operator==(const xml_path_el& other) const { return tag == other.tag && uri == other.uri; }
     // NOLINTEND(misc-non-private-member-variables-in-classes)
   };
@@ -32,7 +32,7 @@ namespace fsp
     bool                      stop_parsing      = false;
     int                       active_target_idx = -1;
     xmlParserCtxtPtr          ctxt              = nullptr; // to stop the parser
-    std::string               current_buffer;              // for temporary tag values
+    str_t                     current_buffer;              // for temporary tag values
     bool                      log_trace_ = log_.active(lvl_enum::trace);
     bool                      log_debug_ = log_.active(lvl_enum::debug);
     bool                      log_info_  = log_.active(lvl_enum::info);
@@ -56,7 +56,7 @@ namespace fsp
     segment_sax(const segment_sax&)            = delete;
     segment_sax& operator=(const segment_sax&) = delete;
 
-    segment_sax::result_t exec(std::string_view xml_data, const xpath_set& targets);
+    segment_sax::result_t exec(cstr_t xml_data, const xpath_set& targets);
   private:
     template <typename F>
     static void   for_each_set_bit(std::uint64_t bits, F&& func); //< oteration over bits set
@@ -144,7 +144,7 @@ namespace fsp
    * @param xml_data xml document
    * @return segment_sax::result_t values of the targets found in xml document
    */
-  inline segment_sax::result_t segment_sax::exec(std::string_view xml_data, const xpath_set& targets)
+  inline segment_sax::result_t segment_sax::exec(cstr_t xml_data, const xpath_set& targets)
   {
     ctx_.reset_for_reuse(targets);
     xmlCtxtResetPush(ctxt_, xml_data.data(), static_cast<int>(xml_data.size()), nullptr, nullptr);
@@ -188,7 +188,7 @@ namespace fsp
               target.attr_name() == reinterpret_cast<const char*>(attr_localname) &&
               target.attr_uri() == (nullptr != attr_uri ? reinterpret_cast<const char*>(attr_uri) : ""))
           {
-            std::string value(reinterpret_cast<const char*>(val_ptr), static_cast<std::size_t>(val_end - val_ptr));
+            str_t       value(reinterpret_cast<const char*>(val_ptr), static_cast<std::size_t>(val_end - val_ptr));
             const bool  is_array = (ctx->targets->array_mask() & (std::uint64_t{1} << static_cast<std::size_t>(t))) != 0;
             if (ctx->log_trace_) ctx->log_.trace(fmt::format("assign attr [{}] '{}' = '{}'", t, target.name(), value));
             if (is_array) ctx->results.add(static_cast<std::size_t>(t), std::move(value));

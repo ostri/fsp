@@ -130,13 +130,13 @@ namespace
                            elapsed_sec));
     }
 
-    void on_wrk_start(int worker_id, std::string_view thread_name, const fsp::fsp_logger& log) override
+    void on_wrk_start(int worker_id, fsp::cstr_t thread_name, const fsp::fsp_logger& log) override
     {
       worker_start_ = std::chrono::steady_clock::now();
       log.info(fmt::format("[pacs8_cb] {:12}: worker_id={} thread_name='{}'", "on_wrk_start", worker_id, thread_name));
     }
 
-    void on_wrk_end(int worker_id, std::string_view thread_name, const fsp::fsp_logger& log) override
+    void on_wrk_end(int worker_id, fsp::cstr_t thread_name, const fsp::fsp_logger& log) override
     {
       const auto elapsed_sec =
         std::chrono::duration_cast<std::chrono::duration<double>>(std::chrono::steady_clock::now() - worker_start_).count();
@@ -193,11 +193,11 @@ int main(int argc, const char* argv[])
 {
   using str_t = std::string;
   if (argc == 1) return help(*argv);
-  std::vector<std::string> args(argv, argv + argc); // NOLINT (cppcoreguidelines-pro-bounds-pointer-arithmetic)
+  std::vector<str_t> args(argv, argv + argc); // NOLINT (cppcoreguidelines-pro-bounds-pointer-arithmetic)
   args.erase(args.begin());
   try
   {
-    std::string        xsd_file;
+    str_t              xsd_file;
     std::vector<str_t> files;
     files.reserve(args.size());
     for (const auto& file : args)

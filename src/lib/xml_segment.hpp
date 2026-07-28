@@ -27,7 +27,7 @@ namespace fsp
     xml_segment& operator=(const xml_segment&)     = default;
     xml_segment& operator=(xml_segment&&) noexcept = default;
 
-    [[nodiscard]] std::string_view view(const std::byte* mmap_base = nullptr) const noexcept;
+    [[nodiscard]] cstr_t view(const std::byte* mmap_base = nullptr) const noexcept;
 
     [[nodiscard]] bool        empty() const noexcept;
     [[nodiscard]] std::size_t id() const;
@@ -35,11 +35,11 @@ namespace fsp
     [[nodiscard]] std::size_t offset() const;
     [[nodiscard]] std::size_t length() const;
     // [[nodiscard]] str_XMLCh_t prefix() const;
-    [[nodiscard]] std::string        subtree_str(std::string_view tree_content) const;
-    [[nodiscard]] std::string        dump(int offs = 0) const;
-    [[nodiscard]] std::string        dump_all(std::string_view base, int offs = 0) const;
-    [[nodiscard]] std::string        dump_all(const std::byte* mmap_base = nullptr, int offs = 0) const;
-    [[nodiscard]] cstr_t             extract_qname_from_offset(std::string_view base) const;
+    [[nodiscard]] str_t              subtree_str(cstr_t tree_content) const;
+    [[nodiscard]] str_t              dump(int offs = 0) const;
+    [[nodiscard]] str_t              dump_all(cstr_t base, int offs = 0) const;
+    [[nodiscard]] str_t              dump_all(const std::byte* mmap_base = nullptr, int offs = 0) const;
+    [[nodiscard]] cstr_t             extract_qname_from_offset(cstr_t base) const;
     [[nodiscard]] const str_XMLCh_t& ns_raw() const noexcept;
     [[nodiscard]] const str_XMLCh_t& attrs_raw() const noexcept;
     [[nodiscard]] int                doc_ndx() const;

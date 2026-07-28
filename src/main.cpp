@@ -11,7 +11,7 @@
 //   // fsp::print_namespace<^^work>();
 //   constexpr auto x = fsp::reflex<^^work>();
 //   static_assert(x.ns() == "work", "namespace name error");
-//   std::string msg = fmt::format("namespace: {}\n", x.ns());
+//   str_t msg = fmt::format("namespace: {}\n", x.ns());
 //   fmt::print("{}", msg);
 //   return 0;
 // }
@@ -27,7 +27,7 @@
 #include <vector>
 int main(int argc, const char* argv[])
 {
-  std::vector<std::string> args(argv, argv + argc); // NOLINT (cppcoreguidelines-pro-bounds-pointer-arithmetic)
+  std::vector<fsp::str_t> args(argv, argv + argc); // NOLINT (cppcoreguidelines-pro-bounds-pointer-arithmetic)
   if (argc != 3 && argc != 2)
   {
     static constexpr auto* msg = "Usage: {0} <xml_file> [<xsd_file>] \n"
@@ -38,8 +38,8 @@ int main(int argc, const char* argv[])
 
   try
   {
-    const std::string xml_file(argv[1]);                  // NOLINT
-    const std::string xsd_file(argc == 3 ? argv[2] : ""); // NOLINT
+    const fsp::str_t xml_file(argv[1]);                  // NOLINT
+    const fsp::str_t xsd_file(argc == 3 ? argv[2] : ""); // NOLINT
 
     // clang-format off
     static constexpr auto ns = std::to_array<fsp::ns>({
@@ -91,7 +91,7 @@ int main(int argc, const char* argv[])
     static const auto all = fsp::proc_data{.targets = targets, .xpaths = {hdr, txn}};
 
     assert(all.targets.size() == all.xpaths.size());
-    std::vector<std::string> files;
+    std::vector<fsp::str_t> files;
     files.push_back(xml_file);
     //  Configure logging -- see fsp::load_logger_config() for the LOG_CONFIG env var /
     //  log_<program>_debug.log / _release.log lookup chain.

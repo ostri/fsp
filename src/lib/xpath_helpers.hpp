@@ -16,16 +16,16 @@ namespace fsp
 namespace fsp::xpath_helpers
 {
   //   // split xx:yy
-  //   // result<e_tag> parse_e_tag(const std::string& etag_str);
+  //   // result<e_tag> parse_e_tag(const str_t& etag_str);
 
   //   // Parse XPath string like "/ns:root/child/grandchild" or "root/child"
-  //   result<xpath_t> from_string(const std::string& xpath_str);
+  //   result<xpath_t> from_string(const str_t& xpath_str);
 
   //   // Convert xpath_t to string representation
-  //   std::string to_string(const xpath_t& xpath);
+  //   str_t to_string(const xpath_t& xpath);
 
   //   // Validate xpath_t (no empty tags, valid characters, etc.)
-  //   bool validate(const xpath_t& xpath, std::string* error_msg = nullptr);
+  //   bool validate(const xpath_t& xpath, str_t* error_msg = nullptr);
 
   //   // Get the last tag from xpath
   //   std::optional<e_tag> last_tag(const xpath_t& xpath);

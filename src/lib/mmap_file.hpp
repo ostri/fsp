@@ -12,6 +12,7 @@
 namespace fsp
 {
   using cstr_t = std::string_view;
+  using str_t  = std::string;
 
   class mmap_file
   {
@@ -37,7 +38,7 @@ namespace fsp
     ~mmap_file();
     void                                   open(cstr_t path);
     void                                   close() noexcept;
-    [[nodiscard]] std::string_view         string_view() const;
+    [[nodiscard]] cstr_t                   string_view() const;
     [[nodiscard]] mmap_file::const_pointer data() const noexcept;
     [[nodiscard]] size_type                size() const noexcept;
     [[nodiscard]] bool                     empty() const noexcept;
@@ -53,16 +54,16 @@ namespace fsp
     static constexpr size_type             prefetch_size = 4096;
     void                                   prefetch(size_type offset, size_type count = prefetch_size) const noexcept;
     explicit                               operator bool() const noexcept;
-    [[nodiscard]] std::string_view         path() const;
+    [[nodiscard]] cstr_t                   path() const;
   private:
     const_pointer data_ = nullptr; // address of start of the file; null if error or closed
     size_type     size_ = 0;       // size of the file
     int           fd_   = -1;      // fd of the open file or -1 if file not opened
-    std::string   path_;           // path of the opened file
+    str_t         path_;           // path of the opened file
   };
 
   // Helper function for better error handling using std::expected
-  std::expected<mmap_file, std::string> try_mmap_file(const std::string& path);
+  std::expected<mmap_file, str_t>       try_mmap_file(cstr_t path);
   inline mmap_file::iterator            mmap_file::begin() const noexcept { return data_; }
   inline mmap_file::const_iterator      mmap_file::cbegin() const noexcept { return data_; }
   // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic)
@@ -86,9 +87,9 @@ namespace fsp
     }
   }
   inline mmap_file::      operator bool() const noexcept { return is_open(); }
-  inline std::string_view mmap_file::path() const { return path_; }
+  inline cstr_t           mmap_file::path() const { return path_; }
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
-  inline std::string_view mmap_file::string_view() const
+  inline cstr_t mmap_file::string_view() const
   {
     if (is_open()) return {reinterpret_cast<const char*>(data()), size()};
     return {};

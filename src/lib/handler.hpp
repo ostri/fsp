@@ -70,10 +70,10 @@ namespace fsp
     [[nodiscard]] bool is_capturing() const { return frag_depth_ != -1; }
     // Razreši NS URI za e_tag (enkrat, ko je NS context zgrajen).
     [[nodiscard]] bool tag_matches(const e_tag_wide& tag, const XMLCh* local_name, const XMLCh* ns_uri) const noexcept;
-    std::string        make_open_tag(const XMLCh* qname, const xercesc::Attributes& attrs);
+    str_t              make_open_tag(const XMLCh* qname, const xercesc::Attributes& attrs);
     str_XMLCh_t        attr_values_str(const xercesc::Attributes& attrs);
     /// prepare message to report exception
-    std::string prepare_msg(const xercesc::SAXParseException& e);
+    str_t       prepare_msg(const xercesc::SAXParseException& e);
     void        rebuild_ns_decl_for_current_level();
   private:                  /// members
     const fsp_logger& log_; // must be first logger NOLINT(cppcoreguidelines-avoid-const-or-ref-data-members)

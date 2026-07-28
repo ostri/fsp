@@ -7,6 +7,7 @@
 
 namespace fsp
 {
+  using str_t = std::string;
   // Collection of doc_counters, one per document, indexed by doc_ndx -- mirrors the
   // doc_dscr/doc_set_dscr split (one class describing a single document, one class managing
   // the whole set). Size is fixed at construction, since doc_count is already known by the time
@@ -18,7 +19,7 @@ namespace fsp
     [[nodiscard]] doc_counters&       operator[](std::size_t doc_ndx) noexcept;
     [[nodiscard]] const doc_counters& operator[](std::size_t doc_ndx) const noexcept;
     [[nodiscard]] std::size_t         size() const noexcept;
-    [[nodiscard]] std::string         dump(int offs = 0) const;
+    [[nodiscard]] str_t               dump(int offs = 0) const;
 
     // Whole-run totals, each computed by summing/counting across all documents once (not
     // maintained as a separate running counter -- see doc_counters.hpp for why).
@@ -102,10 +103,10 @@ namespace fsp
     return count;
   }
 
-  inline std::string doc_set_counter::dump(int offs) const
+  inline str_t doc_set_counter::dump(int offs) const
   {
-    auto        leading = std::string(offs, ' ');
-    std::string out;
+    auto  leading = str_t(offs, ' ');
+    str_t out;
     for (std::size_t i = 0; i < counters_.size(); ++i)
     {
       out += fmt::format("{}doc {}: {}", leading, i, counters_[i].dump());

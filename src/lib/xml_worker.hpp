@@ -41,7 +41,7 @@ namespace fsp
   //   struct err_result
   //   {
   //     int         status{}; // status of last libxml2 operation
-  //     std::string err;      // description of what is wrong
+  //     str_t err;      // description of what is wrong
   //   };
   class xml_worker
   {

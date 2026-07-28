@@ -17,7 +17,7 @@ namespace fsp
   {
   public:
     doc_dscr() = default;
-    explicit doc_dscr(const std::string& path);
+    explicit doc_dscr(cstr_t path);
     explicit doc_dscr(mmap_file&& file);
     ~doc_dscr();
     // Copy/move semantics
@@ -30,8 +30,8 @@ namespace fsp
     [[nodiscard]] bool                       empty() const noexcept;
     [[nodiscard]] size_t                     size() const noexcept;
     [[nodiscard]] const std::byte*           data() const noexcept;
-    [[nodiscard]] std::string_view           path() const;
-    [[nodiscard]] std::string_view           string_view() const;
+    [[nodiscard]] cstr_t                     path() const;
+    [[nodiscard]] cstr_t                     string_view() const;
     [[nodiscard]] std::byte                  operator[](size_t pos) const;
     [[nodiscard]] std::byte                  at(size_t pos) const;
     [[nodiscard]] auto                       begin() const noexcept;
@@ -48,14 +48,14 @@ namespace fsp
     void                            set_validation_result(doc_status result, error_info err = {}) noexcept; // SPREMENJENO iz set_status()
     [[nodiscard]] const error_info& error() const noexcept;                                                 // NOVO
   private:                                                                                                  //< methods
-    void open(const std::string& path);
+    void open(cstr_t path);
   private:
     mmap_file               doc_;             // core document functionality
     std::atomic<doc_status> status_{unknown}; // validation status of the document
     error_info              err_;             // if there is an error, here it is the error description
   };
   ///////////////////////////////////////////////////////////////////////////////////////////
-  inline doc_dscr::doc_dscr(const std::string& path)
+  inline doc_dscr::doc_dscr(cstr_t path)
   : doc_(path)
   {
   }
@@ -85,16 +85,16 @@ namespace fsp
     return *this;
   }
   // Opening/closing
-  inline void doc_dscr::open(const std::string& path) { doc_.open(path); }
+  inline void doc_dscr::open(cstr_t path) { doc_.open(path); }
   inline void doc_dscr::close() noexcept { doc_.close(); }
   // Accessors
   inline bool             doc_dscr::is_open() const noexcept { return doc_.is_open(); }
   inline bool             doc_dscr::empty() const noexcept { return doc_.empty(); }
   inline size_t           doc_dscr::size() const noexcept { return doc_.size(); }
   inline const std::byte* doc_dscr::data() const noexcept { return doc_.data(); }
-  inline std::string_view doc_dscr::path() const { return doc_.path(); }
+  inline cstr_t           doc_dscr::path() const { return doc_.path(); }
   // String view access (same as mmap_file::string_view())
-  inline std::string_view doc_dscr::string_view() const { return doc_.string_view(); }
+  inline cstr_t doc_dscr::string_view() const { return doc_.string_view(); }
   // Element access
   inline std::byte doc_dscr::operator[](size_t pos) const { return doc_[pos]; }
   inline std::byte doc_dscr::at(size_t pos) const { return doc_.at(pos); }

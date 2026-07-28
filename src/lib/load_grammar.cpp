@@ -29,7 +29,7 @@ namespace fsp
                           const gr_pool_t&                        gr_pool,
                           std::latch&                             gr_latch,
                           std::atomic<bool>&                      gr_loaded,
-                          const str_t&                            xsd_file)
+                          cstr_t                                  xsd_file)
   {
     // auto start = std::chrono::high_resolution_clock::now();
     try
@@ -49,8 +49,8 @@ namespace fsp
                               const gr_pool_t&                        gr_pool,
                               std::latch&                             gr_latch,
                               std::atomic<bool>&                      gr_loaded,
-                              std::string_view                        buf,
-                              const str_t&                            buffer_id)
+                              cstr_t                                  buf,
+                              cstr_t                                  buffer_id)
   {
     auto start = std::chrono::high_resolution_clock::now();
     try

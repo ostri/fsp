@@ -68,11 +68,11 @@ int main(int argc, const char* argv[])
 {
   using str_t = std::string;
   if (argc == 1) return help(*argv);
-  std::vector<std::string> args(argv, argv + argc); // NOLINT (cppcoreguidelines-pro-bounds-pointer-arithmetic)
+  std::vector<str_t> args(argv, argv + argc); // NOLINT (cppcoreguidelines-pro-bounds-pointer-arithmetic)
   args.erase(args.begin());
   try
   {
-    std::string        xsd_file;
+    str_t              xsd_file;
     std::vector<str_t> files;
     files.reserve(args.size());
     for (const auto& file : args)

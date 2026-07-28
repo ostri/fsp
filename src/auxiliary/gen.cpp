@@ -9,7 +9,7 @@
 #include <ctime>
 
 // Function to get current date in ISO format (YYYY-MM-DD)
-std::string getCurrentDate()
+str_t getCurrentDate()
 {
   auto        now      = std::chrono::system_clock::now();
   std::time_t now_time = std::chrono::system_clock::to_time_t(now);
@@ -25,7 +25,7 @@ std::string getCurrentDate()
 }
 
 // Function to get current date time in ISO format (YYYY-MM-DDThh:mm:ss.sssZ)
-std::string getCurrentDateTime()
+str_t getCurrentDateTime()
 {
   auto now    = std::chrono::system_clock::now();
   auto now_ms = std::chrono::time_point_cast<std::chrono::milliseconds>(now);
@@ -48,21 +48,21 @@ std::string getCurrentDateTime()
 }
 
 // Function to generate a random numeric string of given length
-std::string randomNumericString(size_t length)
+str_t randomNumericString(size_t length)
 {
   static const char                      digits[] = "0123456789"; // NOLINT(hicpp-avoid-c-arrays)
   static std::random_device              rd;
   static std::mt19937                    gen(rd());
   static std::uniform_int_distribution<> dis(0, sizeof(digits) - 2);
 
-  std::string result;
+  str_t result;
   result.reserve(length);
   for (size_t i = 0; i < length; ++i) { result += digits[dis(gen)]; } // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index)
   return result;
 }
 
 // Function to generate a random alphanumeric string of given length
-std::string randomString(size_t length)
+str_t randomString(size_t length)
 {
   // NOLINTNEXTLINE(hicpp-avoid-c-arrays)
   static const char                      alphanum[] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
@@ -70,28 +70,28 @@ std::string randomString(size_t length)
   static std::mt19937                    gen(rd());
   static std::uniform_int_distribution<> dis(0, sizeof(alphanum) - 2);
 
-  std::string result;
+  str_t result;
   result.reserve(length);
   for (size_t i = 0; i < length; ++i) { result += alphanum[dis(gen)]; } // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index)
   return result;
 }
 
 // Function to generate a random IBAN (starts with EE for Estonia)
-std::string randomIBAN()
+str_t randomIBAN()
 {
   // Generate a random 18-digit IBAN (EE + 2 check digits + 16 digits)
   // NOLINTNEXTLINE(readability-magic-numbers)
-  std::string iban = "EE" + randomNumericString(2) + randomNumericString(16);
+  str_t iban = "EE" + randomNumericString(2) + randomNumericString(16);
   return iban;
 }
 
 // Function to generate a random BICFI (8 or 11 characters)
-std::string randomBICFI()
+str_t randomBICFI()
 {
   static std::random_device rd;
   static std::mt19937       gen(rd());
 
-  std::string                     bic;
+  str_t                           bic;
   std::uniform_int_distribution<> letter_dist(0, 25); // NOLINT(readability-magic-numbers)
   std::uniform_int_distribution<> branch_dist(0, 1);
 
@@ -114,7 +114,7 @@ std::string randomBICFI()
 }
 
 // Function to generate a random amount between min and max with 2 decimal places
-std::string randomAmount(double min, double max)
+str_t randomAmount(double min, double max)
 {
   static std::random_device        rd;
   static std::mt19937              gen(rd());
@@ -127,11 +127,11 @@ std::string randomAmount(double min, double max)
 }
 
 // Function to generate a random RF Creditor Reference (ISO 11649)
-std::string randomRFCreditorReference()
+str_t randomRFCreditorReference()
 {
   // RF + 2 check digits + up to 21 alphanumeric characters
   // NOLINTNEXTLINE(readability-magic-numbers)
-  std::string rf = "RF" + randomNumericString(2) + randomString(21);
+  str_t rf = "RF" + randomNumericString(2) + randomString(21);
   return rf;
 }
 
@@ -139,14 +139,14 @@ std::string randomRFCreditorReference()
 void generateXML(int numTransactions)
 {
   // NOLINTNEXTLINE(readability-magic-numbers)
-  std::string msgId            = "MSG" + randomNumericString(10);
-  std::string creationDateTime = getCurrentDateTime();
-  std::string nbOfTxs          = std::to_string(numTransactions);
-  std::string intrBkSttlmDt    = getCurrentDate();
+  str_t msgId            = "MSG" + randomNumericString(10);
+  str_t creationDateTime = getCurrentDateTime();
+  str_t nbOfTxs          = std::to_string(numTransactions);
+  str_t intrBkSttlmDt    = getCurrentDate();
   // NOLINTNEXTLINE(readability-magic-numbers)
-  std::string ttlIntrBkSttlmAmt = std::to_string(numTransactions); // randomAmount(0.01, 999999999999999.99);
-  std::string instgAgtBIC       = randomBICFI();
-  std::string instdAgtBIC       = randomBICFI();
+  str_t ttlIntrBkSttlmAmt = std::to_string(numTransactions); // randomAmount(0.01, 999999999999999.99);
+  str_t instgAgtBIC       = randomBICFI();
+  str_t instdAgtBIC       = randomBICFI();
 
   // XML header
   std::cout << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n";
@@ -188,21 +188,21 @@ void generateXML(int numTransactions)
   for (int i = 0; i < numTransactions; ++i)
   {
     // NOLINTNEXTLINE(readability-magic-numbers)
-    std::string endToEndId = "E2E" + randomString(15);
+    str_t endToEndId = "E2E" + randomString(15);
     // NOLINTNEXTLINE(readability-magic-numbers)
-    std::string txId = "TXN" + randomNumericString(15);
+    str_t txId = "TXN" + randomNumericString(15);
     // NOLINTNEXTLINE(readability-magic-numbers)
-    std::string intrBkSttlmAmtTx = "1.00";        // randomAmount(0.01, 999999999.99);
-    std::string dbtrNm           = randomBICFI(); // Originator PSP BIC
-    std::string dbtrId           = randomBICFI(); // Originator PSP AnyBIC
-    std::string dbtrAcct         = randomIBAN();
-    std::string dbtrAgtBIC       = randomBICFI();
-    std::string cdtrAgtBIC       = randomBICFI();
-    std::string cdtrNm           = randomBICFI(); // Beneficiary PSP BIC
-    std::string cdtrId           = randomBICFI(); // Beneficiary PSP AnyBIC
-    std::string cdtrAcct         = randomIBAN();
-    std::string creditorRef      = randomRFCreditorReference();
-    std::string issuer           = "ISO";
+    str_t intrBkSttlmAmtTx = "1.00";        // randomAmount(0.01, 999999999.99);
+    str_t dbtrNm           = randomBICFI(); // Originator PSP BIC
+    str_t dbtrId           = randomBICFI(); // Originator PSP AnyBIC
+    str_t dbtrAcct         = randomIBAN();
+    str_t dbtrAgtBIC       = randomBICFI();
+    str_t cdtrAgtBIC       = randomBICFI();
+    str_t cdtrNm           = randomBICFI(); // Beneficiary PSP BIC
+    str_t cdtrId           = randomBICFI(); // Beneficiary PSP AnyBIC
+    str_t cdtrAcct         = randomIBAN();
+    str_t creditorRef      = randomRFCreditorReference();
+    str_t issuer           = "ISO";
 
     std::cout << "    <CdtTrfTxInf>\n";
     std::cout << "      <PmtId>\n";
@@ -287,7 +287,7 @@ void generateXML(int numTransactions)
 
 int main(int argc, char* argv[])
 {
-  std::vector<std::string> args(argv, argv + argc); // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic)
+  std::vector<str_t> args(argv, argv + argc); // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic)
   if (argc != 2)
   {
     std::cerr << "Usage: " << (argc > 0 ? args[0] : "xml_generator") << " <number_of_transactions>\n";

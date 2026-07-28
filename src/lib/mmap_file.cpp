@@ -34,11 +34,11 @@ namespace fsp
     return *this;
   }
   mmap_file::~mmap_file() { close(); }
-  //  void mmap_file::open(const std::string& path)
+  //  void mmap_file::open(const str_t& path)
   void mmap_file::open(cstr_t path)
   {
     close();
-    fd_ = ::open(std::string(path.data(), path.size()).data(), O_RDONLY | O_CLOEXEC); // NOLINT(hicpp-vararg)
+    fd_ = ::open(str_t(path.data(), path.size()).data(), O_RDONLY | O_CLOEXEC); // NOLINT(hicpp-vararg)
     if (fd_ == -1)
     {
       fs::path absolute = fs::absolute(path).lexically_normal();
@@ -95,7 +95,7 @@ namespace fsp
     if (pos >= size_) { throw std::out_of_range("mmap_file::at: index out of range"); }
     return data_[pos]; // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic)
   }
-  std::expected<mmap_file, std::string> try_mmap_file(const std::string& path)
+  std::expected<mmap_file, str_t> try_mmap_file(cstr_t path)
   {
     try
     {
@@ -103,7 +103,7 @@ namespace fsp
     }
     catch (const std::exception& e)
     {
-      return std::unexpected(std::string(e.what()));
+      return std::unexpected(str_t(e.what()));
     }
   }
 }; // namespace fsp

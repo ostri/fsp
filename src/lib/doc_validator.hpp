@@ -38,11 +38,11 @@ namespace fsp
       message_.clear();
     }
     [[nodiscard]] bool               has_error() const noexcept { return has_error_; }
-    [[nodiscard]] const std::string& message() const noexcept { return message_; }
+    [[nodiscard]] const str_t&       message() const noexcept { return message_; }
   private:
     void        record(const xercesc::SAXParseException& e);
     bool        has_error_ = false;
-    std::string message_;
+    str_t       message_;
   };
 
   // Narrow "V toolkit": owns one grammar pool + one SGXMLScanner-based reader, bound to a
@@ -60,7 +60,7 @@ namespace fsp
     // for infrastructure failures (e.g. the XSD itself could not be loaded/compiled) -- that
     // case is fatal for the whole run, distinct from an ordinary "this document is invalid".
     std::expected<bool, error_info>  validate(std::size_t doc_ndx);
-    [[nodiscard]] const std::string& last_error_message() const noexcept { return err_handler_.message(); }
+    [[nodiscard]] const str_t&       last_error_message() const noexcept { return err_handler_.message(); }
   private:
     void_result ensure_grammar_loaded();
   private:

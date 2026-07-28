@@ -27,8 +27,8 @@ namespace fsp
     fsp::xpath_set              targets; // NOLINT(misc-non-private-member-variables-in-classes)
     std::vector<fsp::xpath_set> xpaths;  // NOLINT(misc-non-private-member-variables-in-classes)
 
-    [[nodiscard]] std::string dump(int offs = 0) const
-    { return fmt::format("{0}targets:{1}\n{0}xpaths.size:{2}", std::string(offs, ' '), targets.dump(offs), xpaths.size()); }
+    [[nodiscard]] str_t dump(int offs = 0) const
+    { return fmt::format("{0}targets:{1}\n{0}xpaths.size:{2}", str_t(offs, ' '), targets.dump(offs), xpaths.size()); }
   };
 
   // --- build --------------------------------------------------------------------------

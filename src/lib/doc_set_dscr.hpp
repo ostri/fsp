@@ -29,9 +29,9 @@ namespace fsp
     doc_set_dscr& operator=(const doc_set_dscr&)                         = delete;
     doc_set_dscr(doc_set_dscr&&)                                         = default;
     doc_set_dscr&                              operator=(doc_set_dscr&&) = delete;
-    bool                                       add_document(const std::string& path);
+    bool                                       add_document(cstr_t path);
     bool                                       add_document(doc_dscr&& doc);
-    bool                                       set_grammar(const std::string& path);
+    bool                                       set_grammar(cstr_t path);
     bool                                       set_grammar(doc_dscr&& doc);
     [[nodiscard]] doc_dscr&                    operator[](size_type pos);
     [[nodiscard]] const doc_dscr&              operator[](size_type pos) const;
@@ -84,7 +84,7 @@ namespace fsp
    * @param path Path to the document file
    * @return true if document was successfully added
    */
-  inline bool doc_set_dscr::add_document(const std::string& path)
+  inline bool doc_set_dscr::add_document(cstr_t path)
   {
     try
     {
@@ -131,7 +131,7 @@ namespace fsp
    * @param path Path to the grammar document file
    * @return true if grammar was successfully loaded
    */
-  inline bool doc_set_dscr::set_grammar(const std::string& path)
+  inline bool doc_set_dscr::set_grammar(cstr_t path)
   {
     try
     {

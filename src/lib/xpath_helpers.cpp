@@ -9,12 +9,12 @@ namespace fsp::xpath_helpers
 //   //   /Document/iso:FIToFICstmrCdtTrf/CdtTrfTxInf
 //   //   Document/child/grandchild
 //   //   /root
-//   result<xpath_t> from_string(const std::string& xpath_str)
+//   result<xpath_t> from_string(const str_t& xpath_str)
 //   {
 //     if (xpath_str.empty()) { return std::unexpected(error_info{processor_error::invalid_xpath, "XPath je prazen", "", 0}); }
 
 //     xpath_t          result;
-//     std::string_view path = xpath_str;
+//     cstr_t path = xpath_str;
 
 //     // Odstranimo vodilni '/'
 //     if (path.starts_with('/')) path.remove_prefix(1);
@@ -27,7 +27,7 @@ namespace fsp::xpath_helpers
 //     while (! path.empty())
 //     {
 //       auto sep     = path.find('/');
-//       auto segment = (sep == std::string_view::npos) ? path : path.substr(0, sep);
+//       auto segment = (sep == cstr_t::npos) ? path : path.substr(0, sep);
 
 //       if (segment.empty())
 //       {
@@ -37,18 +37,18 @@ namespace fsp::xpath_helpers
 
 //       e_tag tag;
 //       auto  colon = segment.find(':');
-//       if (colon != std::string_view::npos)
+//       if (colon != cstr_t::npos)
 //       {
-//         tag.set_ns(std::string(segment.substr(0, colon)));
-//         tag.set_tag(std::string(segment.substr(colon + 1)));
+//         tag.set_ns(str_t(segment.substr(0, colon)));
+//         tag.set_tag(str_t(segment.substr(colon + 1)));
 //       }
 //       else
 //       {
-//         tag.set_tag(std::string(segment));
+//         tag.set_tag(str_t(segment));
 //       }
 //       result.push_back(std::move(tag));
 
-//       path = (sep == std::string_view::npos) ? std::string_view{} : path.substr(sep + 1);
+//       path = (sep == cstr_t::npos) ? cstr_t{} : path.substr(sep + 1);
 //     }
 
 //     if (result.empty())
@@ -60,9 +60,9 @@ namespace fsp::xpath_helpers
 //     return result;
 //   }
 
-//   std::string to_string(const xpath_t& xpath)
+//   str_t to_string(const xpath_t& xpath)
 //   {
-//     std::string result;
+//     str_t result;
 //     for (const auto& tag : xpath)
 //     {
 //       result += '/';
@@ -71,7 +71,7 @@ namespace fsp::xpath_helpers
 //     return result;
 //   }
 
-//   bool validate(const xpath_t& xpath, std::string* error_msg) // TODO: ostri - bug 2: error_msg as result is not ok.
+//   bool validate(const xpath_t& xpath, str_t* error_msg) // TODO: ostri - bug 2: error_msg as result is not ok.
 //   {
 //     if (xpath.empty())
 //     {

@@ -12,7 +12,7 @@ namespace fsp
 
   x_str::~x_str() { reset(); }
 
-  x_str::x_str(std::string_view utf8)
+  x_str::x_str(cstr_t utf8)
   {
     if (! utf8.empty())
     {
@@ -95,9 +95,9 @@ namespace fsp
     cached_utf8_.clear();
   }
 
-  [[nodiscard]] std::string x_str::to_string() const { return std::string(to_string_view()); }
+  [[nodiscard]] str_t x_str::to_string() const { return str_t(to_string_view()); }
 
-  [[nodiscard]] std::string_view x_str::to_string_view() const
+  [[nodiscard]] cstr_t x_str::to_string_view() const
   {
     if (empty()) return {};
     if (cached_utf8_.empty() && data_ != nullptr)
@@ -129,13 +129,13 @@ namespace fsp
   bool x_str::operator==(const XMLCh* other) const noexcept { return xercesc::XMLString::equals(data_, other); }
   bool x_str::operator!=(const XMLCh* other) const noexcept { return ! (*this == other); }
   auto x_str::operator<=>(const XMLCh* other) const noexcept { return xercesc::XMLString::compareString(data_, other) <=> 0; }
-  bool x_str::operator==(std::string_view utf8) const
+  bool x_str::operator==(cstr_t utf8) const
   {
     x_str temp(utf8);
     return *this == temp;
   }
 
-  bool x_str::operator!=(std::string_view utf8) const { return ! (*this == utf8); }
+  bool x_str::operator!=(cstr_t utf8) const { return ! (*this == utf8); }
   bool x_str::operator==(std::u16string_view u16) const
   {
     x_str temp(u16);

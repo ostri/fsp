@@ -38,15 +38,15 @@ namespace fsp
     std::size_t   pool_shard_count     = 2; // NOLINT(readability-magic-numbers)
     logger_config log_config;                  // configuration of the
     // NOLINTEND(misc-non-private-member-variables-in-classes)
-    [[nodiscard]] std::string dump(int offs) const;
+    [[nodiscard]] str_t dump(int offs) const;
   };
 
-  inline std::string processor_config::dump(int offs) const
+  inline str_t processor_config::dump(int offs) const
   {
-    std::string msg;
+    str_t msg;
     msg = fmt::format(R"({0}targets:{1}
   {0}num workers:{2})",
-                      std::string(offs, ' '),
+                      str_t(offs, ' '),
                       targets.dump(offs),
                       num_docs);
     return msg;

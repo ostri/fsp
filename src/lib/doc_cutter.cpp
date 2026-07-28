@@ -62,7 +62,7 @@ namespace fsp
       loader->setFeature(xercesc::XMLUni::fgXercesDynamic, false);
       // NOLINTEND(hicpp-no-array-decay)
 
-      const std::string xsd_path{ds_dscr_.xsd_file()};
+      const str_t       xsd_path{ds_dscr_.xsd_file()};
       auto*             grammar = loader->loadGrammar(xsd_path.c_str(), xercesc::Grammar::SchemaGrammarType, true);
       if (grammar == nullptr)
         return std::unexpected(

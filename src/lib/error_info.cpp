@@ -2,7 +2,7 @@
 namespace fsp
 {
 
-  [[nodiscard]] error_info::error_info(processor_error code, std::string msg, std::string_view path, std::size_t line, std::size_t column)
+  [[nodiscard]] error_info::error_info(processor_error code, str_t msg, cstr_t path, std::size_t line, std::size_t column)
   : code_(code)
   , message_(std::move(msg))
   , path_(path)
@@ -13,7 +13,7 @@ namespace fsp
 
   processor_error error_info::code() const { return code_; }
 
-  std::string error_info::to_string() const
+  str_t error_info::to_string() const
   {
     auto code_name = magic_enum::enum_name(code_);
 

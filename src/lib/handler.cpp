@@ -29,7 +29,7 @@ namespace fsp
     {
       xpath_wide_t tmp_vec;
       if (tmp_vec.capacity() < el.path().size()) tmp_vec.reserve(el.xpath().size());
-      for (const auto& xp : el.xpath()) { tmp_vec.emplace_back(std::string(xp.ns), std::string(xp.tag)); }
+      for (const auto& xp : el.xpath()) { tmp_vec.emplace_back(str_t(xp.ns), str_t(xp.tag)); }
       targets_wide_.push_back(tmp_vec);
     }
     auto              all_rules_mask = 0ULL;
@@ -220,7 +220,7 @@ namespace fsp
       }
     }
   }
-  [[noreturn]] void Handler::logic_error(const char* msg) const { throw std::runtime_error(std::string("internal error: ") + msg); }
+  [[noreturn]] void Handler::logic_error(const char* msg) const { throw std::runtime_error(str_t("internal error: ") + msg); }
 
   void Handler::startElement(const XMLCh*                  uri,
                              const XMLCh*                  localname,
@@ -275,7 +275,7 @@ namespace fsp
   // ============================================================================
   // Error handler
   // ============================================================================
-  inline std::string Handler::prepare_msg(const xercesc::SAXParseException& e)
+  inline str_t Handler::prepare_msg(const xercesc::SAXParseException& e)
   {
     auto col = e.getColumnNumber();
     auto row = e.getLineNumber();

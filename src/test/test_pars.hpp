@@ -5,11 +5,12 @@
 
 namespace fsp
 {
+  using str_t = std::string;
 
   struct accnt
   {
-    std::string iban_;
-    std::string bic_;
+    str_t iban_;
+    str_t bic_;
   };
 
   struct ct_txn
@@ -18,7 +19,7 @@ namespace fsp
     accnt       debtor_;
     accnt       creditor_;
     int         amount_;
-    std::string currency_;
+    str_t       currency_;
     date_t      value_date_;
   };
 

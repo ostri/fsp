@@ -41,7 +41,7 @@ int main()
 
     for (const auto& attr : fsp::xtn)
     {
-      std::string xpath_str = attr.full_xpath();
+      fsp::str_t xpath_str = attr.full_xpath();
       fmt::print("{:<15} | {:<40} | {:<7} | {:<8} | {:<7} | {}\n",
                  attr.name(),
                  attr.path(),

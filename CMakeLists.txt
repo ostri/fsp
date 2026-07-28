@@ -146,7 +146,6 @@ set(SOURCES
     ${CMAKE_SOURCE_DIR}/src/lib/lock_queue.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/xml_segment.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/mmap_file.cpp
-    ${CMAKE_SOURCE_DIR}/src/lib/e_tag.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/error_info.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/logger_config.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/processor_config.cpp

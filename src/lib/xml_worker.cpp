@@ -331,8 +331,8 @@ namespace fsp
   //     const bool  log_trace   = log_.active(fsp::lvl_enum::trace);
 
   //     // Safely handle potential null pointers from libxml2
-  //     std::string_view safe_uri = uri != nullptr ? uri : "";
-  //     std::string_view safe_tag = tag != nullptr ? tag : "";
+  //     cstr_t safe_uri = uri != nullptr ? uri : "";
+  //     cstr_t safe_tag = tag != nullptr ? tag : "";
   //     auto             depth    = tree_stack_.size() - 1; // first available on stack
   //     pp_result        result;
   //     if (depth >= tree_stack_.size()) // guard to not go too deep
@@ -368,8 +368,8 @@ namespace fsp
   //         limits.available().reset(cnt);
   //         continue;
   //       }
-  //       std::string_view xp_tag = xp.xpath()[depth].tag;
-  //       std::string_view xp_uri = xp.xpath()[depth].ns;
+  //       cstr_t xp_tag = xp.xpath()[depth].tag;
+  //       cstr_t xp_uri = xp.xpath()[depth].ns;
   //       if (log_trace) log_.trace(fmt::format("tag:{} xp tag:{} depth:{} cnt: {}", safe_tag, xp_tag, depth, cnt));
   //       if ((safe_tag == xp_tag) && (safe_uri == xp_uri)) // remember the tag value index, attribute is handled inside
   //         result.status = std::max(process_positive_xpath_element(xp, cnt, depth, seg_result), result.status);
@@ -426,16 +426,16 @@ namespace fsp
   //     if (status == 1)
   //     { // read the attribute value is attribute is found
   //       const xmlChar* val = xmlTextReaderConstValue(reader_.get());
-  //       std::string    result(val != nullptr ? reinterpret_cast<const char*>(val) : "");
+  //       str_t    result(val != nullptr ? reinterpret_cast<const char*>(val) : "");
   //       xmlTextReaderMoveToElement(reader_.get()); // return focus to current element
   //       return result;
   //     }
   //     return std::nullopt;
   //   }
-  //   std::string xml_worker::process_attribute(const xml_attr& xp) const
+  //   str_t xml_worker::process_attribute(const xml_attr& xp) const
   //   {
-  //     auto local_name = std::string(xp.attr_name());
-  //     auto uri        = std::string(xp.attr_uri());
+  //     auto local_name = str_t(xp.attr_name());
+  //     auto uri        = str_t(xp.attr_uri());
   //     auto value      = get_attribute_value_ns(local_name, uri);
   //     if (value.has_value()) [[likely]]
   //       return value.value(); // non null value

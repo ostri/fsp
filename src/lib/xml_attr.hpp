@@ -13,6 +13,7 @@
 namespace fsp
 {
   using cstr_t = std::string_view;
+  using str_t  = std::string;
 
   struct ns
   {
@@ -51,8 +52,8 @@ namespace fsp
     constexpr xml_attr(std::size_t original_ndx, const raw_attr& raw, std::span<const ns> ns_arr);
 
     // full_xpath and full_xpath_with_uri are not constexpr, since fmt::format is not constexpr
-    [[nodiscard]] std::string full_xpath() const;
-    [[nodiscard]] std::string full_xpath_with_uri() const;
+    [[nodiscard]] str_t full_xpath() const;
+    [[nodiscard]] str_t full_xpath_with_uri() const;
 
     [[nodiscard]] constexpr cstr_t      name() const { return name_; }
     [[nodiscard]] constexpr cstr_t      path() const { return path_; }
@@ -68,7 +69,7 @@ namespace fsp
     [[nodiscard]] constexpr std::size_t original_ndx() const { return original_ndx_; }
 
     // dump() ni constexpr — uporablja fmt::format
-    [[nodiscard]] std::string dump(int offs = 0) const;
+    [[nodiscard]] str_t dump(int offs = 0) const;
   private:
     static constexpr cstr_t             trim_xpath(cstr_t str);
     static constexpr cstr_t             uri_from_prefix(cstr_t prefix, std::span<const ns> ns_arr);
@@ -117,14 +118,14 @@ namespace fsp
     return result;
   }
 
-  [[nodiscard]] inline std::string xml_attr::dump(int offs) const
+  [[nodiscard]] inline str_t xml_attr::dump(int offs) const
   {
-    std::string msg_xpath;
+    str_t msg_xpath;
     // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-constant-array-index)
     for (std::size_t i = 0; i < xpath_size_; ++i) msg_xpath += fmt::format("[{}:{}]/", xpath_[i].tag, xpath_[i].ns);
 
     return fmt::format("{}name: {:15} path: {:40} is_array: {:5} is_opt {:5} attr: {}:{:15} xpath size:{:2} original ndx:{:2} {}",
-                       std::string(offs, ' '),
+                       str_t(offs, ' '),
                        name_,
                        path_,
                        is_array_,
@@ -182,10 +183,10 @@ namespace fsp
     }
   }
 
-  [[nodiscard]] inline std::string xml_attr::full_xpath() const
+  [[nodiscard]] inline str_t xml_attr::full_xpath() const
   {
     // NOLINTBEGIN(cppcoreguidelines-pro-bounds-constant-array-index)
-    std::string tmp;
+    str_t tmp;
     if (is_array())
     {
       auto last_el_ndx = xpath_size_ - 1;
@@ -201,9 +202,9 @@ namespace fsp
     // NOLINTEND(cppcoreguidelines-pro-bounds-constant-array-index)
   }
 
-  [[nodiscard]] inline std::string xml_attr::full_xpath_with_uri() const
+  [[nodiscard]] inline str_t xml_attr::full_xpath_with_uri() const
   {
-    std::string tmp;
+    str_t tmp;
     // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-constant-array-index)
     for (std::size_t i = 0; i < xpath_size_; ++i) tmp += fmt::format("/{}:{}", xpath_[i].ns, xpath_[i].tag);
     if (is_attr()) tmp += fmt::format("/@{}:{}", attr_uri(), attr_name());

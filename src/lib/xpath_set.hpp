@@ -37,7 +37,7 @@ namespace fsp
     [[nodiscard]] constexpr std::size_t last(std::size_t depth) const;
     [[nodiscard]] constexpr std::size_t first(std::size_t depth) const;
 
-    [[nodiscard]] std::string dump(int offs = 0) const;
+    [[nodiscard]] str_t dump(int offs = 0) const;
 
     [[nodiscard]] constexpr std::uint64_t elem_mask(std::size_t depth) const;
     [[nodiscard]] constexpr std::uint64_t attr_mask(std::size_t depth) const;
@@ -116,13 +116,13 @@ namespace fsp
     throw compile_error("no element at depth");
   }
   // dump() ni constexpr (fmt::format alokira) — definicija brez constexpr
-  [[nodiscard]] inline std::string xpath_set::dump(int offs) const
+  [[nodiscard]] inline str_t xpath_set::dump(int offs) const
   {
-    std::string msg_el;
+    str_t msg_el;
     for (std::size_t i = 0; i < size_; ++i)
       // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-constant-array-index)
       msg_el += fmt::format("{}\n", data_[i].dump());
-    return fmt::format("{}data.size: {} max_path_size: {}\n{}", std::string(offs, ' '), size_, max_xpath_size_, msg_el);
+    return fmt::format("{}data.size: {} max_path_size: {}\n{}", str_t(offs, ' '), size_, max_xpath_size_, msg_el);
   }
   [[nodiscard]] constexpr std::uint64_t xpath_set::elem_mask(std::size_t depth) const
   {

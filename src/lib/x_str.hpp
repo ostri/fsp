@@ -8,13 +8,14 @@
 namespace fsp
 {
   using cstr_t = std::string_view;
+  using str_t  = std::string;
   class x_str
   {
   public:
     x_str() noexcept = default;
     ~x_str();
     explicit x_str(XMLCh* ptr) noexcept;
-    explicit x_str(std::string_view utf8);
+    explicit x_str(cstr_t utf8);
     explicit x_str(std::u16string_view u16);
     x_str(const x_str& other);
     x_str(x_str&& other) noexcept;
@@ -26,17 +27,17 @@ namespace fsp
     void                           reset() noexcept;
     void                           reset(XMLCh* ptr) noexcept;
     void                           reset(XMLCh* ptr, XMLSize_t size) noexcept;
-    [[nodiscard]] std::string      to_string() const;
+    [[nodiscard]] str_t            to_string() const;
     [[nodiscard]] std::u16string   to_u16string() const;
-    [[nodiscard]] std::string_view to_string_view() const;
+    [[nodiscard]] cstr_t           to_string_view() const;
     bool                           operator==(const x_str& other) const noexcept;
     bool                           operator!=(const x_str& other) const noexcept;
     auto                           operator<=>(const x_str& other) const noexcept;
     bool                           operator==(const XMLCh* other) const noexcept;
     bool                           operator!=(const XMLCh* other) const noexcept;
     auto                           operator<=>(const XMLCh* other) const noexcept;
-    bool                           operator==(std::string_view utf8) const;
-    bool                           operator!=(std::string_view utf8) const;
+    bool                           operator==(cstr_t utf8) const;
+    bool                           operator!=(cstr_t utf8) const;
     bool                           operator==(std::u16string_view u16) const;
     bool                           operator!=(std::u16string_view u16) const;
     explicit                       operator const XMLCh*() const noexcept;
@@ -47,7 +48,7 @@ namespace fsp
   private:
     XMLCh*              data_ = nullptr;
     XMLSize_t           size_ = 0;
-    mutable std::string cached_utf8_; //< utf8 equivalent of data_
+    mutable str_t       cached_utf8_; //< utf8 equivalent of data_
   };
 } // namespace fsp
 
@@ -55,5 +56,5 @@ namespace fsp
 template <>
 struct std::hash<fsp::x_str>
 {
-  std::size_t operator()(const fsp::x_str& s) const { return std::hash<std::string>{}(s.to_string()); }
+  std::size_t operator()(const fsp::x_str& s) const { return std::hash<fsp::str_t>{}(s.to_string()); }
 };

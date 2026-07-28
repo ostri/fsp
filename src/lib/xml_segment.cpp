@@ -26,10 +26,10 @@ namespace fsp
   /**
    * @brief returns the xml doc segment as defined by mmap_base, offset and length
    *
-   * @return std::string_view
+   * @return cstr_t
    * @param mmap_base address of the start of the xml document
    */
-  std::string_view xml_segment::view(const std::byte* mmap_base) const noexcept
+  cstr_t xml_segment::view(const std::byte* mmap_base) const noexcept
   {
     const auto* base = nullptr != mmap_base ? mmap_base : nullptr;
     // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast, cppcoreguidelines-pro-bounds-pointer-arithmetic)
@@ -49,7 +49,7 @@ namespace fsp
    * @param base start of the string view where the qname is located
    * @return cstr_t qname
    */
-  cstr_t xml_segment::extract_qname_from_offset(std::string_view base) const
+  cstr_t xml_segment::extract_qname_from_offset(cstr_t base) const
   {
     if (base.empty()) throw std::logic_error("empty base in extract_qname");
     // NOLINTBEGIN(cppcoreguidelines-pro-bounds-pointer-arithmetic)
@@ -95,11 +95,11 @@ namespace fsp
    * - fragment content (copied directly from the xml doc)
    * - closing tag: < + qname + />
    * @param tree_content whole xml document as string view buffer
-   * @return std::string just segment of the tree
+   * @return str_t just segment of the tree
    */
-  [[nodiscard]] std::string xml_segment::subtree_str(std::string_view tree_content) const
+  [[nodiscard]] str_t xml_segment::subtree_str(cstr_t tree_content) const
   {
-    if (tree_content.empty()) return std::string{};
+    if (tree_content.empty()) return str_t{};
     auto  qname = extract_qname_from_offset(tree_content);
     x_str work_ns(ns_);
     x_str work_attrs(attrs_);
@@ -114,7 +114,7 @@ namespace fsp
                                    3 + qname.size();                         // </qname>
     const std::size_t active_len = ns_len + attrs_len + cont_len;
 
-    thread_local std::string result;
+    thread_local str_t result;
     if (total_len > result.capacity()) result.reserve(total_len * 2);
     result.clear(); // result is thread_local, we need to clean it before next iteration
     // --- top level opening tag ---
@@ -143,12 +143,12 @@ namespace fsp
 
     return result;
   }
-  [[nodiscard]] std::string xml_segment::dump(int offs) const
+  [[nodiscard]] str_t xml_segment::dump(int offs) const
   {
     x_str       ns(ns_);
     x_str       attrs(attrs_);
-    auto        leading = std::string(offs, ' ');
-    std::string str     = fmt::format( //
+    auto        leading = str_t(offs, ' ');
+    str_t       str     = fmt::format( //
       R"({0}id: {1} subtree type: {2} offset: {3} length: {4} doc_ndx: {5}
 {0}ns:    '{6}'
 {0}attrs: '{7}')",
@@ -162,13 +162,13 @@ namespace fsp
       attrs.to_string_view());
     return str;
   }
-  [[nodiscard]] std::string xml_segment::dump_all(std::string_view base, int offs) const //
+  [[nodiscard]] str_t xml_segment::dump_all(cstr_t base, int offs) const //
   { return dump_all(reinterpret_cast<const std::byte*>(base.data()), offs); }
-  [[nodiscard]] std::string xml_segment::dump_all(const std::byte* mmap_base, int offs) const
+  [[nodiscard]] str_t xml_segment::dump_all(const std::byte* mmap_base, int offs) const
   { //
     return fmt::format(R"({0}segment {1} [subtree type: {2}, offs: {3}, len: {4} doc_ndx: {5} ns: {6}]
   {0}{7})",
-                       std::string(offs, ' '),
+                       str_t(offs, ' '),
                        id_,
                        subtree_type_,
                        offset_,

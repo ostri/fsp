@@ -20,7 +20,7 @@ namespace fsp
   // Definirano kot inline, da je vidno v vseh prevajalnih enotah brez ODR kršitev.
   // ---------------------------------------------------------------------------
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables, cert-err58-cpp)
-  inline thread_local std::string log_thread_name = "unknown";
+  inline thread_local str_t log_thread_name = "unknown";
   // ---------------------------------------------------------------------------
   // Custom spdlog flag formatter: izpisuje log_thread_name trenutne niti.
   // Registriraj ga kot '%*' v vzorcu formatiranja.
@@ -69,12 +69,12 @@ namespace fsp
     [[nodiscard]] std::shared_ptr<spdlog::logger> get() const;
     void                                          critical(const error_info& e) const;
     void                                          error(const error_info& e) const;
-    void                                          critical(std::string_view msg) const;
-    void                                          error(std::string_view msg) const;
-    void                                          warn(std::string_view msg) const;
-    void                                          info(std::string_view msg) const;
-    void                                          debug(std::string_view msg) const;
-    void                                          trace(std::string_view msg) const;
+    void                                          critical(cstr_t msg) const;
+    void                                          error(cstr_t msg) const;
+    void                                          warn(cstr_t msg) const;
+    void                                          info(cstr_t msg) const;
+    void                                          debug(cstr_t msg) const;
+    void                                          trace(cstr_t msg) const;
     [[nodiscard]] constexpr bool                  active(lvl_enum lvl = lvl_enum::trace) const noexcept;
     [[nodiscard]] lvl_enum                        level() const noexcept;
     [[nodiscard]] str_t                           log_name() const;
@@ -82,7 +82,7 @@ namespace fsp
     void                                          make_log_name(cstr_t name) const;
     void                                          set_level(lvl_enum lvl);
   private: /// methods
-    static std::unique_ptr<spdlog::pattern_formatter> make_formatter(std::string_view pattern);
+    static std::unique_ptr<spdlog::pattern_formatter> make_formatter(cstr_t pattern);
     void                                              build(const logger_config& cfg);
   private:
     std::shared_ptr<spdlog::logger> logger_;
@@ -118,5 +118,5 @@ namespace fsp
    * log_file_path (see config/log_debug.conf.in/log_release.conf.in, generated per-program by
    * CMake into log_<program_name>_debug.conf/_release.conf).
    */
-  [[nodiscard]] logger_config load_logger_config(std::string_view program_name);
+  [[nodiscard]] logger_config load_logger_config(cstr_t program_name);
 } // namespace fsp

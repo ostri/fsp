@@ -13,30 +13,30 @@ namespace
    * trace/debug/info/warning/error/critical/off, plus the short aliases warn/err/crit).
    * @return std::nullopt if the file couldn't be opened.
    */
-  std::optional<fsp::logger_config> parse_logger_config_file(const std::string& path)
+  std::optional<fsp::logger_config> parse_logger_config_file(const fsp::str_t& path)
   {
     std::ifstream in(path);
     if (! in.is_open()) return std::nullopt;
 
     fsp::logger_config cfg;
-    std::string        line;
+    fsp::str_t         line;
     while (std::getline(in, line))
     {
       auto trimmed = fsp::trim(line);
       if (trimmed.empty() || trimmed.front() == '#') continue;
       auto eq = trimmed.find('=');
-      if (eq == std::string_view::npos) continue;
+      if (eq == fsp::cstr_t::npos) continue;
       auto key = fsp::trim(trimmed.substr(0, eq));
       auto val = fsp::trim(trimmed.substr(eq + 1));
 
       if (key == "enable_console") cfg.enable_console = (val == "true" || val == "1");
       else if (key == "enable_file") cfg.enable_file = (val == "true" || val == "1");
-      else if (key == "log_file_path") cfg.log_file_path = std::string(val);
+      else if (key == "log_file_path") cfg.log_file_path = fsp::str_t(val);
       else if (key == "log_level")
       {
         // spdlog::level::from_str() only accepts the canonical names (warning/error/critical),
         // not the short aliases some config authors might expect -- accept both spellings.
-        std::string level_str(val);
+        fsp::str_t level_str(val);
         if (level_str == "warn") level_str = "warning";
         else if (level_str == "err") level_str = "error";
         else if (level_str == "crit") level_str = "critical";
@@ -97,37 +97,37 @@ namespace fsp
       logger_->error(e.to_string());
   }
 
-  void fsp_logger::critical(std::string_view msg) const
+  void fsp_logger::critical(cstr_t msg) const
   {
     if (active(crit)) [[unlikely]]
       logger_->critical(msg);
   }
 
-  void fsp_logger::error(std::string_view msg) const
+  void fsp_logger::error(cstr_t msg) const
   {
     if (active(err)) [[unlikely]]
       logger_->error(msg);
   }
 
-  void fsp_logger::warn(std::string_view msg) const
+  void fsp_logger::warn(cstr_t msg) const
   {
     if (active(lvl_enum::warn)) [[unlikely]]
       logger_->warn(msg);
   }
 
-  void fsp_logger::info(std::string_view msg) const
+  void fsp_logger::info(cstr_t msg) const
   {
     if (active(lvl_enum::info)) [[unlikely]]
       logger_->info(msg);
   }
 
-  void fsp_logger::debug([[maybe_unused]] std::string_view msg) const
+  void fsp_logger::debug([[maybe_unused]] cstr_t msg) const
   {
     if constexpr (is_debug())
       if (active(lvl_enum::debug)) logger_->debug(msg);
   }
 
-  void fsp_logger::trace([[maybe_unused]] std::string_view msg) const
+  void fsp_logger::trace([[maybe_unused]] cstr_t msg) const
   {
     if constexpr (is_debug())
       if (active(lvl_enum::trace)) logger_->trace(msg);
@@ -142,12 +142,12 @@ namespace fsp
   }
 
   // auxiliary function: it builds spdlog::pattern_formatter with '%*' flag for the thread is.
-  std::unique_ptr<spdlog::pattern_formatter> fsp_logger::make_formatter(std::string_view pattern)
+  std::unique_ptr<spdlog::pattern_formatter> fsp_logger::make_formatter(cstr_t pattern)
   {
     std::unordered_map<char, std::unique_ptr<spdlog::custom_flag_formatter>> flags;
     flags['*'] = std::make_unique<ThreadNameFormatter>();
     return std::make_unique<spdlog::pattern_formatter>(
-      std::string(pattern), spdlog::pattern_time_type::local, spdlog::details::os::default_eol, std::move(flags));
+      str_t(pattern), spdlog::pattern_time_type::local, spdlog::details::os::default_eol, std::move(flags));
   }
 
   void fsp_logger::build(const logger_config& cfg)
@@ -184,7 +184,7 @@ namespace fsp
                                                   // level_ too
   }
 
-  logger_config load_logger_config(std::string_view program_name)
+  logger_config load_logger_config(cstr_t program_name)
   {
     // Safe: called once at startup, before any worker thread exists.
     if (const char* env_path = std::getenv("LOG_CONFIG"); env_path != nullptr && *env_path != '\0') // NOLINT(concurrency-mt-unsafe)

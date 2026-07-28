@@ -94,7 +94,7 @@ namespace fsp
     return out;
   }
 
-  void_result pipeline::add_documents(const std::vector<std::string>& xml_paths, const std::string& xsd_path)
+  void_result pipeline::add_documents(const std::vector<str_t>& xml_paths, cstr_t xsd_path)
   {
     for (const auto& file : xml_paths)
       if (! ds_dscr_.add_document(file))
@@ -207,7 +207,7 @@ namespace fsp
     std::erase_if(errors_, belongs_to_invalid_doc);
   }
 
-  std::string pipeline::build_summary(std::size_t doc_count, double elapsed_ms, std::size_t failed_count) const
+  str_t pipeline::build_summary(std::size_t doc_count, double elapsed_ms, std::size_t failed_count) const
   {
     const auto pool_capacity = pool_.size();
     const auto pool_peak     = pool_.high_water_mark();
@@ -227,7 +227,7 @@ namespace fsp
     return msg;
   }
 
-  result<doc_set_counter> pipeline::process_files(const std::vector<std::string>& xml_paths, const std::string& xsd_path, pipeline_hooks& hooks)
+  result<doc_set_counter> pipeline::process_files(const std::vector<str_t>& xml_paths, cstr_t xsd_path, pipeline_hooks& hooks)
   {
     if (xml_paths.empty())
     {

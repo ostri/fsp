@@ -46,7 +46,7 @@ namespace fsp
   }
 
   // Function to validate XML against XSD
-  bool validateXML(const std::string& xmlFile, const std::string& xsdFile, bool quietMode)
+  bool validateXML(const str_t& xmlFile, const str_t& xsdFile, bool quietMode)
   {
     // Check if files exist using std::filesystem
     if (! std::filesystem::exists(xmlFile))
@@ -143,14 +143,14 @@ int main(int argc, char* argv[])
     return 1;
   }
 
-  std::string xmlFile   = argv[1]; // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic)
-  std::string xsdFile   = argv[2]; // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic)
+  fsp::str_t  xmlFile   = argv[1]; // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic)
+  fsp::str_t  xsdFile   = argv[2]; // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic)
   bool        quietMode = false;
 
   // Check optional mode parameter
   if (argc == 4)
   {
-    std::string_view mode = argv[3]; // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic)
+    fsp::cstr_t mode = argv[3]; // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic)
     if (mode == "-q" || mode == "--quiet") { quietMode = true; }
     else
     {

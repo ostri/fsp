@@ -18,7 +18,7 @@ namespace fsp
     [[nodiscard]] int                  seg_type() const;
     [[nodiscard]] const result_values& values() const;
     result_values&                     values();
-    std::string                        dump(int offs = 0);
+    str_t                              dump(int offs = 0);
     [[nodiscard]] int                  doc_ndx() const;
   private:
     std::size_t   seg_id_   = 0;  // unique id of the segment

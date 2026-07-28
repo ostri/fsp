@@ -28,9 +28,9 @@ namespace fsp
   {
   public:
     pipeline(processor_config cfg, const fsp_logger& log, str_t parent_log_name);
-    [[nodiscard]] result<doc_set_counter> process_files(const std::vector<std::string>& xml_paths,
-                                                        const std::string&              xsd_path,
-                                                        pipeline_hooks&                 hooks = default_pipeline_hooks);
+    [[nodiscard]] result<doc_set_counter>  process_files(const std::vector<str_t>& xml_paths,
+                                                         cstr_t                    xsd_path,
+                                                         pipeline_hooks&           hooks = default_pipeline_hooks);
     [[nodiscard]] const vec_seg_result&    get_results() const;
     [[nodiscard]] const vec_seg_result&    get_errors() const;
     // [[nodiscard]] stats_t                  stats() const { return stats_; }
@@ -73,7 +73,7 @@ namespace fsp
 
     // --- process_files() broken into named phases, purely to keep each piece small and
     // separately readable -- none of these are meant to be called from anywhere else. ---
-    [[nodiscard]] void_result add_documents(const std::vector<std::string>& xml_paths, const std::string& xsd_path);
+    [[nodiscard]] void_result add_documents(const std::vector<str_t>& xml_paths, cstr_t xsd_path);
     struct run_plan
     {
       bool        run_validation; // NOLINT(misc-non-private-member-variables-in-classes)
@@ -85,7 +85,7 @@ namespace fsp
     [[nodiscard]] result<std::vector<std::unique_ptr<pipeline_worker>>> start_workers(std::size_t num_parallel, pipeline_hooks& hooks);
     static void                                                         run_workers(std::vector<std::unique_ptr<pipeline_worker>>& worker_state);
     void                                                                discard_invalid_doc_results();
-    [[nodiscard]] std::string build_summary(std::size_t doc_count, double elapsed_ms, std::size_t failed_count) const;
+    [[nodiscard]] str_t build_summary(std::size_t doc_count, double elapsed_ms, std::size_t failed_count) const;
   private:
     // NOLINTBEGIN(cppcoreguidelines-avoid-const-or-ref-data-members)
     const fsp_logger&                  log_;
