@@ -46,12 +46,12 @@ namespace fsp::work
   {
   public:
     // clang-format off
-    [[= "x:GrpHdr/MsgId"]]                 str_t     msg_id;
-    [[= "GrpHdr/NbOfTxs"]]                 big_int_t no_of_txn;
-    [[= "GrpHdr/TtlIntrBkSttlmAmt"]]       amount_t  amount_sum;
-    [[= "GrpHdr/TtlIntrBkSttlmAmt/@Ccy"]]  o_str_t   currency;
-    [[= "x:GrpHdr/CreDtTm"]]               o_ts_t    msg_ts;
-    [[= "GrpHdr/IntrBkSttlmDt"]]           o_date_t  value_date;
+    [[= "x:GrpHdr/MsgId"]]                str_t     msg_id;
+    [[= "GrpHdr/NbOfTxs"]]                big_int_t no_of_txn;
+    [[= "GrpHdr/TtlIntrBkSttlmAmt"]]      amount_t  amount_sum;
+    [[= "GrpHdr/TtlIntrBkSttlmAmt/@Ccy"]] o_str_t   currency;
+    [[= "x:GrpHdr/CreDtTm"]]              o_ts_t    msg_ts;
+    [[= "GrpHdr/IntrBkSttlmDt"]]          o_date_t  value_date;
     // clang-format on
   };
 
@@ -59,14 +59,14 @@ namespace fsp::work
   {
   public:
     // clang-format off
-    [[= "CdtTrfTxInf/PmtId/TxId"]]                 str_t    txn_id;
-    [[= "CdtTrfTxInf/DbtrAcct/Id/IBAN"]]           str_t    debtor_iban;
-    [[= "CdtTrfTxInf/DbtrAgt/FinInstnId/BICFI"]]   str_t    debtor_bic;
-    [[= "CdtTrfTxInf/CdtrAcct/Id/IBAN"]]           str_t    creditor_iban;
-    [[= "CdtTrfTxInf/CdtrAgt/FinInstnId/BICFI"]]   str_t    creditor_bic;
-    [[= "CdtTrfTxInf/IntrBkSttlmAmt"]]             amount_t amount;
-    [[= "CdtTrfTxInf/IntrBkSttlmAmt/@Ccy"]]        o_str_t  currency;
-    [[= "CdtTrfTxInf/InstgAgt/FinInstnId/BICFI"]]  m_str_t  instr_agent;
+    [[= "CdtTrfTxInf/PmtId/TxId"]]                str_t    txn_id;
+    [[= "CdtTrfTxInf/DbtrAcct/Id/IBAN"]]          str_t    debtor_iban;
+    [[= "CdtTrfTxInf/DbtrAgt/FinInstnId/BICFI"]]  str_t    debtor_bic;
+    [[= "CdtTrfTxInf/CdtrAcct/Id/IBAN"]]          str_t    creditor_iban;
+    [[= "CdtTrfTxInf/CdtrAgt/FinInstnId/BICFI"]]  str_t    creditor_bic;
+    [[= "CdtTrfTxInf/IntrBkSttlmAmt"]]            amount_t amount;
+    [[= "CdtTrfTxInf/IntrBkSttlmAmt/@Ccy"]]       o_str_t  currency;
+    [[= "CdtTrfTxInf/InstgAgt/FinInstnId/BICFI"]] m_str_t  instr_agent;
     // clang-format on
   };
 } // namespace fsp::work
