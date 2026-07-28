@@ -220,12 +220,9 @@ int main(int argc, const char* argv[])
       static_assert(txn.size() == xpath_txn.size(), "split xpaths are not ok.");
     }
     assert(all.targets.size() == all.xpaths.size());
-    //  Configure logging
-    fsp::logger_config log_cfg{.enable_console = true,
-                               .enable_file    = true,
-                               .log_file_path  = "xml_processor.log",
-                               .log_level      = spdlog::level::trace, // spdlog::level::info;
-                               .logger_name    = "fsp"};
+    //  Configure logging -- see fsp::load_logger_config() for the LOG_CONFIG env var /
+    //  log_debug.log / log_release.log lookup chain.
+    auto log_cfg = fsp::load_logger_config();
 
     const auto no_of_cores = 16U; // number of paralell worker threads
 

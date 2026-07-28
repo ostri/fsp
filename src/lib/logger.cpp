@@ -1,5 +1,51 @@
 #include "logger.hpp"
 #include <spdlog/pattern_formatter.h>
+#include <cstdlib>
+#include <fstream>
+#include <iostream>
+#include <optional>
+
+namespace
+{
+  /**
+   * @brief Parses a simple "key=value" logger config file (# comments and blank lines ignored).
+   * Recognized keys: enable_console, enable_file, log_file_path, log_level (spdlog level name:
+   * trace/debug/info/warning/error/critical/off, plus the short aliases warn/err/crit).
+   * @return std::nullopt if the file couldn't be opened.
+   */
+  std::optional<fsp::logger_config> parse_logger_config_file(const std::string& path)
+  {
+    std::ifstream in(path);
+    if (! in.is_open()) return std::nullopt;
+
+    fsp::logger_config cfg;
+    std::string        line;
+    while (std::getline(in, line))
+    {
+      auto trimmed = fsp::trim(line);
+      if (trimmed.empty() || trimmed.front() == '#') continue;
+      auto eq = trimmed.find('=');
+      if (eq == std::string_view::npos) continue;
+      auto key = fsp::trim(trimmed.substr(0, eq));
+      auto val = fsp::trim(trimmed.substr(eq + 1));
+
+      if (key == "enable_console") cfg.enable_console = (val == "true" || val == "1");
+      else if (key == "enable_file") cfg.enable_file = (val == "true" || val == "1");
+      else if (key == "log_file_path") cfg.log_file_path = std::string(val);
+      else if (key == "log_level")
+      {
+        // spdlog::level::from_str() only accepts the canonical names (warning/error/critical),
+        // not the short aliases some config authors might expect -- accept both spellings.
+        std::string level_str(val);
+        if (level_str == "warn") level_str = "warning";
+        else if (level_str == "err") level_str = "error";
+        else if (level_str == "crit") level_str = "critical";
+        cfg.log_level = spdlog::level::from_str(level_str);
+      }
+    }
+    return cfg;
+  }
+} // namespace
 
 namespace fsp
 {
@@ -127,13 +173,30 @@ namespace fsp
       s->set_formatter(make_formatter("[%Y-%m-%d %H:%M:%S.%e] [%*] [%^%-5l%$] %v"));
       sinks.push_back(std::move(s));
     }
-    logger_ = std::make_shared<spdlog::logger>(cfg.logger_name, sinks.begin(), sinks.end());
+    // spdlog requires a name here, but this logger is never registered in spdlog's global
+    // registry and the log pattern doesn't use %n, so this value never surfaces anywhere.
+    logger_ = std::make_shared<spdlog::logger>("fsp", sinks.begin(), sinks.end());
     logger_->set_level(cfg.log_level);
     logger_->flush_on(spdlog::level::err);
     logger_->flush();
     level_ = static_cast<uint8_t>(cfg.log_level); // caching level to speedup
                                                   // should one implement set_level method, it must set
                                                   // level_ too
+  }
+
+  logger_config load_logger_config()
+  {
+    // Safe: called once at startup, before any worker thread exists.
+    if (const char* env_path = std::getenv("LOG_CONFIG"); env_path != nullptr && *env_path != '\0') // NOLINT(concurrency-mt-unsafe)
+    {
+      if (auto cfg = parse_logger_config_file(env_path)) return *cfg;
+      std::cerr << "LOG_CONFIG='" << env_path << "' could not be read -- falling back.\n";
+    }
+
+    const auto* fallback_path = is_debug() ? "log_debug.log" : "log_release.log";
+    if (auto cfg = parse_logger_config_file(fallback_path)) return *cfg;
+
+    return logger_config{.enable_console = true, .enable_file = false, .log_level = spdlog::level::info};
   }
 
 } // namespace fsp

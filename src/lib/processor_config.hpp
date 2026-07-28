@@ -45,12 +45,10 @@ namespace fsp
   {
     std::string msg;
     msg = fmt::format(R"({0}targets:{1}
-  {0}num workers:{2}
-  {0}logger: {3})",
+  {0}num workers:{2})",
                       std::string(offs, ' '),
                       targets.dump(offs),
-                      num_docs,
-                      log_config.logger_name);
+                      num_docs);
     return msg;
   }
 } // namespace fsp

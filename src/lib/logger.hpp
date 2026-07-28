@@ -105,4 +105,14 @@ namespace fsp
   }
 
   inline void fsp_logger::make_log_name(cstr_t name) const { make_log_name(name, ""); };
+
+  /**
+   * @brief Loads a logger_config, trying in order:
+   * 1. LOG_CONFIG environment variable -> path to a config file (if set and non-empty).
+   * 2. log_debug.log / log_release.log (matching is_debug()/is_release()) in the current
+   *    working directory, if LOG_CONFIG was unset, empty, or pointed at a file that couldn't
+   *    be read.
+   * 3. Hardcoded fallback if neither file could be read: console logging, level info.
+   */
+  [[nodiscard]] logger_config load_logger_config();
 } // namespace fsp

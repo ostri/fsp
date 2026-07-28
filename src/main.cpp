@@ -92,13 +92,9 @@ int main(int argc, const char* argv[])
     assert(all.targets.size() == all.xpaths.size());
     std::vector<std::string> files;
     files.push_back(xml_file);
-    //  Configure logging
-
-    auto log_cfg = fsp::logger_config{.enable_console = true,
-                                      .enable_file    = true,
-                                      .log_file_path  = "xml_processor.log",
-                                      .log_level      = spdlog::level::trace, // spdlog::level::info;
-                                      .logger_name    = "fsp"};
+    //  Configure logging -- see fsp::load_logger_config() for the LOG_CONFIG env var /
+    //  log_debug.log / log_release.log lookup chain.
+    auto log_cfg = fsp::load_logger_config();
 
     const auto no_of_workers = 20U;                  // number of paralell workers
     auto       cfg           = fsp::processor_config{//
