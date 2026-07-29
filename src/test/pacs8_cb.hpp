@@ -35,9 +35,9 @@ public:
   void on_wrk_end(int worker_id, fsp::cstr_t thread_name, const fsp::fsp_logger& log) override;
   void on_doc_open(std::size_t doc_ndx, const fsp::doc_dscr& dscr, const fsp::fsp_logger& log) override;
   void on_doc_close(std::size_t doc_ndx, fsp::doc_status status, const fsp::doc_dscr& dscr, const fsp::fsp_logger& log) override;
-  bool on_seg_proc(const fsp::xml_segment&    segment,
-                   const fsp::segment_result& result,
-                   bool                       is_first,
-                   bool                       is_last,
-                   const fsp::fsp_logger&     log) override;
+  bool on_seg_proc(const fsp::xml_segment& segment,
+                   fsp::segment_result&    result,
+                   bool                    is_first,
+                   bool                    is_last,
+                   const fsp::fsp_logger&  log) override;
 };

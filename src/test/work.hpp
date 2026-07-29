@@ -1,6 +1,8 @@
 #pragma once
 
 #include "reflection.hpp"
+#include "ach/utility.hpp"
+#include "user_types.hpp"
 
 namespace fsp::work
 {
@@ -29,14 +31,14 @@ namespace fsp::work
   {
   public:
     // clang-format off
-    [[= "CdtTrfTxInf/PmtId/TxId"]]                str_t    txn_id;
-    [[= "CdtTrfTxInf/DbtrAcct/Id/IBAN"]]          str_t    debtor_iban;
-    [[= "CdtTrfTxInf/DbtrAgt/FinInstnId/BICFI"]]  str_t    debtor_bic;
-    [[= "CdtTrfTxInf/CdtrAcct/Id/IBAN"]]          str_t    creditor_iban;
-    [[= "CdtTrfTxInf/CdtrAgt/FinInstnId/BICFI"]]  str_t    creditor_bic;
-    [[= "CdtTrfTxInf/IntrBkSttlmAmt"]]            amount_t amount;
-    [[= "CdtTrfTxInf/IntrBkSttlmAmt/@Ccy"]]       o_str_t  currency;
-    [[= "CdtTrfTxInf/InstgAgt/FinInstnId/BICFI"]] m_str_t  instr_agent;
+    [[= "CdtTrfTxInf/PmtId/TxId"]]                str_t                                         txn_id;
+    [[= "CdtTrfTxInf/DbtrAcct/Id/IBAN"]]           validated_t<fsp::ach::iban_t>                 debtor_iban;
+    [[= "CdtTrfTxInf/DbtrAgt/FinInstnId/BICFI"]]   str_t                                         debtor_bic;
+    [[= "CdtTrfTxInf/CdtrAcct/Id/IBAN"]]           validated_t<fsp::ach::iban_t>                 creditor_iban;
+    [[= "CdtTrfTxInf/CdtrAgt/FinInstnId/BICFI"]]   str_t                                         creditor_bic;
+    [[= "CdtTrfTxInf/IntrBkSttlmAmt"]]             validated_t<usr::bounded_amount_t<1, 50000>>  amount; // NOLINT(readability-magic-numbers)
+    [[= "CdtTrfTxInf/IntrBkSttlmAmt/@Ccy"]]        o_str_t                                       currency;
+    [[= "CdtTrfTxInf/InstgAgt/FinInstnId/BICFI"]]  m_str_t                                       instr_agent;
     // clang-format on
   };
 } // namespace fsp::work

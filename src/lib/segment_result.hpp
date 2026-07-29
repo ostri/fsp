@@ -1,5 +1,6 @@
 #pragma once
 
+#include "error_info.hpp"
 #include "result_values.hpp"
 #include <fmt/format.h>
 #include <utility>
@@ -19,11 +20,21 @@ namespace fsp
     result_values&                     values();
     str_t                              dump(int offs = 0);
     [[nodiscard]] int                  doc_ndx() const;
+
+    /**
+     * @brief Validation errors collected while materializing this segment's fields (see
+     * fsp::validated_t<>/materialize<T>() in reflection.hpp) -- a validated field stores an
+     * index into this vector instead of embedding fsp::error_info inline, keeping the field's
+     * own storage small and trivially copyable even though validation itself rarely fails.
+     */
+    [[nodiscard]] const std::vector<error_info>& errors() const;
+    std::vector<error_info>&                     errors();
   private:
-    std::size_t   seg_id_   = 0;  // unique id of the segment
-    int           seg_type_ = -1; // xpath index that was used to partiion the xml to get this subtree
-    int           doc_ndx_  = -1; // document id where this segment_result occurred
-    result_values values_;        // result values
+    std::size_t             seg_id_   = 0;  // unique id of the segment
+    int                     seg_type_ = -1; // xpath index that was used to partiion the xml to get this subtree
+    int                     doc_ndx_  = -1; // document id where this segment_result occurred
+    result_values           values_;        // result values
+    std::vector<error_info> errors_;        // per-field validation errors, reset alongside the rest of this slot
   };
   using vec_seg_result = std::vector<segment_result>;
   //////////////////////////////////////////////////////////////////////
@@ -45,4 +56,6 @@ namespace fsp
   inline int                  segment_result::doc_ndx() const { return doc_ndx_; }
   inline const result_values& segment_result::values() const { return values_; }
   inline result_values&       segment_result::values() { return values_; }
+  inline const std::vector<error_info>& segment_result::errors() const { return errors_; }
+  inline std::vector<error_info>&       segment_result::errors() { return errors_; }
 } // namespace fsp

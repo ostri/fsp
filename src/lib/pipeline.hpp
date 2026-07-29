@@ -54,7 +54,7 @@ namespace fsp
     void record_doc_close(std::size_t doc_ndx, std::size_t segment_count);
     // Runs the on_seg_proc hook and folds the resulting verdict into doc_counters.
     // Returns that verdict.
-    bool record_segment_done(const xml_segment& segment, const segment_result& result, pipeline_hooks& hooks);
+    bool record_segment_done(const xml_segment& segment, segment_result& result, pipeline_hooks& hooks);
     // For a segment that failed technically (never reached process_segment()'s value extraction,
     // so there's no result_values to hand to a hook) -- bookkeeping only, no hook call.
     void                                 record_segment_failed(std::size_t doc_ndx, std::size_t seg_id);

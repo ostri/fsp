@@ -82,7 +82,7 @@ void pacs8_cb::on_doc_close(std::size_t doc_ndx, fsp::doc_status status, const f
 }
 
 bool pacs8_cb::on_seg_proc([[maybe_unused]] const fsp::xml_segment& segment,
-                           const fsp::segment_result&               result,
+                           fsp::segment_result&                     result,
                            bool                                     is_first,
                            bool                                     is_last,
                            const fsp::fsp_logger&                   log)
@@ -95,8 +95,10 @@ bool pacs8_cb::on_seg_proc([[maybe_unused]] const fsp::xml_segment& segment,
   else ++segments_error;
 
   // materialize_variant() hands back the segment as the developer's own work.hpp schema type
-  // (pacs8_header or pacs8_txn) instead of the generic, name-indexed result_values.
-  auto seg = fsp::materialize_variant<^^fsp::work>(result.seg_type(), result.values());
+  // (pacs8_header or pacs8_txn) instead of the generic, name-indexed result_values. result is
+  // passed by reference (not result.values()) because a failed validated_t<X> field appends its
+  // error_info to result.errors() during materialization.
+  auto seg = fsp::materialize_variant<^^fsp::work>(result.seg_type(), result);
   std::visit(
     [&]<typename T>(const T& s)
     {
@@ -114,6 +116,8 @@ bool pacs8_cb::on_seg_proc([[maybe_unused]] const fsp::xml_segment& segment,
       }
       else if constexpr (std::is_same_v<T, fsp::work::pacs8_txn>)
       {
+        const fsp::str_t iban_str = s.debtor_iban ? s.debtor_iban->value
+                                                   : fmt::format("<invalid: {}>", result.errors()[s.debtor_iban.error()].to_string());
         log.debug(fmt::format("[pacs8_cb] {:12}: seg_id={} doc_ndx={} is_first={} is_last={} ok={} txn: txn_id='{}' debtor_iban={}",
                               "on_seg_proc",
                               seg_id,
@@ -122,7 +126,7 @@ bool pacs8_cb::on_seg_proc([[maybe_unused]] const fsp::xml_segment& segment,
                               is_last,
                               ok,
                               s.txn_id,
-                              s.debtor_iban));
+                              iban_str));
       }
       else static_assert(sizeof(T) == 0, "on_seg_proc: unhandled fsp::work schema type -- add a branch above");
     },

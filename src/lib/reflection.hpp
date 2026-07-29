@@ -1,10 +1,13 @@
 #pragma once
 #include "compile_error.hpp"
+#include "error_info.hpp"
 #include "parsing_util.hpp"
 #include "result_values.hpp"
+#include "segment_result.hpp"
 #include "xml_attr.hpp"
 #include <array>
 #include <charconv>
+#include <expected>
 #include <meta>
 #include <optional>
 #include <string_view>
@@ -120,6 +123,49 @@ namespace fsp
   };
   template <typename FieldType>
   inline constexpr bool is_vector_v = is_vector<FieldType>::value;
+
+  /**
+   * @brief Field type for a validated scalar: X on success, or an index into the owning
+   * segment_result::errors() on failure (see materialize<T>() below).
+   * @details Deliberately std::expected<X, int> rather than std::expected<X, error_info> --
+   * error_info carries two owning std::string members (~90 bytes), so embedding it inline would
+   * make every validated field pay that size, and lose trivial-copyability, even on the (common)
+   * success path where no error ever occurs. An int index keeps a validated field exactly as
+   * small/trivial as X + int, at the cost of the field alone not being interpretable without its
+   * owning segment_result.
+   * @tparam X the wrapped, self-validating field type -- must provide
+   * `static std::expected<X, error_info> parse(cstr_t)` (see is_validated_v below and e.g.
+   * fsp::ach::iban_t in ach/utility.hpp)
+   */
+  template <typename X>
+  using validated_t = std::expected<X, int>;
+
+  /** @brief True iff FieldType is a validated_t<X> (i.e. std::expected<X, int>) for some X. */
+  template <typename>
+  struct is_validated : std::false_type
+  {
+  };
+  template <typename X>
+  struct is_validated<std::expected<X, int>> : std::true_type
+  {
+  };
+  template <typename FieldType>
+  inline constexpr bool is_validated_v = is_validated<FieldType>::value;
+
+  /**
+   * @brief o_- and m_-prefixed validated_t<X> pairs, matching the naming convention used for
+   * o_str_t and m_str_t in parsing_util.hpp: o_validated_t<X> is an optional validated field (0
+   * or 1 occurrences), m_validated_t<X> is a fixed-capacity (max_values) array of
+   * independently-validated occurrences -- each element gets its own parse call and its own
+   * error_info, see convert_scalar()'s is_validated_v branch. Purely naming convenience:
+   * materialize<T>() already supports std::optional<validated_t<X>> and
+   * std::array<validated_t<X>, N> directly, via the same is_optional_v and is_fixed_array_v
+   * dispatch every other field type uses.
+   */
+  template <typename X>
+  using o_validated_t = std::optional<validated_t<X>>;
+  template <typename X>
+  using m_validated_t = std::array<validated_t<X>, max_values>;
 
   /**
    * @brief Read a field's [[= "path"]] annotation into a raw_attr, taking the name from the
@@ -282,9 +328,12 @@ namespace fsp
    * class's field types.
    * @tparam FieldType the target field's own declared C++ type (or a vector/array field's own
    * value_type)
+   * @param errors the owning segment_result's error list -- a validated_t<X> field that fails
+   * X::parse() appends its error_info here and stores the resulting index instead (see
+   * is_validated_v/validated_t above)
    */
   template <typename FieldType>
-  FieldType convert_scalar(cstr_t s)
+  FieldType convert_scalar(cstr_t s, std::vector<error_info>& errors)
   {
     if constexpr (std::is_same_v<FieldType, str_t>) return str_t(s);
     else if constexpr (std::is_same_v<FieldType, big_int_t>)
@@ -308,10 +357,19 @@ namespace fsp
     else if constexpr (std::is_same_v<FieldType, ts_t>) return parse_iso_datetime(s);
     else if constexpr (std::is_same_v<FieldType, date_t>) return parse_iso_date(s);
     else if constexpr (std::is_same_v<FieldType, amount_t>) return parse_iso_amount(s);
-    else if constexpr (is_optional_v<FieldType>) return convert_scalar<typename FieldType::value_type>(s);
+    else if constexpr (is_optional_v<FieldType>) return convert_scalar<typename FieldType::value_type>(s, errors);
+    else if constexpr (is_validated_v<FieldType>)
+    {
+      using X   = typename FieldType::value_type;
+      auto pars = X::parse(s);
+      if (pars) return FieldType{*std::move(pars)};
+      errors.push_back(std::move(pars.error()));
+      return FieldType{std::unexpect, static_cast<int>(errors.size() - 1)};
+    }
     else static_assert(
       sizeof(FieldType) == 0,
-      "materialize: unsupported field type (only str_t, big_int_t, int_t, small_int_t, ts_t, date_t, amount_t and std::optional<> of those so far)");
+      "materialize: unsupported field type (only str_t, big_int_t, int_t, small_int_t, ts_t, date_t, amount_t, validated_t<X> and "
+      "std::optional<> of those so far)");
   }
 
   /**
@@ -335,13 +393,15 @@ namespace fsp
    * would need more than max_values repeats of the same xpath to hit this). Slots beyond the
    * found count keep their default-constructed value, same as any other not-found field.
    * @tparam T a schema class (see work.hpp) whose fields are all currently either str_t,
-   * big_int_t, int_t, small_int_t, ts_t, date_t, amount_t, an o_*-named std::optional<> of one
-   * of those, or a std::vector<>/m_*-named std::array<> of one of those
-   * @param values one segment's extracted values, as produced for T's own subtree_type()
+   * big_int_t, int_t, small_int_t, ts_t, date_t, amount_t, validated_t<X>, an o_*-named
+   * std::optional<> of one of those, or a std::vector<>/m_*-named std::array<> of one of those
+   * @param seg the segment_result to materialize from -- values() supplies the extracted
+   * strings, errors() receives any validated_t<X> field's error_info (see convert_scalar())
    */
   template <typename T>
-  T materialize(const result_values& values)
+  T materialize(segment_result& seg)
   {
+    const result_values&  values  = seg.values();
     T                     out{};
     static constexpr auto ctx     = std::meta::access_context::unchecked();
     static constexpr auto members = std::define_static_array(std::meta::nonstatic_data_members_of(^^T, ctx));
@@ -353,7 +413,7 @@ namespace fsp
         using field_t = typename[:std::meta::type_of(m):];
         if constexpr (is_vector_v<field_t>)
         {
-          for (const auto& s : values.values(name)) out.[:m:].push_back(convert_scalar<typename field_t::value_type>(s));
+          for (const auto& s : values.values(name)) out.[:m:].push_back(convert_scalar<typename field_t::value_type>(s, seg.errors()));
         }
         else if constexpr (is_fixed_array_v<field_t>)
         {
@@ -362,10 +422,10 @@ namespace fsp
           for (const auto& s : values.values(name))
           {
             if (i >= capacity) break;
-            out.[:m:][i++] = convert_scalar<typename field_t::value_type>(s);
+            out.[:m:][i++] = convert_scalar<typename field_t::value_type>(s, seg.errors());
           }
         }
-        else out.[:m:] = convert_scalar<field_t>(values.value(name));
+        else out.[:m:] = convert_scalar<field_t>(values.value(name), seg.errors());
       }
     }
     return out;
@@ -406,12 +466,12 @@ namespace fsp
 
   /** @brief Pack-deduction helper: recovers Ts... from a variant_of_t<Namespace, Base> pointer. */
   template <typename... Ts>
-  std::variant<Ts...> materialize_variant_impl(int seg_type, const result_values& values, std::variant<Ts...>*)
+  std::variant<Ts...> materialize_variant_impl(int seg_type, segment_result& seg, std::variant<Ts...>*)
   {
     std::variant<Ts...> out;
     int                 i        = 0;
     bool                assigned = false;
-    ((i++ == seg_type ? (out = materialize<Ts>(values), assigned = true) : false), ...);
+    ((i++ == seg_type ? (out = materialize<Ts>(seg), assigned = true) : false), ...);
     if (! assigned) throw compile_error("materialize_variant: seg_type out of range for Namespace's schema classes");
     return out;
   }
@@ -425,10 +485,10 @@ namespace fsp
    * @tparam Namespace reflection of the namespace holding the schema classes
    * @tparam Base      marker base class identifying segment-schema classes
    * @param seg_type declaration-order index of the segment's own schema class within Namespace
-   * @param values   the segment's extracted values, as produced for that schema class
+   * @param seg      the segment_result to materialize from (see materialize<T>() above)
    */
   template <std::meta::info Namespace, typename Base = seg_schema>
-  variant_of_t<Namespace, Base> materialize_variant(int seg_type, const result_values& values)
-  { return materialize_variant_impl(seg_type, values, static_cast<variant_of_t<Namespace, Base>*>(nullptr)); }
+  variant_of_t<Namespace, Base> materialize_variant(int seg_type, segment_result& seg)
+  { return materialize_variant_impl(seg_type, seg, static_cast<variant_of_t<Namespace, Base>*>(nullptr)); }
 
 }; // namespace fsp

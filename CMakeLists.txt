@@ -189,6 +189,7 @@ set(SOURCES
     ${CMAKE_SOURCE_DIR}/src/lib/pipeline_worker.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/pipeline.cpp
     ${CMAKE_SOURCE_DIR}/src/lib/doc_validator.cpp
+    ${CMAKE_SOURCE_DIR}/src/ach/utility.cpp
 )
 # --- 5. Define targets ---
 set(b_target fsp_lib) # name of the target

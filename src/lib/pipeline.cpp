@@ -49,7 +49,7 @@ namespace fsp
     if ((*doc_counters_)[doc_ndx].record_doc_close(segment_count)) log_doc_done(doc_ndx);
   }
 
-  bool pipeline::record_segment_done(const xml_segment& segment, const segment_result& result, pipeline_hooks& hooks)
+  bool pipeline::record_segment_done(const xml_segment& segment, segment_result& result, pipeline_hooks& hooks)
   {
     const auto doc_ndx         = static_cast<std::size_t>(result.doc_ndx());
     auto&      counters        = (*doc_counters_)[doc_ndx];
