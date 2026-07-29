@@ -5,6 +5,12 @@
 #include <cstddef>
 #include <span>
 
+namespace fsp::work
+{
+  class pacs8_header;
+  class pacs8_txn;
+} // namespace fsp::work
+
 /**
  * @brief Demo pipeline_hooks: every hook logs its own name and its parameters at info level.
  *
@@ -16,7 +22,6 @@ class pacs8_cb : public fsp::pipeline_hooks_crtp<pacs8_cb>
 {
 public:
   std::size_t documents_seen = 0; // NOLINT(misc-non-private-member-variables-in-classes)
-  std::size_t segments_seen  = 0; // NOLINT(misc-non-private-member-variables-in-classes)
   std::size_t segments_ok    = 0; // NOLINT(misc-non-private-member-variables-in-classes)
   std::size_t segments_error = 0; // NOLINT(misc-non-private-member-variables-in-classes)
 
@@ -40,4 +45,19 @@ public:
                    bool                    is_first,
                    bool                    is_last,
                    const fsp::fsp_logger&  log) override;
+private:
+  /**
+   * @brief Per-segment-type processing, factored out of on_seg_proc() so it stays pure plumbing.
+   * Each returns its own semantic verdict (true = ok) for the segment it was given.
+   */
+  [[nodiscard]] bool process_header(const fsp::work::pacs8_header& hdr,
+                                    const fsp::segment_result&     result,
+                                    bool                           is_first,
+                                    bool                           is_last,
+                                    const fsp::fsp_logger&         log) const;
+  [[nodiscard]] bool process_txn(const fsp::work::pacs8_txn& txn,
+                                 const fsp::segment_result&  result,
+                                 bool                        is_first,
+                                 bool                        is_last,
+                                 const fsp::fsp_logger&      log) const;
 };
