@@ -368,12 +368,21 @@ if(BUILD_TESTING)
     set(${b_target}_SOURCES
         ${CMAKE_SOURCE_DIR}/src/test/test_x_str.cpp
         ${CMAKE_SOURCE_DIR}/src/test/test_xerces_mgr.cpp
+        ${CMAKE_SOURCE_DIR}/src/test/test_lock_queue.cpp
+        ${CMAKE_SOURCE_DIR}/src/test/test_mmap_file.cpp
+        ${CMAKE_SOURCE_DIR}/src/test/test_logger.cpp
         ${CMAKE_SOURCE_DIR}/src/common/xercesc_helpers/x_str.cpp
         ${CMAKE_SOURCE_DIR}/src/common/xercesc_helpers/xerces_mgr.cpp
+        ${CMAKE_SOURCE_DIR}/src/common/mmap/mmap_file.cpp
+        ${CMAKE_SOURCE_DIR}/src/common/logger/logger.cpp
+        ${CMAKE_SOURCE_DIR}/src/common/logger/logger_config.cpp
+        ${CMAKE_SOURCE_DIR}/src/importer/error_info.cpp
     )
     set(FSP_TARGET_${b_target}_LIBS
         Catch2::Catch2WithMain
         fmt::fmt
+        spdlog::spdlog
+        magic_enum::magic_enum
         XercesC::XercesC
     )
     add_fsp_target(${b_target} EXECUTABLE ${${b_target}_SOURCES})
