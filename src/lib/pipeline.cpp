@@ -5,12 +5,12 @@
 
 namespace fsp
 {
-  pipeline::pipeline(processor_config cfg, const fsp_logger& log, str_t parent_log_name)
+  pipeline::pipeline(const processor_config& cfg, const fsp_logger& log, str_t parent_log_name)
   : log_(log)
   , cfg_(std::move(cfg))
   , parent_log_name_(std::move(parent_log_name))
   , ds_dscr_(log_)
-  , pool_(log_, 1024UL * 1024UL * 8UL, std::max<std::size_t>(1, cfg_.pool_shard_count)) // NOLINT(readability-magic-numbers)
+  , seg_pool_(log_, 1024UL * 1024UL * 8UL, std::max<std::size_t>(1, cfg_.pool_shard_count)) // NOLINT(readability-magic-numbers)
   {
   }
 
@@ -24,7 +24,7 @@ namespace fsp
     if (docs_remaining_to_cut_.fetch_sub(1, std::memory_order_acq_rel) == 1)
     {
       log_.info("All documents accounted for (cut or skipped) -- closing the shared ready_queue_.");
-      pool_.ready_queue_close();
+      seg_pool_.ready_queue_close();
     }
   }
 
@@ -210,8 +210,8 @@ namespace fsp
 
   str_t pipeline::build_summary(std::size_t doc_count, double elapsed_ms, std::size_t failed_count) const
   {
-    const auto pool_capacity = pool_.size();
-    const auto pool_peak     = pool_.high_water_mark();
+    const auto pool_capacity = seg_pool_.size();
+    const auto pool_peak     = seg_pool_.high_water_mark();
     const auto pool_pct      = pool_capacity > 0 ? (static_cast<double>(pool_peak) / static_cast<double>(pool_capacity)) * 100.0
                                                  : 0.0; // NOLINT(readability-magic-numbers)
     auto       msg           = fmt::format(R"(

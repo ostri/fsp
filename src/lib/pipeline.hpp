@@ -27,7 +27,7 @@ namespace fsp
   class pipeline
   {
   public:
-    pipeline(processor_config cfg, const fsp_logger& log, str_t parent_log_name);
+    pipeline(const processor_config& cfg, const fsp_logger& log, str_t parent_log_name);
     [[nodiscard]] result<doc_set_counter> process_files(const std::vector<str_t>& xml_paths,
                                                         cstr_t                    xsd_path,
                                                         pipeline_hooks&           hooks = default_pipeline_hooks);
@@ -58,7 +58,7 @@ namespace fsp
     // For a segment that failed technically (never reached process_segment()'s value extraction,
     // so there's no result_values to hand to a hook) -- bookkeeping only, no hook call.
     void                                 record_segment_failed(std::size_t doc_ndx, std::size_t seg_id);
-    [[nodiscard]] segment_pool&          pool() noexcept { return pool_; }
+    [[nodiscard]] segment_pool&          pool() noexcept { return seg_pool_; }
     [[nodiscard]] const doc_set_dscr&    ds_dscr() const noexcept { return ds_dscr_; }
     [[nodiscard]] const doc_set_counter& doc_counters() const noexcept { return *doc_counters_; }
     [[nodiscard]] vec_seg_result&        results() noexcept { return results_; }
@@ -88,25 +88,26 @@ namespace fsp
     [[nodiscard]] str_t build_summary(std::size_t doc_count, double elapsed_ms, std::size_t failed_count) const;
   private:
     // NOLINTBEGIN(cppcoreguidelines-avoid-const-or-ref-data-members)
-    const fsp_logger&              log_;
-    processor_config               cfg_;
-    str_t                          parent_log_name_;
-    doc_set_dscr                   ds_dscr_;
-    segment_pool                   pool_;
-    lock_queue<std::size_t>        c_queue_;
-    lock_queue<std::size_t>        v_queue_;
-    std::atomic<std::size_t>       docs_remaining_to_cut_{0};
-    std::size_t                    max_concurrent_cutters_{1}; //< computed in process_files()
-    std::atomic<std::size_t>       threads_cutting_{0};
-    std::optional<doc_set_counter> doc_counters_; //< per-document timing + outcome counts, sized to doc_count in process_files()
-    vec_seg_result                 results_;
-    vec_seg_result                 errors_;
-    mutable std::mutex             results_mutex_;
-    mutable std::mutex             errors_mutex_;
-    std::mutex                     first_error_mutex_;
-    std::optional<error_info>      first_error_;
-    stats_t                        stats_{};
-    s_clock                        start_time_ = std::chrono::steady_clock::now();
+    const fsp_logger&        log_;             //< reference to the logger
+    const processor_config&  cfg_;             //< copy of the config passed to the constructor, used by process_files() and its helpers
+    str_t                    parent_log_name_; //< parent worker thread's name (parent_log_name_ + ".worker_N")
+    doc_set_dscr             ds_dscr_;         //< doc_set_dscr is thread-safe, so one instance is shared by all workers
+    segment_pool             seg_pool_;        //< segment_pool is thread-safe, so one instance is shared by all workers
+    lock_queue<std::size_t>  c_queue_;         //< queue of document indices for cutting (C) -- one instance is shared by all workers
+    lock_queue<std::size_t>  v_queue_;         //< queue of document indices for validation (V) -- one instance is shared by all workers
+    std::atomic<std::size_t> docs_remaining_to_cut_{0};
+    std::size_t              max_concurrent_cutters_{1}; //< computed in process_files()
+    std::atomic<std::size_t> threads_cutting_{
+      0}; //< used by try_reserve_cutter_slot() to enforce the "at most half the threads may cut concurrently" rule
+    std::optional<doc_set_counter> doc_counters_;      //< per-document timing + outcome counts, sized to doc_count in process_files()
+    vec_seg_result                 results_;           //< all segments that were processed successfully
+    vec_seg_result                 errors_;            //< all segments that failed syntactically or semantically
+    mutable std::mutex             results_mutex_;     //< protects results_
+    mutable std::mutex             errors_mutex_;      //< protects errors_
+    std::mutex                     first_error_mutex_; //< protects first_error_
+    std::optional<error_info>      first_error_;       //<  the first fatal error reported by any worker thread, if any
+    stats_t                        stats_{};           //< cumulative stats for the run, updated by multiple threads
+    s_clock                        start_time_ = std::chrono::steady_clock::now(); //< to compute total elapsed time for the run
     // NOLINTEND(cppcoreguidelines-avoid-const-or-ref-data-members)
   };
 } // namespace fsp
