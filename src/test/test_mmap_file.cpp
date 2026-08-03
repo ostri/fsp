@@ -1,10 +1,17 @@
 #include "mmap_file.hpp"
 #include <catch2/catch_test_macros.hpp>
-#include <cstdio>
+#include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <ios>
+#include <iterator>
+#include <stdexcept>
 #include <string>
+#include <string_view>
+#include <system_error>
 #include <unistd.h>
+#include <utility>
 
 using fsp::mmap_file;
 using fsp::try_mmap_file;
@@ -28,6 +35,8 @@ namespace
     ~temp_file() { std::error_code ec; fs::remove(path_, ec); }
     temp_file(const temp_file&)            = delete;
     temp_file& operator=(const temp_file&) = delete;
+    temp_file(temp_file&&)                 = delete;
+    temp_file& operator=(temp_file&&)      = delete;
 
     [[nodiscard]] std::string string_path() const { return path_.string(); }
   private:
@@ -48,7 +57,7 @@ TEST_CASE("mmap_file default-constructs closed and empty", "[mmap_file][positive
   const mmap_file f;
   CHECK_FALSE(f.is_open());
   CHECK(f.empty());
-  CHECK(f.size() == 0);
+  CHECK(f.size() == 0); // NOLINT(readability-container-size-empty) -- size() itself is under test here
   CHECK(f.data() == nullptr);
   CHECK_FALSE(static_cast<bool>(f));
 }
@@ -94,7 +103,7 @@ TEST_CASE("mmap_file::open on an empty (zero-size) file succeeds with a null dat
   mmap_file       f(tf.string_path());
   CHECK(f.is_open());
   CHECK(f.empty());
-  CHECK(f.size() == 0);
+  CHECK(f.size() == 0); // NOLINT(readability-container-size-empty) -- size() itself is under test here
   CHECK(f.data() == nullptr);
 }
 
@@ -168,7 +177,7 @@ TEST_CASE("mmap_file::size reports the exact byte count of the mapped file", "[m
 TEST_CASE("mmap_file::size is zero for a closed file", "[mmap_file][negative]")
 {
   const mmap_file f;
-  CHECK(f.size() == 0);
+  CHECK(f.size() == 0); // NOLINT(readability-container-size-empty) -- size() itself is under test here
 }
 
 TEST_CASE("mmap_file::empty is false for a non-empty open file", "[mmap_file][positive]")
@@ -203,8 +212,10 @@ TEST_CASE("mmap_file::operator[] returns the byte at a valid index", "[mmap_file
 {
   const temp_file tf("ABC");
   const mmap_file f(tf.string_path());
+  // NOLINTBEGIN(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- operator[] itself is under test here
   CHECK(f[0] == std::byte{'A'});
   CHECK(f[2] == std::byte{'C'});
+  // NOLINTEND(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
 }
 
 TEST_CASE("mmap_file::at returns the byte at a valid index", "[mmap_file][positive]")
@@ -271,8 +282,8 @@ TEST_CASE("mmap_file::subspan returns the requested slice for a valid in-range o
   const mmap_file f(tf.string_path());
   const auto      sp = f.subspan(2, 3);
   REQUIRE(sp.size() == 3);
-  CHECK(sp[0] == std::byte{'2'});
-  CHECK(sp[2] == std::byte{'4'});
+  CHECK(sp.at(0) == std::byte{'2'});
+  CHECK(sp.at(2) == std::byte{'4'});
 }
 
 TEST_CASE("mmap_file::subspan clamps a count that runs past the end of the file", "[mmap_file][positive]")
@@ -360,7 +371,7 @@ TEST_CASE("mmap_file move constructor transfers an open mapping", "[mmap_file][p
   const mmap_file dst(std::move(src));
   CHECK(dst.is_open());
   CHECK(dst.string_view() == "move me");
-  // NOLINTNEXTLINE(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
+  // NOLINTNEXTLINE(bugprone-use-after-move,clang-analyzer-cplusplus.Move,hicpp-invalid-access-moved) -- verifying the moved-from state is the point of this test
   CHECK_FALSE(src.is_open());
 }
 
@@ -379,7 +390,7 @@ TEST_CASE("mmap_file move assignment transfers an open mapping and closes the pr
   mmap_file       dst(tf_dst.string_path());
   dst = std::move(src);
   CHECK(dst.string_view() == "source content");
-  // NOLINTNEXTLINE(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
+  // NOLINTNEXTLINE(bugprone-use-after-move,clang-analyzer-cplusplus.Move,hicpp-invalid-access-moved) -- verifying the moved-from state is the point of this test
   CHECK_FALSE(src.is_open());
 }
 

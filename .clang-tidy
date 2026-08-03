@@ -20,6 +20,7 @@ Checks: |
   -llvmlibc-*,
   -llvm-header-guard,
   -llvm-include-order,
+  -llvm-prefer-static-over-anonymous-namespace, # conflicts with misc-use-anonymous-namespace
   -modernize-use-trailing-return-type,
   -modernize-avoid-c-arrays,
   -readability-avoid-do-while-macro,                    # <<< Catch2

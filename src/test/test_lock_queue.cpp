@@ -4,15 +4,16 @@
 #include <chrono>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 using fsp::lock_queue;
 using fsp::queue_status;
 
-namespace
-{
-  constexpr auto wait_timeout = std::chrono::milliseconds(500);
-} // namespace
+// The specific literals below (queue sizes, pushed values, sleep durations) are
+// arbitrary test fixtures, not meaningful constants -- naming each one would only
+// add indirection, so readability-magic-numbers is suppressed for the whole file.
+// NOLINTBEGIN(readability-magic-numbers)
 
 // --- push(const T&) / push(T&&) -----------------------------------------------------
 
@@ -268,8 +269,8 @@ TEST_CASE("lock_queue::drained is false while merely active and empty", "[lock_q
 
 TEST_CASE("lock_queue::push_range enqueues every element of a non-empty range in order", "[lock_queue][positive]")
 {
-  lock_queue<int>      q;
-  std::array<int, 3> values{10, 20, 30};
+  lock_queue<int>           q;
+  const std::array<int, 3> values{10, 20, 30};
   q.push_range(values);
   CHECK(q.size() == 3);
   int out = 0;
@@ -283,9 +284,10 @@ TEST_CASE("lock_queue::push_range enqueues every element of a non-empty range in
 
 TEST_CASE("lock_queue::push_range on an empty range leaves the queue unchanged", "[lock_queue][negative]")
 {
-  lock_queue<int>      q;
-  std::vector<int> empty_range;
+  lock_queue<int>        q;
+  const std::vector<int> empty_range;
   q.push_range(empty_range);
   CHECK(q.size() == 0);
   CHECK(q.size_approx() == 0);
 }
+// NOLINTEND(readability-magic-numbers)

@@ -1,13 +1,24 @@
 #include "logger.hpp"
 #include "logger_config.hpp"
 #include "error_info.hpp"
+#include "common.hpp"
 #include <catch2/catch_test_macros.hpp>
+#include <cstdint>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <ios>
+#include <iterator>
 #include <optional>
+#include <spdlog/common.h>
 #include <string>
+#include <string_view>
+#include <system_error>
 #include <unistd.h>
+#include <utility>
+// setenv/unsetenv are POSIX extensions that glibc exposes via <cstdlib> (included above)
+// without a dedicated standard header of their own -- misc-include-cleaner has no
+// POSIX-aware mapping for them, so its complaint on those two call sites is suppressed below.
 
 using fsp::error_info;
 using fsp::fsp_logger;
@@ -30,11 +41,13 @@ namespace
     }
     ~env_guard()
     {
-      if (old_value_) ::setenv(name_.c_str(), old_value_->c_str(), 1); // NOLINT(concurrency-mt-unsafe)
-      else ::unsetenv(name_.c_str());                                  // NOLINT(concurrency-mt-unsafe)
+      if (old_value_) ::setenv(name_.c_str(), old_value_->c_str(), 1); // NOLINT(concurrency-mt-unsafe, misc-include-cleaner)
+      else ::unsetenv(name_.c_str());                                  // NOLINT(concurrency-mt-unsafe, misc-include-cleaner)
     }
     env_guard(const env_guard&)            = delete;
     env_guard& operator=(const env_guard&) = delete;
+    env_guard(env_guard&&)                 = delete;
+    env_guard& operator=(env_guard&&)      = delete;
   private:
     std::string                name_;
     std::optional<std::string> old_value_;
@@ -58,6 +71,8 @@ namespace
     }
     temp_dir_guard(const temp_dir_guard&)            = delete;
     temp_dir_guard& operator=(const temp_dir_guard&) = delete;
+    temp_dir_guard(temp_dir_guard&&)                 = delete;
+    temp_dir_guard& operator=(temp_dir_guard&&)      = delete;
     [[nodiscard]] const fs::path& dir() const { return dir_; }
   private:
     fs::path                    prev_;
@@ -152,9 +167,9 @@ TEST_CASE("fsp_logger construction with enable_file writes to the given log file
     lg.get()->flush();
   }
   REQUIRE(fs::exists(log_path));
-  std::ifstream in(log_path);
-  std::string   content((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-  CHECK(content.find("hello file sink") != std::string::npos);
+  std::ifstream     in(log_path);
+  const std::string content((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+  CHECK(content.contains("hello file sink"));
 }
 
 // ============================================================================
@@ -370,7 +385,7 @@ TEST_CASE("fsp_logger::make_log_name(parent, child) with an empty child uses onl
 
 TEST_CASE("load_logger_config reads settings from a valid LOG_CONFIG file", "[load_logger_config][positive]")
 {
-  env_guard       guard("LOG_CONFIG");
+  const env_guard       guard("LOG_CONFIG");
   const temp_dir_guard tmp;
   const auto      cfg_path = tmp.dir() / "custom.conf";
   write_file(cfg_path, "enable_console=false\nenable_file=true\nlog_file_path=custom_out.log\nlog_level=debug\n");
@@ -385,7 +400,7 @@ TEST_CASE("load_logger_config reads settings from a valid LOG_CONFIG file", "[lo
 
 TEST_CASE("load_logger_config accepts the warn/err/crit short aliases for log_level", "[load_logger_config][positive]")
 {
-  env_guard             guard("LOG_CONFIG");
+  const env_guard             guard("LOG_CONFIG");
   const temp_dir_guard tmp;
   const auto            cfg_path = tmp.dir() / "aliases.conf";
   write_file(cfg_path, "log_level=err\n");
@@ -397,7 +412,7 @@ TEST_CASE("load_logger_config accepts the warn/err/crit short aliases for log_le
 
 TEST_CASE("load_logger_config falls back when LOG_CONFIG points at a non-existent file", "[load_logger_config][negative]")
 {
-  env_guard             guard("LOG_CONFIG");
+  const env_guard             guard("LOG_CONFIG");
   const temp_dir_guard tmp; // isolate cwd so no stray log_<program>_*.conf fallback file is picked up
   ::setenv("LOG_CONFIG", "/nonexistent/path/does_not_exist.conf", 1); // NOLINT(concurrency-mt-unsafe)
 
@@ -410,7 +425,7 @@ TEST_CASE("load_logger_config falls back when LOG_CONFIG points at a non-existen
 
 TEST_CASE("load_logger_config falls back when LOG_CONFIG is set but empty", "[load_logger_config][negative]")
 {
-  env_guard             guard("LOG_CONFIG");
+  const env_guard             guard("LOG_CONFIG");
   const temp_dir_guard tmp;
   ::setenv("LOG_CONFIG", "", 1); // NOLINT(concurrency-mt-unsafe)
 
@@ -422,10 +437,10 @@ TEST_CASE("load_logger_config falls back when LOG_CONFIG is set but empty", "[lo
 
 TEST_CASE("load_logger_config reads the log_<program>_<mode>.conf fallback file from the cwd", "[load_logger_config][positive]")
 {
-  env_guard             guard("LOG_CONFIG");
+  const env_guard             guard("LOG_CONFIG");
   ::unsetenv("LOG_CONFIG"); // NOLINT(concurrency-mt-unsafe)
   const temp_dir_guard tmp;
-  const auto            mode      = fsp::is_debug() ? "debug" : "release";
+  const auto* const mode      = fsp::is_debug() ? "debug" : "release";
   const auto            file_name = fsp::str_t("log_myprog_") + mode + ".conf";
   write_file(tmp.dir() / file_name, "log_level=critical\n");
 
@@ -435,10 +450,10 @@ TEST_CASE("load_logger_config reads the log_<program>_<mode>.conf fallback file 
 
 TEST_CASE("load_logger_config strips a directory component from program_name before the fallback lookup", "[load_logger_config][positive]")
 {
-  env_guard             guard("LOG_CONFIG");
+  const env_guard             guard("LOG_CONFIG");
   ::unsetenv("LOG_CONFIG"); // NOLINT(concurrency-mt-unsafe)
   const temp_dir_guard tmp;
-  const auto            mode      = fsp::is_debug() ? "debug" : "release";
+  const auto* const mode      = fsp::is_debug() ? "debug" : "release";
   const auto            file_name = fsp::str_t("log_pacs8_") + mode + ".conf";
   write_file(tmp.dir() / file_name, "log_level=trace\n");
 
@@ -449,7 +464,7 @@ TEST_CASE("load_logger_config strips a directory component from program_name bef
 
 TEST_CASE("load_logger_config returns the hardcoded default when neither LOG_CONFIG nor a fallback file exist", "[load_logger_config][negative]")
 {
-  env_guard             guard("LOG_CONFIG");
+  const env_guard             guard("LOG_CONFIG");
   ::unsetenv("LOG_CONFIG"); // NOLINT(concurrency-mt-unsafe)
   const temp_dir_guard tmp; // empty cwd: no log_<program>_*.conf present
 
@@ -463,7 +478,7 @@ TEST_CASE("load_logger_config falls back to level 'off' for an unrecognized log_
 {
   // spdlog::level::from_str() returns level::off for any name it doesn't recognize --
   // a typo'd log_level in the config file silently disables logging instead of erroring.
-  env_guard             guard("LOG_CONFIG");
+  const env_guard             guard("LOG_CONFIG");
   const temp_dir_guard tmp;
   const auto            cfg_path = tmp.dir() / "bad_level.conf";
   write_file(cfg_path, "log_level=not_a_real_level\n");
@@ -475,7 +490,7 @@ TEST_CASE("load_logger_config falls back to level 'off' for an unrecognized log_
 
 TEST_CASE("load_logger_config ignores comments and blank lines in the config file", "[load_logger_config][negative]")
 {
-  env_guard             guard("LOG_CONFIG");
+  const env_guard             guard("LOG_CONFIG");
   const temp_dir_guard tmp;
   const auto            cfg_path = tmp.dir() / "commented.conf";
   write_file(cfg_path, "# a comment\n\n   \nlog_level=warning\n# trailing comment\n");

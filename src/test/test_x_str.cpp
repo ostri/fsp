@@ -1,14 +1,21 @@
 #include "x_str.hpp"
 #include "xerces_mgr.hpp"
 #include <catch2/catch_test_macros.hpp>
+#include <string_view>
+#include <utility>
 #include <xercesc/util/XMLString.hpp>
+
+// XMLCh comes in transitively from XMLString.hpp, same as in x_str.hpp/.cpp itself --
+// there is no dedicated public header for it in Xerces-C, so misc-include-cleaner's
+// "no header providing XMLCh is directly included" is suppressed file-wide.
+// NOLINTBEGIN(misc-include-cleaner)
 
 namespace
 {
   // x_str wraps Xerces-allocated buffers, so XMLPlatformUtils must be initialized
   // before any x_str is constructed. One guard for the whole test binary, same as
   // every fsp executable creates exactly one xerces_mgr for its process lifetime.
-  const fsp::xerces_mgr g_xerces_guard; // NOLINT(cert-err58-cpp)
+  const fsp::xerces_mgr g_xerces_guard; // NOLINT(cert-err58-cpp, bugprone-throwing-static-initialization)
 } // namespace
 
 using fsp::x_str;
@@ -19,7 +26,7 @@ TEST_CASE("x_str default-constructs empty", "[x_str][positive]")
 {
   const x_str s;
   CHECK(s.empty());
-  CHECK(s.length() == 0);
+  CHECK(s.length() == 0); // NOLINT(readability-container-size-empty) -- length() itself is under test here
   CHECK(s.c_str() == nullptr);
 }
 
@@ -37,7 +44,7 @@ TEST_CASE("x_str constructs empty from an empty UTF-8 string_view", "[x_str][neg
   // it must not attempt transcode() and must leave the string in the empty state.
   const x_str s(fsp::cstr_t{});
   CHECK(s.empty());
-  CHECK(s.length() == 0);
+  CHECK(s.length() == 0); // NOLINT(readability-container-size-empty) -- length() itself is under test here
 }
 
 TEST_CASE("x_str constructs from a replicated raw XMLCh*", "[x_str][positive]")
@@ -54,13 +61,13 @@ TEST_CASE("x_str constructs empty from a null raw XMLCh*", "[x_str][negative]")
 {
   const x_str s(static_cast<XMLCh*>(nullptr));
   CHECK(s.empty());
-  CHECK(s.length() == 0);
+  CHECK(s.length() == 0); // NOLINT(readability-container-size-empty) -- length() itself is under test here
 }
 
 TEST_CASE("x_str constructs from a non-empty u16string_view", "[x_str][positive]")
 {
   const std::u16string_view u16 = u"xyz";
-  const x_str                s(u16);
+  const x_str               s(u16);
   CHECK_FALSE(s.empty());
   CHECK(s.to_string() == "xyz");
 }
@@ -69,7 +76,7 @@ TEST_CASE("x_str constructs empty from an empty u16string_view", "[x_str][negati
 {
   const x_str s(std::u16string_view{});
   CHECK(s.empty());
-  CHECK(s.length() == 0);
+  CHECK(s.length() == 0); // NOLINT(readability-container-size-empty) -- length() itself is under test here
 }
 
 // --- copy / move --------------------------------------------------------------
@@ -77,7 +84,7 @@ TEST_CASE("x_str constructs empty from an empty u16string_view", "[x_str][negati
 TEST_CASE("x_str copy constructor duplicates a non-empty string", "[x_str][positive]")
 {
   const x_str original(fsp::cstr_t{"copy me"});
-  const x_str copy(original);
+  const x_str copy(original); // NOLINT(performance-unnecessary-copy-initialization) -- the copy ctor is what's under test
   CHECK(copy == original);
   CHECK(copy.to_string() == "copy me");
   // independent buffers: the original still owns its own data
@@ -87,7 +94,7 @@ TEST_CASE("x_str copy constructor duplicates a non-empty string", "[x_str][posit
 TEST_CASE("x_str copy constructor from an empty source stays empty", "[x_str][negative]")
 {
   const x_str empty_src;
-  const x_str copy(empty_src);
+  const x_str copy(empty_src); // NOLINT(performance-unnecessary-copy-initialization) -- the copy ctor is what's under test
   CHECK(copy.empty());
 }
 
@@ -287,8 +294,8 @@ TEST_CASE("x_str::operator<=> reports equal for two equal values", "[x_str][nega
 
 TEST_CASE("x_str::operator==(const XMLCh*) is true for matching content", "[x_str][positive]")
 {
-  const x_str  a(fsp::cstr_t{"match"});
-  XMLCh*       raw = xercesc::XMLString::transcode("match");
+  const x_str a(fsp::cstr_t{"match"});
+  XMLCh*      raw = xercesc::XMLString::transcode("match");
   REQUIRE(raw != nullptr);
   CHECK(a == static_cast<const XMLCh*>(raw));
   xercesc::XMLString::release(&raw);
@@ -378,23 +385,23 @@ TEST_CASE("x_str::length reports the correct length for a non-empty string", "[x
 TEST_CASE("x_str::length is zero for an empty string", "[x_str][negative]")
 {
   const x_str s;
-  CHECK(s.length() == 0);
+  CHECK(s.length() == 0); // NOLINT(readability-container-size-empty) -- length() itself is under test here
 }
 
 // --- explicit operator const XMLCh* ---------------------------------------------------
 
 TEST_CASE("x_str converts explicitly to a usable const XMLCh*", "[x_str][positive]")
 {
-  const x_str  s(fsp::cstr_t{"conv"});
-  const XMLCh* raw = static_cast<const XMLCh*>(s);
+  const x_str s(fsp::cstr_t{"conv"});
+  const auto* raw = static_cast<const XMLCh*>(s);
   REQUIRE(raw != nullptr);
   CHECK(xercesc::XMLString::stringLen(raw) == 4);
 }
 
 TEST_CASE("x_str converts explicitly to nullptr when empty", "[x_str][negative]")
 {
-  const x_str  s;
-  const XMLCh* raw = static_cast<const XMLCh*>(s);
+  const x_str s;
+  const auto* raw = static_cast<const XMLCh*>(s);
   CHECK(raw == nullptr);
 }
 
@@ -413,3 +420,4 @@ TEST_CASE("std::hash<x_str> distinguishes an empty string from a non-empty one",
   const x_str non_empty(fsp::cstr_t{"not empty"});
   CHECK(std::hash<x_str>{}(empty_s) != std::hash<x_str>{}(non_empty));
 }
+// NOLINTEND(misc-include-cleaner)

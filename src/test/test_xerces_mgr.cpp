@@ -1,8 +1,12 @@
 #include "xerces_mgr.hpp"
-#include "x_str.hpp"
 #include <catch2/catch_test_macros.hpp>
 #include <type_traits>
 #include <xercesc/util/XMLString.hpp>
+
+// XMLCh comes in transitively from XMLString.hpp -- Xerces-C has no dedicated public
+// header for it (same situation as in x_str.hpp/.cpp), so misc-include-cleaner's
+// "no header providing XMLCh is directly included" is suppressed file-wide.
+// NOLINTBEGIN(misc-include-cleaner)
 
 namespace
 {
@@ -21,7 +25,7 @@ namespace
 
 TEST_CASE("xerces_mgr construction initializes Xerces for use", "[xerces_mgr][positive]")
 {
-  fsp::xerces_mgr mgr;
+  const fsp::xerces_mgr mgr;
   REQUIRE(xerces_is_usable());
 }
 
@@ -32,10 +36,11 @@ TEST_CASE("xerces_mgr can be constructed and destroyed repeatedly in sequence", 
   // that N times in a row (e.g. across N unit-test processes) keeps working correctly.
   for (int i = 0; i < 3; ++i)
   {
-    fsp::xerces_mgr mgr;
+    const fsp::xerces_mgr mgr;
     REQUIRE(xerces_is_usable());
   }
 }
+// NOLINTEND(misc-include-cleaner)
 
 TEST_CASE("xerces_mgr is neither copyable nor movable", "[xerces_mgr][negative]")
 {
