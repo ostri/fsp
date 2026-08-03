@@ -58,20 +58,54 @@ else()
 endif()
 
 # --- 3. Find required packages ---
+# XercesC and LibXml2 stay on find_package(): they are large C libraries with
+# their own (non-CPM-trivial) build systems, and the distro packages are
+# already what this project builds against. Everything else below comes
+# through CPM instead, pinned here rather than taken from whatever the
+# distribution happens to ship, so that this file is the whole answer to
+# "which versions does fsp build against".
 find_package(XercesC REQUIRED)
-find_package(fmt REQUIRED)
-find_package(spdlog REQUIRED)
-find_package(magic_enum REQUIRED)
 find_package(LibXml2 REQUIRED)
+
+# CPM_SOURCE_CACHE (see cmake/CPM.cmake) lets every build directory
+# (build/debug, build/release, build/profile) share one downloaded copy.
+include(cmake/CPM.cmake)
+
+CPMAddPackage(
+    NAME fmt
+    GITHUB_REPOSITORY fmtlib/fmt
+    GIT_TAG 12.2.0
+    SYSTEM YES
+    EXCLUDE_FROM_ALL YES
+)
+
+CPMAddPackage(
+    NAME spdlog
+    GITHUB_REPOSITORY gabime/spdlog
+    GIT_TAG v1.17.0
+    SYSTEM YES
+    EXCLUDE_FROM_ALL YES
+    OPTIONS
+        "SPDLOG_FMT_EXTERNAL ON"
+        "SPDLOG_BUILD_SHARED OFF"
+        "SPDLOG_INSTALL OFF"
+        "SPDLOG_BUILD_EXAMPLE OFF"
+        "SPDLOG_BUILD_TESTS OFF"
+)
+
+CPMAddPackage(
+    NAME magic_enum
+    GITHUB_REPOSITORY Neargye/magic_enum
+    GIT_TAG v0.9.7
+    SYSTEM YES
+    EXCLUDE_FROM_ALL YES
+)
 
 # --- 3a. Unit testing (Catch2, fetched via CPM) ---
 # BUILD_TESTING is CTest's standard opt-out switch, defaulted ON here since
 # this project has no separate packaging/consumer mode to skip it for.
 option(BUILD_TESTING "Build unit tests" ON)
 if(BUILD_TESTING)
-    include(cmake/CPM.cmake)
-    # CPM_SOURCE_CACHE (see cmake/CPM.cmake) lets every build directory
-    # (build, build-debug, build-profile) share one downloaded copy.
     CPMAddPackage(
         NAME Catch2
         GITHUB_REPOSITORY catchorg/Catch2
@@ -226,9 +260,18 @@ set(${b_target}_SOURCES
     ${SOURCES}
 )
 # Specify additional libraries for fsp_lib (if needed)
+# fmt/spdlog/magic_enum weren't listed here even under find_package(), which
+# went unnoticed only because that fmt/spdlog were consistent between compile
+# and link across every consumer (all from the same distro package). Now that
+# fmt/spdlog come from CPM as compiled libraries (not header-only), a fsp_lib
+# .cpp that calls fmt::vformat (via error_info.hpp etc.) has an unresolved
+# symbol unless fsp_lib links fmt::fmt itself -- so all three are explicit here.
 set(FSP_TARGET_${b_target}_LIBS
     XercesC::XercesC
     LibXml2::LibXml2
+    fmt::fmt
+    spdlog::spdlog
+    magic_enum::magic_enum
 )
 add_fsp_target(fsp_lib STATIC ${fsp_lib_SOURCES})
 #

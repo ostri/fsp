@@ -4,7 +4,13 @@
   ],
   //"lldb.library": "/usr/lib64/liblldb.so.20.1.8",
   "C_mantic.caseStyle": "snake_case",
+  // Forces CMake Tools to drive configuration/build through CMakePresets.json
+  // (binaryDir build/debug, build/release, build/profile) rather than its
+  // legacy kit/variant workflow, which otherwise configures into a plain
+  // top-level build/ - out of step with the ninja-debug/-release/-profile
+  // directories the command line (and launch.json) expects.
+  "cmake.useCMakePresets": "always",
   // Add these lines to connect IntelliSense with CMake:
   "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools",
-  "C_Cpp.default.compileCommands": "${workspaceFolder}/build/compile_commands.json"
+  "C_Cpp.default.compileCommands": "${workspaceFolder}/build/debug/compile_commands.json"
 }

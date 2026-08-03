@@ -2,13 +2,22 @@
 	"version": "2.0.0",
 	"tasks": [
 		{
+			"type": "cmake",
+			"label": "CMake: configure",
+			"command": "configure",
+			"problemMatcher": [],
+			"detail": "CMake template configure task"
+		},
+		{
+			"type": "cmake",
 			"label": "build",
-			"type": "shell",
-			"command": "cd /home/ostri/fsp/build && cmake -DCMAKE_BUILD_TYPE=Debug .. && make",
+			"command": "build",
+			"problemMatcher": [],
 			"group": {
 				"kind": "build",
 				"isDefault": true
-			}
+			},
+			"detail": "Build the active CMake preset (debug/release/profile)"
 		}
 	]
 }

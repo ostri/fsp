@@ -4,6 +4,7 @@
 #include "xpath_set.hpp"
 #include <libxml/parser.h>
 #include <cstddef>
+#include <cstring>
 #include <string_view>
 #include <utility>
 #include <vector>

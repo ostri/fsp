@@ -1,0 +1,60 @@
+{
+  "version": 8,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 25,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "ninja-debug",
+      "displayName": "Debug",
+      "description": "Ninja + Debug (sanitizers, -O0) -- see add_fsp_target() in CMakeLists.txt for the per-config flags.",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/debug",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      }
+    },
+    {
+      "name": "ninja-release",
+      "displayName": "Release",
+      "description": "Ninja + Release (-O3, LTO, no sanitizers)",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      }
+    },
+    {
+      "name": "ninja-profile",
+      "displayName": "Profile",
+      "description": "Same as Release, plus DWARF debug info for readable stack traces under Linux perf.",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/profile",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Profile",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "debug",
+      "configurePreset": "ninja-debug",
+      "displayName": "Build (Debug)"
+    },
+    {
+      "name": "release",
+      "configurePreset": "ninja-release",
+      "displayName": "Build (Release)"
+    },
+    {
+      "name": "profile",
+      "configurePreset": "ninja-profile",
+      "displayName": "Build (Profile)"
+    }
+  ]
+}

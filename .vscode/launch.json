@@ -2,27 +2,15 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "fsp-core",
+      "name": "pacs8",
       "type": "cppdbg",
       "request": "launch",
-      "program": "${workspaceRoot}/build/fsp",
+      "program": "${workspaceFolder}/build/debug/pacs8",
       "args": [
-        "../xml-data/pacs8-2.xml",
-        "../xsd/pacs.008.xsd",
+        "../../xml-data/pacs8-2.xml"
       ],
-      "cwd": "${workspaceRoot}/build",
-      "preLaunchTask": "build", // Najprej požene task "build" v tasks.json
-    },
-    {
-      "name": "small file",
-      "type": "cppdbg",
-      "request": "launch",
-      "program": "${workspaceRoot}/build/fsp",
-      "args": [
-        "../xml-data/pacs8-2.xml",
-      ],
-      "cwd": "${workspaceRoot}/build",
-      "preLaunchTask": "build", // Najprej požene task "build" v tasks.json
+      "cwd": "${workspaceFolder}/build/debug",
+      "preLaunchTask": "build",
       "environment": [
         {
           "name": "ASAN_OPTIONS",
@@ -31,15 +19,15 @@
       ]
     },
     {
-      "name": "pacs8",
+      "name": "pacs8-cb",
       "type": "cppdbg",
       "request": "launch",
-      "program": "${workspaceRoot}/build/pacs8",
+      "program": "${workspaceFolder}/build/debug/pacs8-cb",
       "args": [
-        "../xml-data/pacs8-2.xml",
+        "../../xml-data/pacs8-2.xml"
       ],
-      "cwd": "${workspaceRoot}/build",
-      "preLaunchTask": "build", // Najprej požene task "build" v tasks.json
+      "cwd": "${workspaceFolder}/build/debug",
+      "preLaunchTask": "build",
       "environment": [
         {
           "name": "ASAN_OPTIONS",
@@ -51,19 +39,28 @@
       "name": "validator",
       "type": "cppdbg",
       "request": "launch",
-      "program": "${workspaceRoot}/build/validator",
+      "program": "${workspaceFolder}/build/debug/validator",
       "args": [
-        "../xsd/pacs.008.xsd",
-        "../xml-data/pacs8-2.xml"
+        "../../xsd/pacs.008.xsd",
+        "../../xml-data/pacs8-2.xml"
       ],
-      "cwd": "${workspaceRoot}/build",
-      "preLaunchTask": "build", // Najprej požene task "build" v tasks.json
+      "cwd": "${workspaceFolder}/build/debug",
+      "preLaunchTask": "build",
       "environment": [
         {
           "name": "ASAN_OPTIONS",
           "value": "detect_leaks=0"
         }
       ]
+    },
+    {
+      "name": "unit_tests",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/build/debug/unit_tests",
+      "args": [],
+      "cwd": "${workspaceFolder}/build/debug",
+      "preLaunchTask": "build"
     }
   ]
 }
