@@ -72,8 +72,12 @@ namespace fsp
   }
   void x_str::assign(const cstr_t other)
   {
+    // Not "x_str tmp(other); *this = tmp;" -- operator=(const x_str&) intentionally
+    // no-ops when the source is empty (see below), which would make assign() with an
+    // empty string_view silently keep the old value instead of clearing it.
     x_str tmp(other);
-    *this = tmp;
+    reset(std::exchange(tmp.data_, nullptr));
+    cached_utf8_.clear();
   }
 
   void x_str::reset() noexcept
@@ -125,10 +129,10 @@ namespace fsp
 
   bool x_str::operator==(const x_str& other) const noexcept { return xercesc::XMLString::equals(data_, other.data_); }
   bool x_str::operator!=(const x_str& other) const noexcept { return ! (*this == other); }
-  auto x_str::operator<=>(const x_str& other) const noexcept { return xercesc::XMLString::compareString(data_, other.data_) <=> 0; }
+  std::strong_ordering x_str::operator<=>(const x_str& other) const noexcept { return xercesc::XMLString::compareString(data_, other.data_) <=> 0; }
   bool x_str::operator==(const XMLCh* other) const noexcept { return xercesc::XMLString::equals(data_, other); }
   bool x_str::operator!=(const XMLCh* other) const noexcept { return ! (*this == other); }
-  auto x_str::operator<=>(const XMLCh* other) const noexcept { return xercesc::XMLString::compareString(data_, other) <=> 0; }
+  std::strong_ordering x_str::operator<=>(const XMLCh* other) const noexcept { return xercesc::XMLString::compareString(data_, other) <=> 0; }
   bool x_str::operator==(cstr_t utf8) const
   {
     x_str temp(utf8);

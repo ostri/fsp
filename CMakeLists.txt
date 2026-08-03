@@ -64,6 +64,28 @@ find_package(spdlog REQUIRED)
 find_package(magic_enum REQUIRED)
 find_package(LibXml2 REQUIRED)
 
+# --- 3a. Unit testing (Catch2, fetched via CPM) ---
+# BUILD_TESTING is CTest's standard opt-out switch, defaulted ON here since
+# this project has no separate packaging/consumer mode to skip it for.
+option(BUILD_TESTING "Build unit tests" ON)
+if(BUILD_TESTING)
+    include(cmake/CPM.cmake)
+    # CPM_SOURCE_CACHE (see cmake/CPM.cmake) lets every build directory
+    # (build, build-debug, build-profile) share one downloaded copy.
+    CPMAddPackage(
+        NAME Catch2
+        GITHUB_REPOSITORY catchorg/Catch2
+        GIT_TAG v3.15.3
+        SYSTEM YES
+        EXCLUDE_FROM_ALL YES
+    )
+    # catch_discover_tests lives in Catch2's extras/ and registers one ctest
+    # entry per TEST_CASE rather than one for the whole binary.
+    list(APPEND CMAKE_MODULE_PATH ${Catch2_SOURCE_DIR}/extras)
+    include(CTest)
+    include(Catch)
+endif()
+
 # --- 4. Function to define a target with common settings ---
 function(add_fsp_target TARGET_NAME TYPE)
     # TYPE can be STATIC, SHARED, or EXECUTABLE
@@ -338,6 +360,32 @@ set(FSP_TARGET_${b_target}_LIBS PRIVATE
     XercesC::XercesC
 )
 add_fsp_target(${b_target} EXECUTABLE ${${b_target}_SOURCES})
+# -----------------------------------------------------------------------------
+# --- target: unit_tests
+# -----------------------------------------------------------------------------
+if(BUILD_TESTING)
+    set(b_target unit_tests) # name of the target
+    set(${b_target}_SOURCES
+        ${CMAKE_SOURCE_DIR}/src/test/test_x_str.cpp
+        ${CMAKE_SOURCE_DIR}/src/test/test_xerces_mgr.cpp
+        ${CMAKE_SOURCE_DIR}/src/common/xercesc_helpers/x_str.cpp
+        ${CMAKE_SOURCE_DIR}/src/common/xercesc_helpers/xerces_mgr.cpp
+    )
+    set(FSP_TARGET_${b_target}_LIBS
+        Catch2::Catch2WithMain
+        fmt::fmt
+        XercesC::XercesC
+    )
+    add_fsp_target(${b_target} EXECUTABLE ${${b_target}_SOURCES})
+    # Catch2's INTERNAL_CATCH_UNIQUE_NAME expands to __COUNTER__, flagged by
+    # -Wpedantic as a C2y extension on Clang (silent on GCC); a third-party
+    # macro this project doesn't control, so it is silenced rather than
+    # allowed to trip -Werror.
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        target_compile_options(${b_target} PRIVATE -Wno-c2y-extensions)
+    endif()
+    catch_discover_tests(${b_target})
+endif()
 #-------------------------------------------------------------------------------
 # --- 6. (Optional) Display built targets ---
 message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")

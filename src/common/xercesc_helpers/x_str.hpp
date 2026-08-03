@@ -1,6 +1,7 @@
 #pragma once
 
 #include <xercesc/util/XMLString.hpp>
+#include <compare>
 #include <string>
 #include <string_view>
 #include <functional>
@@ -32,10 +33,10 @@ namespace fsp
     [[nodiscard]] cstr_t           to_string_view() const;
     bool                           operator==(const x_str& other) const noexcept;
     bool                           operator!=(const x_str& other) const noexcept;
-    auto                           operator<=>(const x_str& other) const noexcept;
+    std::strong_ordering           operator<=>(const x_str& other) const noexcept;
     bool                           operator==(const XMLCh* other) const noexcept;
     bool                           operator!=(const XMLCh* other) const noexcept;
-    auto                           operator<=>(const XMLCh* other) const noexcept;
+    std::strong_ordering           operator<=>(const XMLCh* other) const noexcept;
     bool                           operator==(cstr_t utf8) const;
     bool                           operator!=(cstr_t utf8) const;
     bool                           operator==(std::u16string_view u16) const;
