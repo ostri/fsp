@@ -258,6 +258,7 @@ set(SRC_COMMON
     ${CMAKE_SOURCE_DIR}/src/common/logger/logger_config.cpp
     ${CMAKE_SOURCE_DIR}/src/common/common.cpp
     ${CMAKE_SOURCE_DIR}/src/common/logger/logger.cpp
+    ${CMAKE_SOURCE_DIR}/src/common/logger/logger_impl.cpp
     ${CMAKE_SOURCE_DIR}/src/ach/utility.cpp
 )
 
@@ -432,6 +433,7 @@ if(BUILD_TESTING)
         ${CMAKE_SOURCE_DIR}/src/common/xercesc_helpers/xerces_mgr.cpp
         ${CMAKE_SOURCE_DIR}/src/common/mmap/mmap_file.cpp
         ${CMAKE_SOURCE_DIR}/src/common/logger/logger.cpp
+        ${CMAKE_SOURCE_DIR}/src/common/logger/logger_impl.cpp
         ${CMAKE_SOURCE_DIR}/src/common/logger/logger_config.cpp
         ${CMAKE_SOURCE_DIR}/src/importer/error_info.cpp
     )

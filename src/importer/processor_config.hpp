@@ -2,6 +2,7 @@
 
 #include "logger_config.hpp"
 #include "parsing_util.hpp"
+#include <magic_enum.hpp>
 #include <optional>
 namespace fsp
 {
@@ -68,7 +69,7 @@ namespace fsp
                       log_config.enable_console,
                       log_config.enable_file,
                       log_config.log_file_path,
-                      spdlog::level::to_string_view(log_config.log_level),
+                      magic_enum::enum_name(log_config.log_level),
                       program_name);
   }
 } // namespace fsp

@@ -10,7 +10,6 @@
 #include <ios>
 #include <iterator>
 #include <optional>
-#include <spdlog/common.h>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -97,16 +96,16 @@ TEST_CASE("logger_config default values match the documented fallback", "[logger
   CHECK(cfg.enable_console);
   CHECK_FALSE(cfg.enable_file);
   CHECK(cfg.log_file_path == "xml_processor.log");
-  CHECK(cfg.log_level == spdlog::level::warn);
+  CHECK(cfg.log_level == lvl_enum::warn);
 }
 
 TEST_CASE("logger_config fields can be overridden away from their defaults", "[logger_config][negative]")
 {
-  const logger_config cfg{.enable_console = false, .enable_file = true, .log_file_path = "custom.log", .log_level = spdlog::level::trace};
+  const logger_config cfg{.enable_console = false, .enable_file = true, .log_file_path = "custom.log", .log_level = lvl_enum::trace};
   CHECK_FALSE(cfg.enable_console);
   CHECK(cfg.enable_file);
   CHECK(cfg.log_file_path == "custom.log");
-  CHECK(cfg.log_level == spdlog::level::trace);
+  CHECK(cfg.log_level == lvl_enum::trace);
 }
 
 // ============================================================================
@@ -115,9 +114,9 @@ TEST_CASE("logger_config fields can be overridden away from their defaults", "[l
 
 TEST_CASE("fsp_logger construction with enable_console builds a usable logger", "[fsp_logger][positive]")
 {
-  const logger_config cfg{.enable_console = true, .enable_file = false, .log_level = spdlog::level::info};
+  const logger_config cfg{.enable_console = true, .enable_file = false, .log_level = lvl_enum::info};
   const fsp_logger     lg(cfg);
-  REQUIRE(lg.get() != nullptr);
+  REQUIRE(lg.is_valid());
   CHECK(lg.level() == lvl_enum::info);
 }
 
@@ -125,9 +124,9 @@ TEST_CASE("fsp_logger construction with both sinks disabled still builds a worki
 {
   // build() explicitly falls back to a console sink when the sinks vector would
   // otherwise be empty -- a logger must never end up with zero sinks.
-  const logger_config cfg{.enable_console = false, .enable_file = false, .log_level = spdlog::level::info};
+  const logger_config cfg{.enable_console = false, .enable_file = false, .log_level = lvl_enum::info};
   const fsp_logger     lg(cfg);
-  REQUIRE(lg.get() != nullptr);
+  REQUIRE(lg.is_valid());
   CHECK_NOTHROW(lg.info("still works"));
 }
 
@@ -135,9 +134,9 @@ TEST_CASE("fsp_logger construction with enable_file but an empty log_file_path f
 {
   // build() only adds the file sink when "cfg.enable_file && !cfg.log_file_path.empty()" --
   // enable_file alone with an empty path must not attempt to open a file.
-  const logger_config cfg{.enable_console = false, .enable_file = true, .log_file_path = "", .log_level = spdlog::level::info};
+  const logger_config cfg{.enable_console = false, .enable_file = true, .log_file_path = "", .log_level = lvl_enum::info};
   const fsp_logger     lg(cfg);
-  REQUIRE(lg.get() != nullptr);
+  REQUIRE(lg.is_valid());
   CHECK_NOTHROW(lg.info("no file sink attempted"));
 }
 
@@ -160,11 +159,11 @@ TEST_CASE("fsp_logger construction with enable_file writes to the given log file
 {
   const temp_dir_guard tmp;
   const auto            log_path = (tmp.dir() / "out.log").string();
-  const logger_config   cfg{.enable_console = false, .enable_file = true, .log_file_path = log_path, .log_level = spdlog::level::info};
+  const logger_config   cfg{.enable_console = false, .enable_file = true, .log_file_path = log_path, .log_level = lvl_enum::info};
   {
     const fsp_logger lg(cfg);
     lg.info("hello file sink");
-    lg.get()->flush();
+    lg.flush();
   }
   REQUIRE(fs::exists(log_path));
   std::ifstream     in(log_path);
@@ -173,19 +172,13 @@ TEST_CASE("fsp_logger construction with enable_file writes to the given log file
 }
 
 // ============================================================================
-// fsp_logger::get
+// fsp_logger::is_valid
 // ============================================================================
 
-TEST_CASE("fsp_logger::get returns a non-null shared_ptr after construction", "[fsp_logger][positive]")
+TEST_CASE("fsp_logger::is_valid is true right after construction", "[fsp_logger][positive]")
 {
   const fsp_logger lg(logger_config{});
-  CHECK(lg.get() != nullptr);
-}
-
-TEST_CASE("fsp_logger::get returns the same underlying logger on repeated calls", "[fsp_logger][negative]")
-{
-  const fsp_logger lg(logger_config{});
-  CHECK(lg.get() == lg.get());
+  CHECK(lg.is_valid());
 }
 
 // ============================================================================
@@ -194,7 +187,7 @@ TEST_CASE("fsp_logger::get returns the same underlying logger on repeated calls"
 
 TEST_CASE("fsp_logger::critical(error_info) does not throw when the level is active", "[fsp_logger][positive]")
 {
-  const logger_config cfg{.enable_console = true, .log_level = spdlog::level::critical};
+  const logger_config cfg{.enable_console = true, .log_level = lvl_enum::crit};
   const fsp_logger     lg(cfg);
   const error_info     err(processor_error::internal_error, "boom", "some/path", 3, 1);
   CHECK_NOTHROW(lg.critical(err));
@@ -202,7 +195,7 @@ TEST_CASE("fsp_logger::critical(error_info) does not throw when the level is act
 
 TEST_CASE("fsp_logger::critical(error_info) is a silent no-op when the level is off", "[fsp_logger][negative]")
 {
-  const logger_config cfg{.enable_console = true, .log_level = spdlog::level::off};
+  const logger_config cfg{.enable_console = true, .log_level = lvl_enum::off};
   const fsp_logger     lg(cfg);
   const error_info     err(processor_error::internal_error, "boom", "some/path", 3, 1);
   CHECK_NOTHROW(lg.critical(err));
@@ -210,7 +203,7 @@ TEST_CASE("fsp_logger::critical(error_info) is a silent no-op when the level is 
 
 TEST_CASE("fsp_logger::error(error_info) does not throw when the level is active", "[fsp_logger][positive]")
 {
-  const logger_config cfg{.enable_console = true, .log_level = spdlog::level::err};
+  const logger_config cfg{.enable_console = true, .log_level = lvl_enum::err};
   const fsp_logger     lg(cfg);
   const error_info     err(processor_error::parse_failed, "parse boom", "x.xml", 10, 2);
   CHECK_NOTHROW(lg.error(err));
@@ -218,7 +211,7 @@ TEST_CASE("fsp_logger::error(error_info) does not throw when the level is active
 
 TEST_CASE("fsp_logger::error(error_info) is a silent no-op when the level is above err", "[fsp_logger][negative]")
 {
-  const logger_config cfg{.enable_console = true, .log_level = spdlog::level::critical};
+  const logger_config cfg{.enable_console = true, .log_level = lvl_enum::crit};
   const fsp_logger     lg(cfg);
   const error_info     err(processor_error::parse_failed, "parse boom", "x.xml", 10, 2);
   CHECK_NOTHROW(lg.error(err));
@@ -230,49 +223,49 @@ TEST_CASE("fsp_logger::error(error_info) is a silent no-op when the level is abo
 
 TEST_CASE("fsp_logger::critical(cstr_t) does not throw for a non-empty message when active", "[fsp_logger][positive]")
 {
-  const fsp_logger lg(logger_config{.log_level = spdlog::level::critical});
+  const fsp_logger lg(logger_config{.log_level = lvl_enum::crit});
   CHECK_NOTHROW(lg.critical("critical message"));
 }
 
 TEST_CASE("fsp_logger::critical(cstr_t) does not throw for an empty message", "[fsp_logger][negative]")
 {
-  const fsp_logger lg(logger_config{.log_level = spdlog::level::critical});
+  const fsp_logger lg(logger_config{.log_level = lvl_enum::crit});
   CHECK_NOTHROW(lg.critical(fsp::cstr_t{}));
 }
 
 TEST_CASE("fsp_logger::error(cstr_t) does not throw for a non-empty message when active", "[fsp_logger][positive]")
 {
-  const fsp_logger lg(logger_config{.log_level = spdlog::level::err});
+  const fsp_logger lg(logger_config{.log_level = lvl_enum::err});
   CHECK_NOTHROW(lg.error("error message"));
 }
 
 TEST_CASE("fsp_logger::error(cstr_t) is silent (but harmless) when the level is inactive", "[fsp_logger][negative]")
 {
-  const fsp_logger lg(logger_config{.log_level = spdlog::level::off});
+  const fsp_logger lg(logger_config{.log_level = lvl_enum::off});
   CHECK_NOTHROW(lg.error("suppressed"));
 }
 
 TEST_CASE("fsp_logger::warn(cstr_t) does not throw for a non-empty message when active", "[fsp_logger][positive]")
 {
-  const fsp_logger lg(logger_config{.log_level = spdlog::level::warn});
+  const fsp_logger lg(logger_config{.log_level = lvl_enum::warn});
   CHECK_NOTHROW(lg.warn("warn message"));
 }
 
 TEST_CASE("fsp_logger::warn(cstr_t) is harmless when the level is above warn", "[fsp_logger][negative]")
 {
-  const fsp_logger lg(logger_config{.log_level = spdlog::level::err});
+  const fsp_logger lg(logger_config{.log_level = lvl_enum::err});
   CHECK_NOTHROW(lg.warn("suppressed"));
 }
 
 TEST_CASE("fsp_logger::info(cstr_t) does not throw for a non-empty message when active", "[fsp_logger][positive]")
 {
-  const fsp_logger lg(logger_config{.log_level = spdlog::level::info});
+  const fsp_logger lg(logger_config{.log_level = lvl_enum::info});
   CHECK_NOTHROW(lg.info("info message"));
 }
 
 TEST_CASE("fsp_logger::info(cstr_t) is harmless when the level is above info", "[fsp_logger][negative]")
 {
-  const fsp_logger lg(logger_config{.log_level = spdlog::level::warn});
+  const fsp_logger lg(logger_config{.log_level = lvl_enum::warn});
   CHECK_NOTHROW(lg.info("suppressed"));
 }
 
@@ -281,25 +274,25 @@ TEST_CASE("fsp_logger::debug(cstr_t) does not throw regardless of build mode", "
   // debug()/trace() are unconditionally compiled out to no-ops in Release builds
   // (if constexpr (is_debug())), so "active" here only means "doesn't throw", not
   // "definitely wrote to the sink" -- that part is build-mode dependent by design.
-  const fsp_logger lg(logger_config{.log_level = spdlog::level::debug});
+  const fsp_logger lg(logger_config{.log_level = lvl_enum::debug});
   CHECK_NOTHROW(lg.debug("debug message"));
 }
 
 TEST_CASE("fsp_logger::debug(cstr_t) is harmless when the level is above debug", "[fsp_logger][negative]")
 {
-  const fsp_logger lg(logger_config{.log_level = spdlog::level::info});
+  const fsp_logger lg(logger_config{.log_level = lvl_enum::info});
   CHECK_NOTHROW(lg.debug("suppressed"));
 }
 
 TEST_CASE("fsp_logger::trace(cstr_t) does not throw regardless of build mode", "[fsp_logger][positive]")
 {
-  const fsp_logger lg(logger_config{.log_level = spdlog::level::trace});
+  const fsp_logger lg(logger_config{.log_level = lvl_enum::trace});
   CHECK_NOTHROW(lg.trace("trace message"));
 }
 
 TEST_CASE("fsp_logger::trace(cstr_t) is harmless when the level is above trace", "[fsp_logger][negative]")
 {
-  const fsp_logger lg(logger_config{.log_level = spdlog::level::debug});
+  const fsp_logger lg(logger_config{.log_level = lvl_enum::debug});
   CHECK_NOTHROW(lg.trace("suppressed"));
 }
 
@@ -309,7 +302,7 @@ TEST_CASE("fsp_logger::trace(cstr_t) is harmless when the level is above trace",
 
 TEST_CASE("fsp_logger::active is true for a level at or above the configured threshold", "[fsp_logger][positive]")
 {
-  const fsp_logger lg(logger_config{.log_level = spdlog::level::info});
+  const fsp_logger lg(logger_config{.log_level = lvl_enum::info});
   CHECK(lg.active(lvl_enum::info));
   CHECK(lg.active(lvl_enum::warn));
   CHECK(lg.active(lvl_enum::crit));
@@ -317,7 +310,7 @@ TEST_CASE("fsp_logger::active is true for a level at or above the configured thr
 
 TEST_CASE("fsp_logger::active is false for a level below the configured threshold", "[fsp_logger][negative]")
 {
-  const fsp_logger lg(logger_config{.log_level = spdlog::level::warn});
+  const fsp_logger lg(logger_config{.log_level = lvl_enum::warn});
   CHECK_FALSE(lg.active(lvl_enum::info));
 }
 
@@ -327,13 +320,13 @@ TEST_CASE("fsp_logger::active is false for a level below the configured threshol
 
 TEST_CASE("fsp_logger::level reflects the level passed at construction", "[fsp_logger][positive]")
 {
-  const fsp_logger lg(logger_config{.log_level = spdlog::level::err});
+  const fsp_logger lg(logger_config{.log_level = lvl_enum::err});
   CHECK(lg.level() == lvl_enum::err);
 }
 
 TEST_CASE("fsp_logger::set_level changes the active threshold to a higher level", "[fsp_logger][positive]")
 {
-  fsp_logger lg(logger_config{.log_level = spdlog::level::info});
+  fsp_logger lg(logger_config{.log_level = lvl_enum::info});
   lg.set_level(lvl_enum::crit);
   CHECK(lg.level() == lvl_enum::crit);
   CHECK_FALSE(lg.active(lvl_enum::err));
@@ -341,7 +334,7 @@ TEST_CASE("fsp_logger::set_level changes the active threshold to a higher level"
 
 TEST_CASE("fsp_logger::set_level to the same level is idempotent", "[fsp_logger][negative]")
 {
-  fsp_logger lg(logger_config{.log_level = spdlog::level::warn});
+  fsp_logger lg(logger_config{.log_level = lvl_enum::warn});
   lg.set_level(lvl_enum::warn);
   CHECK(lg.level() == lvl_enum::warn);
 }
@@ -395,7 +388,7 @@ TEST_CASE("load_logger_config reads settings from a valid LOG_CONFIG file", "[lo
   CHECK_FALSE(cfg.enable_console);
   CHECK(cfg.enable_file);
   CHECK(cfg.log_file_path == "custom_out.log");
-  CHECK(cfg.log_level == spdlog::level::debug);
+  CHECK(cfg.log_level == lvl_enum::debug);
 }
 
 TEST_CASE("load_logger_config accepts the warn/err/crit short aliases for log_level", "[load_logger_config][positive]")
@@ -407,7 +400,7 @@ TEST_CASE("load_logger_config accepts the warn/err/crit short aliases for log_le
   ::setenv("LOG_CONFIG", cfg_path.string().c_str(), 1); // NOLINT(concurrency-mt-unsafe)
 
   const auto cfg = fsp::load_logger_config("test-program");
-  CHECK(cfg.log_level == spdlog::level::err);
+  CHECK(cfg.log_level == lvl_enum::err);
 }
 
 TEST_CASE("load_logger_config falls back when LOG_CONFIG points at a non-existent file", "[load_logger_config][negative]")
@@ -420,7 +413,7 @@ TEST_CASE("load_logger_config falls back when LOG_CONFIG points at a non-existen
   // falls through to the hardcoded default since no cwd fallback file exists either
   CHECK(cfg.enable_console);
   CHECK_FALSE(cfg.enable_file);
-  CHECK(cfg.log_level == spdlog::level::info);
+  CHECK(cfg.log_level == lvl_enum::info);
 }
 
 TEST_CASE("load_logger_config falls back when LOG_CONFIG is set but empty", "[load_logger_config][negative]")
@@ -432,7 +425,7 @@ TEST_CASE("load_logger_config falls back when LOG_CONFIG is set but empty", "[lo
   const auto cfg = fsp::load_logger_config("test-program");
   CHECK(cfg.enable_console);
   CHECK_FALSE(cfg.enable_file);
-  CHECK(cfg.log_level == spdlog::level::info);
+  CHECK(cfg.log_level == lvl_enum::info);
 }
 
 TEST_CASE("load_logger_config reads the log_<program>_<mode>.conf fallback file from the cwd", "[load_logger_config][positive]")
@@ -445,7 +438,7 @@ TEST_CASE("load_logger_config reads the log_<program>_<mode>.conf fallback file 
   write_file(tmp.dir() / file_name, "log_level=critical\n");
 
   const auto cfg = fsp::load_logger_config("myprog");
-  CHECK(cfg.log_level == spdlog::level::critical);
+  CHECK(cfg.log_level == lvl_enum::crit);
 }
 
 TEST_CASE("load_logger_config strips a directory component from program_name before the fallback lookup", "[load_logger_config][positive]")
@@ -459,7 +452,7 @@ TEST_CASE("load_logger_config strips a directory component from program_name bef
 
   // program_name arrives as argv[0], e.g. "./pacs8" -- filename() must strip the "./"
   const auto cfg = fsp::load_logger_config("./pacs8");
-  CHECK(cfg.log_level == spdlog::level::trace);
+  CHECK(cfg.log_level == lvl_enum::trace);
 }
 
 TEST_CASE("load_logger_config returns the hardcoded default when neither LOG_CONFIG nor a fallback file exist", "[load_logger_config][negative]")
@@ -471,13 +464,13 @@ TEST_CASE("load_logger_config returns the hardcoded default when neither LOG_CON
   const auto cfg = fsp::load_logger_config("nonexistent-program");
   CHECK(cfg.enable_console);
   CHECK_FALSE(cfg.enable_file);
-  CHECK(cfg.log_level == spdlog::level::info);
+  CHECK(cfg.log_level == lvl_enum::info);
 }
 
 TEST_CASE("load_logger_config falls back to level 'off' for an unrecognized log_level value", "[load_logger_config][negative]")
 {
-  // spdlog::level::from_str() returns level::off for any name it doesn't recognize --
-  // a typo'd log_level in the config file silently disables logging instead of erroring.
+  // level_from_str() returns lvl_enum::off for any name it doesn't recognize -- a typo'd
+  // log_level in the config file silently disables logging instead of erroring.
   const env_guard             guard("LOG_CONFIG");
   const temp_dir_guard tmp;
   const auto            cfg_path = tmp.dir() / "bad_level.conf";
@@ -485,7 +478,7 @@ TEST_CASE("load_logger_config falls back to level 'off' for an unrecognized log_
   ::setenv("LOG_CONFIG", cfg_path.string().c_str(), 1); // NOLINT(concurrency-mt-unsafe)
 
   const auto cfg = fsp::load_logger_config("test-program");
-  CHECK(cfg.log_level == spdlog::level::off);
+  CHECK(cfg.log_level == lvl_enum::off);
 }
 
 TEST_CASE("load_logger_config ignores comments and blank lines in the config file", "[load_logger_config][negative]")
@@ -497,5 +490,5 @@ TEST_CASE("load_logger_config ignores comments and blank lines in the config fil
   ::setenv("LOG_CONFIG", cfg_path.string().c_str(), 1); // NOLINT(concurrency-mt-unsafe)
 
   const auto cfg = fsp::load_logger_config("test-program");
-  CHECK(cfg.log_level == spdlog::level::warn);
+  CHECK(cfg.log_level == lvl_enum::warn);
 }
