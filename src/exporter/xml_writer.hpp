@@ -124,6 +124,8 @@ namespace fsp
     // Opening interface
     // -------------------------------------------------------------------------
     [[nodiscard]] e_result open(const char* path) noexcept;
+    /// @brief Non-throwing variant of the constructor -- constructs and opens a writer without ever throwing.
+    [[nodiscard]] static std::expected<xml_writer, error_info> try_open(const char* path) noexcept;
     // -------------------------------------------------------------------------
     // Writing interface
     // -------------------------------------------------------------------------
@@ -161,10 +163,9 @@ namespace fsp
     bool log_crit_  = false;
   };
   /**
-   * @brief Helper for better error handling using std::expected, mirroring
-   * fsp::try_mmap_file() -- constructs and opens an xml_writer without throwing.
+   * @brief Constructs and opens @p path without ever throwing, mirroring mmap_file::try_open().
    */
-  [[nodiscard]] inline std::expected<xml_writer, error_info> try_open_xml_writer(const char* path) noexcept
+  inline std::expected<xml_writer, error_info> xml_writer::try_open(const char* path) noexcept
   {
     xml_writer writer;
     if (auto res = writer.open(path); ! res) { return std::unexpected(std::move(res.error())); }

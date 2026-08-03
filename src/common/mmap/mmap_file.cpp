@@ -95,7 +95,7 @@ namespace fsp
     if (pos >= size_) { throw std::out_of_range("mmap_file::at: index out of range"); }
     return data_[pos]; // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic)
   }
-  std::expected<mmap_file, str_t> try_mmap_file(cstr_t path)
+  std::expected<mmap_file, str_t> mmap_file::try_open(cstr_t path)
   {
     try
     {

@@ -37,6 +37,8 @@ namespace fsp
     mmap_file& operator=(mmap_file&& other) noexcept;
     ~mmap_file();
     void                                   open(cstr_t path);
+    /// @brief Non-throwing variant of the constructor/open() -- mirrors xml_writer::try_open().
+    [[nodiscard]] static std::expected<mmap_file, str_t> try_open(cstr_t path);
     void                                   close() noexcept;
     [[nodiscard]] cstr_t                   string_view() const;
     [[nodiscard]] mmap_file::const_pointer data() const noexcept;
@@ -62,8 +64,6 @@ namespace fsp
     str_t         path_;           // path of the opened file
   };
 
-  // Helper function for better error handling using std::expected
-  std::expected<mmap_file, str_t>       try_mmap_file(cstr_t path);
   inline mmap_file::iterator            mmap_file::begin() const noexcept { return data_; }
   inline mmap_file::const_iterator      mmap_file::cbegin() const noexcept { return data_; }
   // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic)

@@ -429,6 +429,7 @@ if(BUILD_TESTING)
         ${CMAKE_SOURCE_DIR}/src/test/test_lock_queue.cpp
         ${CMAKE_SOURCE_DIR}/src/test/test_mmap_file.cpp
         ${CMAKE_SOURCE_DIR}/src/test/test_logger.cpp
+        ${CMAKE_SOURCE_DIR}/src/test/test_xml_writer.cpp
         ${CMAKE_SOURCE_DIR}/src/common/xercesc_helpers/x_str.cpp
         ${CMAKE_SOURCE_DIR}/src/common/xercesc_helpers/xerces_mgr.cpp
         ${CMAKE_SOURCE_DIR}/src/common/mmap/mmap_file.cpp

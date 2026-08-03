@@ -14,7 +14,6 @@
 #include <utility>
 
 using fsp::mmap_file;
-using fsp::try_mmap_file;
 
 namespace
 {
@@ -404,19 +403,19 @@ TEST_CASE("mmap_file move assignment to itself is a harmless no-op", "[mmap_file
   CHECK(f.string_view() == "self assign");
 }
 
-// --- try_mmap_file -----------------------------------------------------------------------------
+// --- try_open ------------------------------------------------------------------------------
 
-TEST_CASE("try_mmap_file returns a usable mmap_file for an existing file", "[mmap_file][positive]")
+TEST_CASE("mmap_file::try_open returns a usable mmap_file for an existing file", "[mmap_file][positive]")
 {
   const temp_file tf("try me");
-  auto            result = try_mmap_file(tf.string_path());
+  auto            result = mmap_file::try_open(tf.string_path());
   REQUIRE(result.has_value());
   CHECK(result->string_view() == "try me");
 }
 
-TEST_CASE("try_mmap_file returns an error message for a non-existent path", "[mmap_file][negative]")
+TEST_CASE("mmap_file::try_open returns an error message for a non-existent path", "[mmap_file][negative]")
 {
-  auto result = try_mmap_file(nonexistent_path());
+  auto result = mmap_file::try_open(nonexistent_path());
   REQUIRE_FALSE(result.has_value());
   CHECK_FALSE(result.error().empty());
 }
