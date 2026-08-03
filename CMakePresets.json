@@ -38,6 +38,17 @@
         "CMAKE_BUILD_TYPE": "Profile",
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
       }
+    },
+    {
+      "name": "ninja-coverage",
+      "displayName": "Coverage",
+      "description": "Debug (-O0, no sanitizers) + --coverage instrumentation; see the 'coverage' target in CMakeLists.txt.",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/coverage",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Coverage",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      }
     }
   ],
   "buildPresets": [
@@ -55,6 +66,12 @@
       "name": "profile",
       "configurePreset": "ninja-profile",
       "displayName": "Build (Profile)"
+    },
+    {
+      "name": "coverage",
+      "configurePreset": "ninja-coverage",
+      "displayName": "Build (Coverage)",
+      "targets": ["coverage"]
     }
   ]
 }

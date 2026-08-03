@@ -16,7 +16,7 @@ if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE "Debug" CACHE STRING "Choose build type" FORCE)
 endif()
 
-set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "Debug" "Release" "Profile")
+set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "Debug" "Release" "Profile" "Coverage")
 
 # --- 2. Common compilation and linking parameters ---
 if(MSVC)
@@ -55,6 +55,17 @@ else()
     )
     set(COMMON_LINK_FLAGS "-fsanitize=address,undefined,leak")
     set(COMMON_PROFILE_LINK_FLAGS "")
+    # No sanitizers here: ASan/UBSan instrumentation inflates gcov's branch counts with
+    # paths that only exist for the sanitizer's own checks, so a Coverage build measures
+    # plain -O0 execution instead, kept as close to Debug as possible otherwise.
+    set(COMMON_COVERAGE_FLAGS
+        ${COMMON_FLAGS}
+        "-g" "-O0" "-gdwarf-4"
+        "--coverage"
+        "-fno-omit-frame-pointer"
+        "-freflection"
+    )
+    set(COMMON_COVERAGE_LINK_FLAGS "--coverage")
 endif()
 
 # --- 3. Find required packages ---
@@ -157,6 +168,13 @@ function(add_fsp_target TARGET_NAME TYPE)
         if(NOT TYPE STREQUAL "STATIC")
             target_link_options(${TARGET_NAME} PRIVATE ${COMMON_PROFILE_LINK_FLAGS})
         endif()
+    elseif(CMAKE_BUILD_TYPE STREQUAL "Coverage")
+        target_compile_options(${TARGET_NAME} PRIVATE ${COMMON_COVERAGE_FLAGS})
+        # --coverage must be on the link line too (it pulls in libgcov) even for a STATIC
+        # library target, unlike the sanitizer flags above which only executables/shared
+        # libraries need -- a static lib has no link step of its own, but the final
+        # executable that links it still needs every object file's gcov instrumentation.
+        target_link_options(${TARGET_NAME} PRIVATE ${COMMON_COVERAGE_LINK_FLAGS})
     else()
         target_compile_options(${TARGET_NAME} PRIVATE ${COMMON_DEBUG_FLAGS})
         if(NOT TYPE STREQUAL "STATIC")  # Only for executable and shared library
@@ -169,10 +187,12 @@ function(add_fsp_target TARGET_NAME TYPE)
         $<$<CONFIG:Debug>:DEBUG_MODE>
         $<$<CONFIG:Release>:RELEASE_MODE>
         $<$<CONFIG:Profile>:RELEASE_MODE>
+        $<$<CONFIG:Coverage>:DEBUG_MODE>
 
         $<$<CONFIG:Debug>:SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_TRACE>
         $<$<CONFIG:Release>:SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_INFO>
         $<$<CONFIG:Profile>:SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_INFO>
+        $<$<CONFIG:Coverage>:SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_TRACE>
     )
 
     # Link with external libraries if provided
@@ -454,6 +474,35 @@ if(BUILD_TESTING)
         target_compile_options(${b_target} PRIVATE -Wno-c2y-extensions)
     endif()
     catch_discover_tests(${b_target})
+
+    # --- coverage report (only meaningful for -DCMAKE_BUILD_TYPE=Coverage, see
+    # COMMON_COVERAGE_FLAGS/COMMON_COVERAGE_LINK_FLAGS above) ---
+    # Runs unit_tests to produce .gcda files next to the .o's, then points gcovr at the
+    # build directory: --root/--filter restrict the report to this project's own src/ (excluding
+    # CPM-fetched third-party sources, which also get instrumented but aren't ours to cover),
+    # and -e src/test/ excludes the test files themselves from being counted as "covered code".
+    find_program(GCOVR_EXECUTABLE gcovr)
+    if(GCOVR_EXECUTABLE)
+        add_custom_target(coverage
+            COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/coverage
+            COMMAND $<TARGET_FILE:${b_target}>
+            COMMAND ${GCOVR_EXECUTABLE}
+                --root ${CMAKE_SOURCE_DIR}
+                --filter ${CMAKE_SOURCE_DIR}/src/
+                --exclude ${CMAKE_SOURCE_DIR}/src/test/
+                --exclude-unreachable-branches
+                --exclude-throw-branches
+                --print-summary
+                --html-details ${CMAKE_BINARY_DIR}/coverage/index.html
+                ${CMAKE_BINARY_DIR}
+            WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+            DEPENDS ${b_target}
+            COMMENT "Running unit_tests and generating gcovr HTML coverage report in build/coverage/index.html"
+            VERBATIM
+        )
+    else()
+        message(STATUS "gcovr not found -- 'coverage' target not available (install gcovr to enable it)")
+    endif()
 endif()
 #-------------------------------------------------------------------------------
 # --- 6. (Optional) Display built targets ---
