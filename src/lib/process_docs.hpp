@@ -14,7 +14,7 @@ namespace fsp
   class process_docs
   {
   public:
-    explicit process_docs(processor_config cfg);
+    explicit process_docs(const processor_config& cfg);
     //    process_docs(processor_config cfg, const str_t& parent_log_name);
     ~process_docs()                              = default;
     process_docs(const process_docs&)            = delete;
@@ -36,9 +36,9 @@ namespace fsp
     // NOLINTEND(cppcoreguidelines-avoid-const-or-ref-data-members)
   };
 
-  inline process_docs::process_docs(processor_config cfg)
+  inline process_docs::process_docs(const processor_config& cfg)
   : log_(cfg.log_config, cfg.program_name)
-  , impl_(std::move(cfg), log_, cfg.program_name)
+  , impl_(cfg, log_, cfg.program_name)
   {
   }
 
