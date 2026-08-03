@@ -88,25 +88,25 @@ namespace fsp
 
   void fsp_logger::critical(const error_info& e) const
   {
-    if (active(crit)) [[unlikely]]
+    if (active(lvl_enum::crit)) [[unlikely]]
       logger_->critical(e.to_string());
   }
 
   void fsp_logger::error(const error_info& e) const
   {
-    if (active(err)) [[unlikely]]
+    if (active(lvl_enum::err)) [[unlikely]]
       logger_->error(e.to_string());
   }
 
   void fsp_logger::critical(cstr_t msg) const
   {
-    if (active(crit)) [[unlikely]]
+    if (active(lvl_enum::crit)) [[unlikely]]
       logger_->critical(msg);
   }
 
   void fsp_logger::error(cstr_t msg) const
   {
-    if (active(err)) [[unlikely]]
+    if (active(lvl_enum::err)) [[unlikely]]
       logger_->error(msg);
   }
 

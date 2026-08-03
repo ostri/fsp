@@ -19,7 +19,7 @@ namespace fsp
   // Thread-local ime niti — vsaka nit nastavi svoje ime, ki ga formatter bere.
   // Definirano kot inline, da je vidno v vseh prevajalnih enotah brez ODR kršitev.
   // ---------------------------------------------------------------------------
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables, cert-err58-cpp)
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables, cert-err58-cpp, bugprone-throwing-static-initialization)
   inline thread_local str_t log_thread_name = "unknown";
   // ---------------------------------------------------------------------------
   // Custom spdlog flag formatter: izpisuje log_thread_name trenutne niti.
@@ -31,7 +31,7 @@ namespace fsp
     void format(const spdlog::details::log_msg& /*msg*/, const std::tm& /*tm*/, spdlog::memory_buf_t& dest) override;
     [[nodiscard]] std::unique_ptr<custom_flag_formatter> clone() const override;
   };
-  enum lvl_enum : std::uint8_t
+  enum class lvl_enum : std::uint8_t
   {
     crit  = spdlog::level::critical,
     err   = spdlog::level::err,

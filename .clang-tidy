@@ -1,4 +1,20 @@
 ---
+# Notes on this config:
+# - Checks: is a YAML literal block; a trailing '#' comment on an entry is read
+#   as part of the check name, so it silently does nothing. Every entry needs
+#   its trailing comma -- without one the next line glues onto it and both are
+#   lost. clang-tidy --verify-config reports both mistakes.
+# - llvm-prefer-static-over-anonymous-namespace and misc-use-anonymous-namespace
+#   contradict each other (static vs. anonymous namespace for internal linkage);
+#   the llvm one is off so the misc one decides.
+# - portability-avoid-pragma-once wants include guards instead of #pragma once,
+#   which every header here uses -- off for the same reason llvm-header-guard is.
+# - misc-include-cleaner wants each symbol's own header included directly even
+#   when it already arrives transitively -- pure transitive-include style, not
+#   correctness, so it is off.
+# - cppcoreguidelines-avoid-do-while is off for Catch2's TEST_CASE/CHECK macros,
+#   which expand to do { ... } while(0); this LLVM version has no macro-only
+#   variant, so it is off project-wide rather than firing on every test file.
 Checks: |
   *,
   -altera-*,
@@ -7,12 +23,13 @@ Checks: |
   -bugprone-narrowing-conversions,
   -cert-err60-cpp,
   -cppcoreguidelines-avoid-c-arrays,
+  -cppcoreguidelines-avoid-do-while,
   -cppcoreguidelines-avoid-magic-numbers,
   -cppcoreguidelines-init-variables,
   -cppcoreguidelines-pro-bounds-array-to-pointer-decay,
   -cppcoreguidelines-pro-type-reinterpret-cast,
   -cppcoreguidelines-pro-type-vararg,
-  -cppcoreguidelines-special-member-functions
+  -cppcoreguidelines-special-member-functions,
   -fuchsia-*,
   -google-readability-braces-around-statements,
   -hicpp-braces-around-statements,
@@ -20,23 +37,27 @@ Checks: |
   -llvmlibc-*,
   -llvm-header-guard,
   -llvm-include-order,
-  -llvm-prefer-static-over-anonymous-namespace, # conflicts with misc-use-anonymous-namespace
+  -llvm-prefer-static-over-anonymous-namespace,
+  -misc-include-cleaner,
   -modernize-use-trailing-return-type,
   -modernize-avoid-c-arrays,
-  -readability-avoid-do-while-macro,                    # <<< Catch2
+  -portability-avoid-pragma-once,
   -readability-braces-around-statements,
   -readability-convert-member-functions-to-static,
   -readability-identifier-length,
-  -readability-math-missing-parentheses
+  -readability-math-missing-parentheses,
   -readability-redundant-access-specifiers,
-  -readability-static-definition-in-anonymous-namespace, # <<< Catch2
-  -unused-includes,
-
+  -readability-static-definition-in-anonymous-namespace,
 
 WarningsAsErrors: '*'
-HeaderFilterRegex: ^(?!.*catch2)
+# clang-tidy matches this with llvm::Regex (POSIX extended, no negative
+# lookahead), so it must name the path directly rather than try to exclude one.
+HeaderFilterRegex: 'src/.*\.hpp$'
 HeaderFileExtensions: [ hpp ]
 ImplementationFileExtensions: [ cpp ]
 FormatStyle:     none
-ExtraArgsBefore: [ -std=c++23 ]
+# -Wno-unknown-warning-option: compile_commands.json comes from the GCC build,
+# which carries GCC-only flags clang doesn't recognize; with WarningsAsErrors: '*'
+# that would otherwise fail every file before any check runs.
+ExtraArgsBefore: [ -std=c++23, -Wno-unknown-warning-option ]
 ...

@@ -36,7 +36,7 @@ namespace fsp
     {
       std::size_t count = 0;
       {
-        std::lock_guard lock(mtx_);
+        const std::scoped_lock lock(mtx_);
         for (auto&& item : std::forward<R>(range))
         {
           q_.push(std::forward<decltype(item)>(item));
@@ -80,7 +80,7 @@ namespace fsp
   template <class T>
   inline std::size_t lock_queue<T>::size() const
   {
-    std::lock_guard lock(mtx_);
+    const std::scoped_lock lock(mtx_);
     return q_.size();
   }
   /**
@@ -93,7 +93,7 @@ namespace fsp
   void lock_queue<T>::push(T&& s)
   {
     {
-      std::lock_guard lock(mtx_);
+      const std::scoped_lock lock(mtx_);
       q_.push(std::move(s));
       size_approx_.fetch_add(1, std::memory_order_relaxed);
     }
@@ -103,7 +103,7 @@ namespace fsp
   void lock_queue<T>::push(const T& s)
   {
     {
-      std::lock_guard lock(mtx_);
+      const std::scoped_lock lock(mtx_);
       q_.push(s);
       size_approx_.fetch_add(1, std::memory_order_relaxed);
     }
@@ -143,8 +143,8 @@ namespace fsp
   template <class T>
   inline std::expected<T, queue_status> lock_queue<T>::try_pop()
   {
-    std::unique_lock lock(mtx_);
-    queue_status     s = state_.load(std::memory_order_relaxed);
+    const std::unique_lock lock(mtx_);
+    const queue_status     s = state_.load(std::memory_order_relaxed);
     if (s == queue_status::aborted) return std::unexpected<queue_status>(queue_status::aborted);
     if (q_.empty())
     {
@@ -164,14 +164,14 @@ namespace fsp
   template <class T>
   void lock_queue<T>::set_finished()
   {
-    std::lock_guard lock(mtx_);
+    const std::scoped_lock lock(mtx_);
     state_ = queue_status::finished;
     cv_.notify_all();
   }
   template <class T>
   void lock_queue<T>::set_abort()
   {
-    std::lock_guard lock(mtx_);
+    const std::scoped_lock lock(mtx_);
     state_ = queue_status::aborted;
     cv_.notify_all();
   }
@@ -193,7 +193,7 @@ namespace fsp
   template <class T>
   inline bool lock_queue<T>::drained() const noexcept
   {
-    std::lock_guard lock(mtx_);
+    const std::scoped_lock lock(mtx_);
     return is_finished() && q_.empty();
   }
 } // namespace fsp
