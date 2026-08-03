@@ -76,7 +76,12 @@ function(add_fsp_target TARGET_NAME TYPE)
     # Common include paths (can be extended as needed)
     target_include_directories(${TARGET_NAME} PUBLIC
         ${CMAKE_SOURCE_DIR}/src
-        ${CMAKE_SOURCE_DIR}/src/lib
+        ${CMAKE_SOURCE_DIR}/src/importer
+        ${CMAKE_SOURCE_DIR}/src/common
+        ${CMAKE_SOURCE_DIR}/src/common/lock_queue
+        ${CMAKE_SOURCE_DIR}/src/common/mmap
+        ${CMAKE_SOURCE_DIR}/src/common/logger
+        ${CMAKE_SOURCE_DIR}/src/common/xercesc_helpers
     )
 
     # Additional include paths provided by the caller via APPEND_INCLUDES
@@ -123,7 +128,7 @@ endfunction()
 # (config/log_debug.conf.in or config/log_release.conf.in, picked by the current
 # CMAKE_BUILD_TYPE), substituting @PROGRAM_NAME@ for the target's own name, into
 # log_<TARGET_NAME>_<debug|release>.conf in the build directory -- see
-# fsp::load_logger_config() in src/lib/logger.cpp for the matching runtime lookup.
+# fsp::load_logger_config() in src/common/logger/logger.cpp for the matching runtime lookup.
 # configure_file() also makes CMake re-run (and thus regenerate this file) whenever the
 # template changes, even without an explicit `cmake ..`.
 function(add_log_config TARGET_NAME)
@@ -140,7 +145,7 @@ endfunction()
 
 # WORKAROUND (remove once GCC 16.2 ships): on this GCC 16.1.1 -freflection branch,
 # -fsanitize=undefined breaks consteval evaluation of annotation_text() in
-# src/lib/reflection.hpp -- reading a [[= "..."]] annotation back via
+# src/importer/reflection.hpp -- reading a [[= "..."]] annotation back via
 # display_string_of()/define_static_array() three consteval calls deep
 # (proc_data_of -> classes_of/fields_of -> attr_of/field_attr_of) turns into
 # "not a constant expression" only under UBSan. -fsanitize=address and
@@ -154,41 +159,41 @@ function(disable_ubsan_for_reflection)
 endfunction()
 
 set(SOURCES
-    ${CMAKE_SOURCE_DIR}/src/lib/x_str.cpp
-    ${CMAKE_SOURCE_DIR}/src/lib/xerces_mgr.cpp
-    ${CMAKE_SOURCE_DIR}/src/lib/handler.cpp
-    ${CMAKE_SOURCE_DIR}/src/lib/lock_queue.cpp
-    ${CMAKE_SOURCE_DIR}/src/lib/xml_segment.cpp
-    ${CMAKE_SOURCE_DIR}/src/lib/mmap_file.cpp
-    ${CMAKE_SOURCE_DIR}/src/lib/error_info.cpp
-    ${CMAKE_SOURCE_DIR}/src/lib/logger_config.cpp
-    ${CMAKE_SOURCE_DIR}/src/lib/processor_config.cpp
-    ${CMAKE_SOURCE_DIR}/src/lib/xpath_helpers.cpp
-    ${CMAKE_SOURCE_DIR}/src/lib/common.cpp
-    ${CMAKE_SOURCE_DIR}/src/lib/parsing_util.cpp
-    ${CMAKE_SOURCE_DIR}/src/lib/e_tag_wide.cpp
-    ${CMAKE_SOURCE_DIR}/src/lib/xml_node.cpp
-    ${CMAKE_SOURCE_DIR}/src/lib/xml_attr.cpp
-    ${CMAKE_SOURCE_DIR}/src/lib/xpath_el.cpp
-    ${CMAKE_SOURCE_DIR}/src/lib/segment_result.cpp
-    ${CMAKE_SOURCE_DIR}/src/lib/result_values.cpp
-    ${CMAKE_SOURCE_DIR}/src/lib/pipeline_hooks.cpp
-    ${CMAKE_SOURCE_DIR}/src/lib/logger.cpp
-    ${CMAKE_SOURCE_DIR}/src/lib/xml_worker.cpp
-    ${CMAKE_SOURCE_DIR}/src/lib/load_grammar.cpp
-    ${CMAKE_SOURCE_DIR}/src/lib/process_docs.cpp
-    ${CMAKE_SOURCE_DIR}/src/lib/stats.cpp
-    ${CMAKE_SOURCE_DIR}/src/lib/segment_sax.cpp
-    ${CMAKE_SOURCE_DIR}/src/lib/xpath_set.cpp
-    ${CMAKE_SOURCE_DIR}/src/lib/doc_dscr.cpp
-    ${CMAKE_SOURCE_DIR}/src/lib/doc_set_dscr.cpp
-    ${CMAKE_SOURCE_DIR}/src/lib/doc_counters.cpp
-    ${CMAKE_SOURCE_DIR}/src/lib/doc_set_counter.cpp
-    ${CMAKE_SOURCE_DIR}/src/lib/segment_pool.cpp
-    ${CMAKE_SOURCE_DIR}/src/lib/doc_cutter.cpp
-    ${CMAKE_SOURCE_DIR}/src/lib/pipeline_worker.cpp
-    ${CMAKE_SOURCE_DIR}/src/lib/pipeline.cpp
-    ${CMAKE_SOURCE_DIR}/src/lib/doc_validator.cpp
+    ${CMAKE_SOURCE_DIR}/src/common/xercesc_helpers/x_str.cpp
+    ${CMAKE_SOURCE_DIR}/src/common/xercesc_helpers/xerces_mgr.cpp
+    ${CMAKE_SOURCE_DIR}/src/importer/handler.cpp
+    ${CMAKE_SOURCE_DIR}/src/common/lock_queue/lock_queue.cpp
+    ${CMAKE_SOURCE_DIR}/src/importer/xml_segment.cpp
+    ${CMAKE_SOURCE_DIR}/src/common/mmap/mmap_file.cpp
+    ${CMAKE_SOURCE_DIR}/src/importer/error_info.cpp
+    ${CMAKE_SOURCE_DIR}/src/common/logger/logger_config.cpp
+    ${CMAKE_SOURCE_DIR}/src/importer/processor_config.cpp
+    ${CMAKE_SOURCE_DIR}/src/importer/xpath_helpers.cpp
+    ${CMAKE_SOURCE_DIR}/src/common/common.cpp
+    ${CMAKE_SOURCE_DIR}/src/importer/parsing_util.cpp
+    ${CMAKE_SOURCE_DIR}/src/importer/e_tag_wide.cpp
+    ${CMAKE_SOURCE_DIR}/src/importer/xml_node.cpp
+    ${CMAKE_SOURCE_DIR}/src/importer/xml_attr.cpp
+    ${CMAKE_SOURCE_DIR}/src/importer/xpath_el.cpp
+    ${CMAKE_SOURCE_DIR}/src/importer/segment_result.cpp
+    ${CMAKE_SOURCE_DIR}/src/importer/result_values.cpp
+    ${CMAKE_SOURCE_DIR}/src/importer/pipeline_hooks.cpp
+    ${CMAKE_SOURCE_DIR}/src/common/logger/logger.cpp
+    ${CMAKE_SOURCE_DIR}/src/importer/xml_worker.cpp
+    ${CMAKE_SOURCE_DIR}/src/importer/load_grammar.cpp
+    ${CMAKE_SOURCE_DIR}/src/importer/process_docs.cpp
+    ${CMAKE_SOURCE_DIR}/src/importer/stats.cpp
+    ${CMAKE_SOURCE_DIR}/src/importer/segment_sax.cpp
+    ${CMAKE_SOURCE_DIR}/src/importer/xpath_set.cpp
+    ${CMAKE_SOURCE_DIR}/src/importer/doc_dscr.cpp
+    ${CMAKE_SOURCE_DIR}/src/importer/doc_set_dscr.cpp
+    ${CMAKE_SOURCE_DIR}/src/importer/doc_counters.cpp
+    ${CMAKE_SOURCE_DIR}/src/importer/doc_set_counter.cpp
+    ${CMAKE_SOURCE_DIR}/src/importer/segment_pool.cpp
+    ${CMAKE_SOURCE_DIR}/src/importer/doc_cutter.cpp
+    ${CMAKE_SOURCE_DIR}/src/importer/pipeline_worker.cpp
+    ${CMAKE_SOURCE_DIR}/src/importer/pipeline.cpp
+    ${CMAKE_SOURCE_DIR}/src/importer/doc_validator.cpp
     ${CMAKE_SOURCE_DIR}/src/ach/utility.cpp
 )
 # --- 5. Define targets ---
@@ -210,8 +215,8 @@ add_fsp_target(fsp_lib STATIC ${fsp_lib_SOURCES})
 set(b_target validate) # name of the target
 set(${b_target}_SOURCES
     ${CMAKE_SOURCE_DIR}/src/auxiliary/validate.cpp
-    ${CMAKE_SOURCE_DIR}/src/lib/xerces_mgr.cpp
-    ${CMAKE_SOURCE_DIR}/src/lib/x_str.cpp
+    ${CMAKE_SOURCE_DIR}/src/common/xercesc_helpers/xerces_mgr.cpp
+    ${CMAKE_SOURCE_DIR}/src/common/xercesc_helpers/x_str.cpp
 )
 set(FSP_TARGET_${b_target}_INCLUDES ${CMAKE_SOURCE_DIR}/src/auxiliary)
 set(FSP_TARGET_${b_target}_LIBS
@@ -238,10 +243,10 @@ add_fsp_target(${b_target} EXECUTABLE ${${b_target}_SOURCES})
 set(b_target test_pars) # name of the target
 set(${b_target}_SOURCES
     ${CMAKE_SOURCE_DIR}/src/test/test_pars.cpp
-    ${CMAKE_SOURCE_DIR}/src/lib/parsing_util.cpp
+    ${CMAKE_SOURCE_DIR}/src/importer/parsing_util.cpp
 )
 set(FSP_TARGET_${b_target}_INCLUDES
-  ${CMAKE_SOURCE_DIR}/src/lib
+  ${CMAKE_SOURCE_DIR}/src/importer
   ${CMAKE_SOURCE_DIR}/src/test
   )
 set(FSP_TARGET_${b_target}_LIBS
@@ -256,10 +261,10 @@ add_fsp_target(${b_target} EXECUTABLE ${${b_target}_SOURCES})
 set(b_target t_refl) # name of the target
 set(${b_target}_SOURCES
     ${CMAKE_SOURCE_DIR}/src/test/t_refl.cpp
-    ${CMAKE_SOURCE_DIR}/src/lib/parsing_util.cpp
+    ${CMAKE_SOURCE_DIR}/src/importer/parsing_util.cpp
 )
 set(FSP_TARGET_${b_target}_INCLUDES
-  ${CMAKE_SOURCE_DIR}/src/lib
+  ${CMAKE_SOURCE_DIR}/src/importer
   ${CMAKE_SOURCE_DIR}/src/test
   )
 set(FSP_TARGET_${b_target}_LIBS
@@ -277,7 +282,7 @@ set(${b_target}_SOURCES
     ${CMAKE_SOURCE_DIR}/src/test/pacs8.cpp
 )
 set(FSP_TARGET_${b_target}_INCLUDES
-  ${CMAKE_SOURCE_DIR}/src/lib
+  ${CMAKE_SOURCE_DIR}/src/importer
   ${CMAKE_SOURCE_DIR}/src/test
   )
 set(FSP_TARGET_${b_target}_LIBS
@@ -298,7 +303,7 @@ set(${b_target}_SOURCES
     ${CMAKE_SOURCE_DIR}/src/test/pacs8_cb.cpp
 )
 set(FSP_TARGET_${b_target}_INCLUDES
-  ${CMAKE_SOURCE_DIR}/src/lib
+  ${CMAKE_SOURCE_DIR}/src/importer
   ${CMAKE_SOURCE_DIR}/src/test
   )
 set(FSP_TARGET_${b_target}_LIBS
@@ -316,13 +321,13 @@ add_log_config(${b_target})
 set(b_target validator) # name of the target
 set(${b_target}_SOURCES
     ${CMAKE_SOURCE_DIR}/src/auxiliary/validator.cpp
-    ${CMAKE_SOURCE_DIR}/src/lib/xerces_mgr.cpp
-    ${CMAKE_SOURCE_DIR}/src/lib/x_str.cpp
-    ${CMAKE_SOURCE_DIR}/src/lib/load_grammar.cpp
-    ${CMAKE_SOURCE_DIR}/src/lib/mmap_file.cpp
+    ${CMAKE_SOURCE_DIR}/src/common/xercesc_helpers/xerces_mgr.cpp
+    ${CMAKE_SOURCE_DIR}/src/common/xercesc_helpers/x_str.cpp
+    ${CMAKE_SOURCE_DIR}/src/importer/load_grammar.cpp
+    ${CMAKE_SOURCE_DIR}/src/common/mmap/mmap_file.cpp
 )
 set(FSP_TARGET_${b_target}_INCLUDES
-  ${CMAKE_SOURCE_DIR}/src/lib
+  ${CMAKE_SOURCE_DIR}/src/importer
   ${CMAKE_SOURCE_DIR}/src/test
   ${XERCESC_INCLUDE_DIR}
   )
