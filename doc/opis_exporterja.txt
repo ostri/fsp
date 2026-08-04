@@ -1,0 +1,89 @@
+exporter razred
+
+cilj naloge je čim hitrejša priprava xml/utf-8 dokumentov na disk na  podlagi vsebine, ki jo podaja
+callback razred. Vsak klic fetch_doc_data prinese dovolj vsebine za izdelavo enega dokumenta.
+Ogrodje je maksimalno paralelizirano. Število delovnih niti je parameter klica.
+Vsaka delovna nit dela neodvisno.
+
+glavna nit:
+- zažene vse delovne niti
+- počaka na izhod niti
+- izračuna statistiko obdelav
+
+worker pred zanko
+- inicializiraj xml_writter instanco
+worker nit dela v zanki
+  - če zahteva za konec dela -> logiraj prisilen izhod; izračunaj statistiko in jo logiraj in izhod iz zanke
+  - available_drains_ je prazen: izračunaj statistiko in jo logiraj, izhod iz zanke (normalen izhod)
+  - pridobi drain-id iz available_drains_ (če, že imamo work-drain-id, ga ohranimo, drugače random selection, če size > 1)
+  - ali drain-id že ima urejeno statistiko -> nima: zakleni in zberi statistiko cb.
+  - pridobi blok transakcij cb.fetch_doc_data
+    - po potrebi izloči drain, če size < block_size
+    - če size == 0 -> loop
+  - cb.prepare_header -> xml_writter
+  - za vsako transakcijo:
+    - cb.prepare_transaction
+    - če je prekoračena meja -> xml_writter
+  - cb.prepare_footer -> xml_writter
+  - dopolni statistiko niti
+  - popravi globalno statistiko run-a (drain-id, število dokumentov+1)
+
+
+
+
+
+
+
+
+
+konfiguracijski podatki:
+- tip izhodnega dokumenta
+- polje prejemnikov (drain_list) {id, name, maksimalno-število-transakcij-na-dokument}
+- number_of threads
+- filename prefix
+- kvalifikatorji runa - (vektor stringov) recimo številka klirinškega cikla
+  - npr. št poravnalnega cikla, tip dokumenta,
+  - exporter ne pozna semantike kvalifikatorjev, cb metode pa morajo poznati to semantiko
+callback razred:
+- fetch_doc_name(kvalifikatorji, path, številka bloka, število vseh blokov, filename_prefix) -> ime|napaka
+  - izdela ime nove datoteke
+- fetch_run_stat(kvalifikatorji, drain_id) -> vrne {št transakcij, št narejenih dokumentov, št-bodočih-dokumentov} za podani drain-id
+  - statistika za celoten run/drain-id
+  - narejeni dokumenti so tisti, ki so že nastali
+  - bodoči dokumenti so število transakcij div velikost dokumeta +1
+  - pride prav, če run pade med delom in lahko zaženemo še enkrat in nadaljuje
+- fetch_doc_data (kvalifikatorji, drain-id, id-dokumenta) -> block_of_transactions<T>, ali pa : signal za konec, signal napake
+- prepare_transaction(ndx, drain-id, id-dokumenta, const T& data) -> transaction to be outputed ali koda napake (std::expect)
+- prepare_header(kvalifikatoji, drain-id, id-dokumenta) -> header string ali koda napake
+  - vrne string, ki predstavlja header dokumenta
+- prepare_footer(kvalifikatorji, drain-id, id-dokumenta) -> footer string ali koda napake
+  - vrne string, ki predstavlja footer datoteke
+- document_prepared(kvalifikatorji, drain-id, doc-id) -> tue/false
+  - če vrne true se narejena datoteka premakne iz začasne lokacije na ciljno
+  - cb metoda pa lahko zaključi transakcijo
+
+interne strukture (ko rečemo vrsta je to lock_query<int>)
+- seznam drainov za obdelavo - vrtimo dokler seznam ni prazen (zak)
+- drain-data (za vsak drain) - upravlja glavna nit/delovne niti berejo po potrebi
+    - vsi atributi iz drain-data
+    - statistika run-a (za vsak drain-id)
+      {
+        - loaded  t/f - ali je statistika za ta drain že naložena
+        - število transakcij na začetku runa-a,            (na začetku)
+        - število preostalih transakcij v preostanku run-a (popravljamo med obdelavo)
+        - število obstoječih dokumentov,                   (na začetku )
+        - število bodočih dokumentov na začetku run-a      (na začetku )
+        - število narejenih dokumentov v okviru run-a      (popravljamo med obdelavo)
+      }
+      - statistika se zaklepa, da ne pride do tekme pri inicialnem polnenju
+      - statistiko polni cb metoda fetch_doc_stat za posamezen drain-id
+    - doc_statistics_ vektor za vsak narejen ali dokument v delu
+      - ime dokumenta
+      - število transakcij
+      - header da/ne
+      - footer da/ne
+      - čas izdelave dokumenta (od fetch data do končne potrditve)
+- seznam še razpoložljivih drainov (available_drains_ : vector<drain-id>)
+  - v začetku so notri vsi draini
+  - ko prvi cleaner naleti na situacijo, ko dobi manj transakcij za specifičen drain kot ima prostora v bloku
+    zaklene strukturo in izbirše ta drain iz liste ter odklene
