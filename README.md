@@ -2,6 +2,9 @@
 
 Fast SEPA xml file parser
 
+To consume `fsp::importer`/`fsp::exporter` from another project via CPM, see
+[docs/cpm-integration.md](docs/cpm-integration.md).
+
 ## Build process
 
 The project defines four build environments (`CMAKE_BUILD_TYPE`), each with its own compile/link

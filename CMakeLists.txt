@@ -6,6 +6,43 @@ project(fsp LANGUAGES CXX)
 # cmake -B build-profile -DCMAKE_BUILD_TYPE=Profile
 #
 
+# --- 0. Top-level vs. CPM-consumed detection ---
+# Whether this is the top-level project (built directly, e.g. `cmake --preset ninja-debug`)
+# or pulled in as a dependency of another project (add_subdirectory()/FetchContent/
+# CPMAddPackage()). Only the top-level case builds fsp's own executables/tests/coverage
+# target -- a consumer of fsp via CPM only wants the fsp::fsp_lib target (see ALIAS below)
+# to link against, not fsp's own dev tools. See docs/cpm-integration.md for the consumer side.
+set(FSP_IS_TOP_LEVEL_PROJECT OFF)
+if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
+    set(FSP_IS_TOP_LEVEL_PROJECT ON)
+endif()
+
+# option()'s third argument must be a literal ON/OFF -- passing a variable through (even one
+# that itself expands to ON/OFF, like ${FSP_IS_TOP_LEVEL_PROJECT}) is not reliably honored, so
+# the default is picked explicitly here instead of handed to option() directly.
+if(FSP_IS_TOP_LEVEL_PROJECT)
+    option(FSP_BUILD_EXECUTABLES "Build fsp's own executables (validate, gen, pacs8, pacs8-cb, validator)" ON)
+    option(FSP_BUILD_TESTS "Build fsp's own test executables (test_pars, t_refl) and unit_tests/coverage" ON)
+else()
+    option(FSP_BUILD_EXECUTABLES "Build fsp's own executables (validate, gen, pacs8, pacs8-cb, validator)" OFF)
+    option(FSP_BUILD_TESTS "Build fsp's own test executables (test_pars, t_refl) and unit_tests/coverage" OFF)
+endif()
+
+# BUILD_TESTING is CTest's standard opt-out switch, defaulted to FSP_IS_TOP_LEVEL_PROJECT (see
+# above) rather than an unconditional ON -- a project that CPM-consumes fsp only wants fsp_lib,
+# not fsp's own Catch2 fetch and unit_tests target. Deliberately set here, BEFORE the first
+# CPMAddPackage() call below: option() only takes effect on the first call that sets a given
+# cache variable, and ostri/logger (fetched via CPMAddPackage(NAME logger ...) further down)
+# also declares its own option(BUILD_TESTING ... ${PROJECT_IS_TOP_LEVEL}) internally -- since
+# logger is never top-level when pulled in as fsp's subdirectory, its own default is OFF. If
+# logger's add_subdirectory() ran before fsp's own BUILD_TESTING default was set, logger's OFF
+# would win the cache race and silently disable fsp's unit_tests too.
+if(FSP_IS_TOP_LEVEL_PROJECT)
+    option(BUILD_TESTING "Build unit tests" ON)
+else()
+    option(BUILD_TESTING "Build unit tests" OFF)
+endif()
+
 # --- 1. General project settings ---
 set(CMAKE_CXX_STANDARD 26)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -130,10 +167,9 @@ CPMAddPackage(
 )
 
 # --- 3a. Unit testing (Catch2, fetched via CPM) ---
-# BUILD_TESTING is CTest's standard opt-out switch, defaulted ON here since
-# this project has no separate packaging/consumer mode to skip it for.
-option(BUILD_TESTING "Build unit tests" ON)
-if(BUILD_TESTING)
+# BUILD_TESTING itself is set at the top of this file (before any CPMAddPackage() call --
+# see the comment there for why the ordering matters).
+if(BUILD_TESTING AND FSP_BUILD_TESTS)
     CPMAddPackage(
         NAME Catch2
         GITHUB_REPOSITORY catchorg/Catch2
@@ -159,13 +195,13 @@ function(add_fsp_target TARGET_NAME TYPE)
 
     # Common include paths (can be extended as needed)
     target_include_directories(${TARGET_NAME} PUBLIC
-        ${CMAKE_SOURCE_DIR}/src
-        ${CMAKE_SOURCE_DIR}/src/importer
-        ${CMAKE_SOURCE_DIR}/src/exporter
-        ${CMAKE_SOURCE_DIR}/src/common
-        ${CMAKE_SOURCE_DIR}/src/common/lock_queue
-        ${CMAKE_SOURCE_DIR}/src/common/mmap
-        ${CMAKE_SOURCE_DIR}/src/common/xercesc_helpers
+        ${PROJECT_SOURCE_DIR}/src
+        ${PROJECT_SOURCE_DIR}/src/importer
+        ${PROJECT_SOURCE_DIR}/src/exporter
+        ${PROJECT_SOURCE_DIR}/src/common
+        ${PROJECT_SOURCE_DIR}/src/common/lock_queue
+        ${PROJECT_SOURCE_DIR}/src/common/mmap
+        ${PROJECT_SOURCE_DIR}/src/common/xercesc_helpers
     )
 
     # Additional include paths provided by the caller via APPEND_INCLUDES
@@ -235,9 +271,9 @@ endfunction()
 # depends on it, but kept as a parameter so call sites (pacs8, pacs8-cb) don't need
 # to change if per-target output directories are introduced later.
 function(add_log_config TARGET_NAME)
-    configure_file(${CMAKE_SOURCE_DIR}/config/log.debug.json
+    configure_file(${PROJECT_SOURCE_DIR}/config/log.debug.json
                    ${CMAKE_BINARY_DIR}/config/log.debug.json COPYONLY)
-    configure_file(${CMAKE_SOURCE_DIR}/config/log.release.json
+    configure_file(${PROJECT_SOURCE_DIR}/config/log.release.json
                    ${CMAKE_BINARY_DIR}/config/log.release.json COPYONLY)
 endfunction()
 
@@ -257,49 +293,49 @@ function(disable_ubsan_for_reflection)
 endfunction()
 
 set(SRC_IMPORTER
-    ${CMAKE_SOURCE_DIR}/src/importer/handler.cpp
-    ${CMAKE_SOURCE_DIR}/src/importer/xml_segment.cpp
-    ${CMAKE_SOURCE_DIR}/src/importer/error_info.cpp
-    ${CMAKE_SOURCE_DIR}/src/importer/processor_config.cpp
-    ${CMAKE_SOURCE_DIR}/src/importer/xpath_helpers.cpp
-    ${CMAKE_SOURCE_DIR}/src/importer/parsing_util.cpp
-    ${CMAKE_SOURCE_DIR}/src/importer/e_tag_wide.cpp
-    ${CMAKE_SOURCE_DIR}/src/importer/xml_node.cpp
-    ${CMAKE_SOURCE_DIR}/src/importer/xml_attr.cpp
-    ${CMAKE_SOURCE_DIR}/src/importer/xpath_el.cpp
-    ${CMAKE_SOURCE_DIR}/src/importer/segment_result.cpp
-    ${CMAKE_SOURCE_DIR}/src/importer/result_values.cpp
-    ${CMAKE_SOURCE_DIR}/src/importer/pipeline_hooks.cpp
-    ${CMAKE_SOURCE_DIR}/src/importer/xml_worker.cpp
-    ${CMAKE_SOURCE_DIR}/src/importer/load_grammar.cpp
-    ${CMAKE_SOURCE_DIR}/src/importer/importer.cpp
-    ${CMAKE_SOURCE_DIR}/src/importer/stats.cpp
-    ${CMAKE_SOURCE_DIR}/src/importer/segment_sax.cpp
-    ${CMAKE_SOURCE_DIR}/src/importer/xpath_set.cpp
-    ${CMAKE_SOURCE_DIR}/src/importer/doc_dscr.cpp
-    ${CMAKE_SOURCE_DIR}/src/importer/doc_set_dscr.cpp
-    ${CMAKE_SOURCE_DIR}/src/importer/doc_counters.cpp
-    ${CMAKE_SOURCE_DIR}/src/importer/doc_set_counter.cpp
-    ${CMAKE_SOURCE_DIR}/src/importer/segment_pool.cpp
-    ${CMAKE_SOURCE_DIR}/src/importer/doc_cutter.cpp
-    ${CMAKE_SOURCE_DIR}/src/importer/pipeline_worker.cpp
-    ${CMAKE_SOURCE_DIR}/src/importer/pipeline.cpp
-    ${CMAKE_SOURCE_DIR}/src/importer/doc_validator.cpp
+    ${PROJECT_SOURCE_DIR}/src/importer/handler.cpp
+    ${PROJECT_SOURCE_DIR}/src/importer/xml_segment.cpp
+    ${PROJECT_SOURCE_DIR}/src/importer/error_info.cpp
+    ${PROJECT_SOURCE_DIR}/src/importer/processor_config.cpp
+    ${PROJECT_SOURCE_DIR}/src/importer/xpath_helpers.cpp
+    ${PROJECT_SOURCE_DIR}/src/importer/parsing_util.cpp
+    ${PROJECT_SOURCE_DIR}/src/importer/e_tag_wide.cpp
+    ${PROJECT_SOURCE_DIR}/src/importer/xml_node.cpp
+    ${PROJECT_SOURCE_DIR}/src/importer/xml_attr.cpp
+    ${PROJECT_SOURCE_DIR}/src/importer/xpath_el.cpp
+    ${PROJECT_SOURCE_DIR}/src/importer/segment_result.cpp
+    ${PROJECT_SOURCE_DIR}/src/importer/result_values.cpp
+    ${PROJECT_SOURCE_DIR}/src/importer/pipeline_hooks.cpp
+    ${PROJECT_SOURCE_DIR}/src/importer/xml_worker.cpp
+    ${PROJECT_SOURCE_DIR}/src/importer/load_grammar.cpp
+    ${PROJECT_SOURCE_DIR}/src/importer/importer.cpp
+    ${PROJECT_SOURCE_DIR}/src/importer/stats.cpp
+    ${PROJECT_SOURCE_DIR}/src/importer/segment_sax.cpp
+    ${PROJECT_SOURCE_DIR}/src/importer/xpath_set.cpp
+    ${PROJECT_SOURCE_DIR}/src/importer/doc_dscr.cpp
+    ${PROJECT_SOURCE_DIR}/src/importer/doc_set_dscr.cpp
+    ${PROJECT_SOURCE_DIR}/src/importer/doc_counters.cpp
+    ${PROJECT_SOURCE_DIR}/src/importer/doc_set_counter.cpp
+    ${PROJECT_SOURCE_DIR}/src/importer/segment_pool.cpp
+    ${PROJECT_SOURCE_DIR}/src/importer/doc_cutter.cpp
+    ${PROJECT_SOURCE_DIR}/src/importer/pipeline_worker.cpp
+    ${PROJECT_SOURCE_DIR}/src/importer/pipeline.cpp
+    ${PROJECT_SOURCE_DIR}/src/importer/doc_validator.cpp
 )
 
 set(SRC_EXPORTER
-    ${CMAKE_SOURCE_DIR}/src/exporter/xml_writer.cpp
-    ${CMAKE_SOURCE_DIR}/src/exporter/exporter_error.cpp
-    ${CMAKE_SOURCE_DIR}/src/exporter/exporter_state.cpp
+    ${PROJECT_SOURCE_DIR}/src/exporter/xml_writer.cpp
+    ${PROJECT_SOURCE_DIR}/src/exporter/exporter_error.cpp
+    ${PROJECT_SOURCE_DIR}/src/exporter/exporter_state.cpp
 )
 
 set(SRC_COMMON
-    ${CMAKE_SOURCE_DIR}/src/common/xercesc_helpers/x_str.cpp
-    ${CMAKE_SOURCE_DIR}/src/common/xercesc_helpers/xerces_mgr.cpp
-    ${CMAKE_SOURCE_DIR}/src/common/lock_queue/lock_queue.cpp
-    ${CMAKE_SOURCE_DIR}/src/common/mmap/mmap_file.cpp
-    ${CMAKE_SOURCE_DIR}/src/common/common.cpp
-    ${CMAKE_SOURCE_DIR}/src/ach/utility.cpp
+    ${PROJECT_SOURCE_DIR}/src/common/xercesc_helpers/x_str.cpp
+    ${PROJECT_SOURCE_DIR}/src/common/xercesc_helpers/xerces_mgr.cpp
+    ${PROJECT_SOURCE_DIR}/src/common/lock_queue/lock_queue.cpp
+    ${PROJECT_SOURCE_DIR}/src/common/mmap/mmap_file.cpp
+    ${PROJECT_SOURCE_DIR}/src/common/common.cpp
+    ${PROJECT_SOURCE_DIR}/src/ach/utility.cpp
 )
 
 set(SOURCES
@@ -311,7 +347,7 @@ set(SOURCES
 set(b_target fsp_lib) # name of the target
 # 5.1 fsp_lib (static library)
 set(${b_target}_SOURCES
-#    ${CMAKE_SOURCE_DIR}/src/main.cpp
+#    ${PROJECT_SOURCE_DIR}/src/main.cpp
     ${SOURCES}
 )
 # Specify additional libraries for fsp_lib (if needed)
@@ -332,16 +368,26 @@ set(FSP_TARGET_${b_target}_LIBS
     magic_enum::magic_enum
 )
 add_fsp_target(fsp_lib STATIC ${fsp_lib_SOURCES})
+# fsp::fsp_lib -- namespaced alias, the stable name a CPM consumer links against
+# (target_link_libraries(my_app PRIVATE fsp::fsp_lib)), same convention as logger::logger,
+# fmt::fmt, XercesC::XercesC below. See docs/cpm-integration.md.
+add_library(fsp::fsp_lib ALIAS fsp_lib)
+
+# --- fsp's own executables/tests: gated behind FSP_BUILD_EXECUTABLES/FSP_BUILD_TESTS ---
+# (both default to FSP_IS_TOP_LEVEL_PROJECT, see top of file). A project that CPM-consumes fsp
+# only needs fsp_lib itself; none of validate/gen/test_pars/t_refl/pacs8/pacs8-cb/validator/
+# unit_tests are part of the library API.
+if(FSP_BUILD_EXECUTABLES)
 #
 # --- target: validate --------------------------------------------------
 #
 set(b_target validate) # name of the target
 set(${b_target}_SOURCES
-    ${CMAKE_SOURCE_DIR}/src/auxiliary/validate.cpp
-    ${CMAKE_SOURCE_DIR}/src/common/xercesc_helpers/xerces_mgr.cpp
-    ${CMAKE_SOURCE_DIR}/src/common/xercesc_helpers/x_str.cpp
+    ${PROJECT_SOURCE_DIR}/src/auxiliary/validate.cpp
+    ${PROJECT_SOURCE_DIR}/src/common/xercesc_helpers/xerces_mgr.cpp
+    ${PROJECT_SOURCE_DIR}/src/common/xercesc_helpers/x_str.cpp
 )
-set(FSP_TARGET_${b_target}_INCLUDES ${CMAKE_SOURCE_DIR}/src/auxiliary)
+set(FSP_TARGET_${b_target}_INCLUDES ${PROJECT_SOURCE_DIR}/src/auxiliary)
 set(FSP_TARGET_${b_target}_LIBS
     fmt::fmt
     XercesC::XercesC
@@ -352,25 +398,27 @@ add_fsp_target(${b_target} EXECUTABLE ${${b_target}_SOURCES})
 #
 set(b_target gen) # name of the target
 set(${b_target}_SOURCES
-    ${CMAKE_SOURCE_DIR}/src/auxiliary/gen.cpp
+    ${PROJECT_SOURCE_DIR}/src/auxiliary/gen.cpp
 )
-set(FSP_TARGET_${b_target}_INCLUDES ${CMAKE_SOURCE_DIR}/src/auxiliary)
+set(FSP_TARGET_${b_target}_INCLUDES ${PROJECT_SOURCE_DIR}/src/auxiliary)
 set(FSP_TARGET_${b_target}_LIBS
     fsp_lib
     XercesC::XercesC
 )
 add_fsp_target(${b_target} EXECUTABLE ${${b_target}_SOURCES})
+endif() # FSP_BUILD_EXECUTABLES
 # -----------------------------------------------------------------------------
 # --- target: test_pars
 # -----------------------------------------------------------------------------
+if(FSP_BUILD_TESTS)
 set(b_target test_pars) # name of the target
 set(${b_target}_SOURCES
-    ${CMAKE_SOURCE_DIR}/src/test/test_pars.cpp
-    ${CMAKE_SOURCE_DIR}/src/importer/parsing_util.cpp
+    ${PROJECT_SOURCE_DIR}/src/test/test_pars.cpp
+    ${PROJECT_SOURCE_DIR}/src/importer/parsing_util.cpp
 )
 set(FSP_TARGET_${b_target}_INCLUDES
-  ${CMAKE_SOURCE_DIR}/src/importer
-  ${CMAKE_SOURCE_DIR}/src/test
+  ${PROJECT_SOURCE_DIR}/src/importer
+  ${PROJECT_SOURCE_DIR}/src/test
   )
 set(FSP_TARGET_${b_target}_LIBS
     fmt::fmt
@@ -383,30 +431,32 @@ add_fsp_target(${b_target} EXECUTABLE ${${b_target}_SOURCES})
 # -----------------------------------------------------------------------------
 set(b_target t_refl) # name of the target
 set(${b_target}_SOURCES
-    ${CMAKE_SOURCE_DIR}/src/test/t_refl.cpp
-    ${CMAKE_SOURCE_DIR}/src/importer/parsing_util.cpp
+    ${PROJECT_SOURCE_DIR}/src/test/t_refl.cpp
+    ${PROJECT_SOURCE_DIR}/src/importer/parsing_util.cpp
 )
 set(FSP_TARGET_${b_target}_INCLUDES
-  ${CMAKE_SOURCE_DIR}/src/importer
-  ${CMAKE_SOURCE_DIR}/src/test
+  ${PROJECT_SOURCE_DIR}/src/importer
+  ${PROJECT_SOURCE_DIR}/src/test
   )
 set(FSP_TARGET_${b_target}_LIBS
     fmt::fmt
     spdlog::spdlog
     magic_enum::magic_enum
 )
-disable_ubsan_for_reflection(${CMAKE_SOURCE_DIR}/src/test/t_refl.cpp)
+disable_ubsan_for_reflection(${PROJECT_SOURCE_DIR}/src/test/t_refl.cpp)
 add_fsp_target(${b_target} EXECUTABLE ${${b_target}_SOURCES})
+endif() # FSP_BUILD_TESTS
 # -----------------------------------------------------------------------------
 # --- target: pacs8
 # -----------------------------------------------------------------------------
+if(FSP_BUILD_EXECUTABLES)
 set(b_target pacs8) # name of the target
 set(${b_target}_SOURCES
-    ${CMAKE_SOURCE_DIR}/src/test/pacs8.cpp
+    ${PROJECT_SOURCE_DIR}/src/test/pacs8.cpp
 )
 set(FSP_TARGET_${b_target}_INCLUDES
-  ${CMAKE_SOURCE_DIR}/src/importer
-  ${CMAKE_SOURCE_DIR}/src/test
+  ${PROJECT_SOURCE_DIR}/src/importer
+  ${PROJECT_SOURCE_DIR}/src/test
   )
 set(FSP_TARGET_${b_target}_LIBS
     fsp_lib
@@ -414,7 +464,7 @@ set(FSP_TARGET_${b_target}_LIBS
     logger::logger
     magic_enum::magic_enum
 )
-disable_ubsan_for_reflection(${CMAKE_SOURCE_DIR}/src/test/pacs8.cpp)
+disable_ubsan_for_reflection(${PROJECT_SOURCE_DIR}/src/test/pacs8.cpp)
 add_fsp_target(${b_target} EXECUTABLE ${${b_target}_SOURCES})
 add_log_config(${b_target})
 # -----------------------------------------------------------------------------
@@ -422,12 +472,12 @@ add_log_config(${b_target})
 # -----------------------------------------------------------------------------
 set(b_target pacs8-cb) # name of the target
 set(${b_target}_SOURCES
-    ${CMAKE_SOURCE_DIR}/src/test/pacs8-cb.cpp
-    ${CMAKE_SOURCE_DIR}/src/test/pacs8_cb.cpp
+    ${PROJECT_SOURCE_DIR}/src/test/pacs8-cb.cpp
+    ${PROJECT_SOURCE_DIR}/src/test/pacs8_cb.cpp
 )
 set(FSP_TARGET_${b_target}_INCLUDES
-  ${CMAKE_SOURCE_DIR}/src/importer
-  ${CMAKE_SOURCE_DIR}/src/test
+  ${PROJECT_SOURCE_DIR}/src/importer
+  ${PROJECT_SOURCE_DIR}/src/test
   )
 set(FSP_TARGET_${b_target}_LIBS
     fsp_lib
@@ -435,7 +485,7 @@ set(FSP_TARGET_${b_target}_LIBS
     logger::logger
     magic_enum::magic_enum
 )
-disable_ubsan_for_reflection(${CMAKE_SOURCE_DIR}/src/test/pacs8-cb.cpp)
+disable_ubsan_for_reflection(${PROJECT_SOURCE_DIR}/src/test/pacs8-cb.cpp)
 add_fsp_target(${b_target} EXECUTABLE ${${b_target}_SOURCES})
 add_log_config(${b_target})
 # -----------------------------------------------------------------------------
@@ -443,15 +493,15 @@ add_log_config(${b_target})
 # -----------------------------------------------------------------------------
 set(b_target validator) # name of the target
 set(${b_target}_SOURCES
-    ${CMAKE_SOURCE_DIR}/src/auxiliary/validator.cpp
-    ${CMAKE_SOURCE_DIR}/src/common/xercesc_helpers/xerces_mgr.cpp
-    ${CMAKE_SOURCE_DIR}/src/common/xercesc_helpers/x_str.cpp
-    ${CMAKE_SOURCE_DIR}/src/importer/load_grammar.cpp
-    ${CMAKE_SOURCE_DIR}/src/common/mmap/mmap_file.cpp
+    ${PROJECT_SOURCE_DIR}/src/auxiliary/validator.cpp
+    ${PROJECT_SOURCE_DIR}/src/common/xercesc_helpers/xerces_mgr.cpp
+    ${PROJECT_SOURCE_DIR}/src/common/xercesc_helpers/x_str.cpp
+    ${PROJECT_SOURCE_DIR}/src/importer/load_grammar.cpp
+    ${PROJECT_SOURCE_DIR}/src/common/mmap/mmap_file.cpp
 )
 set(FSP_TARGET_${b_target}_INCLUDES
-  ${CMAKE_SOURCE_DIR}/src/importer
-  ${CMAKE_SOURCE_DIR}/src/test
+  ${PROJECT_SOURCE_DIR}/src/importer
+  ${PROJECT_SOURCE_DIR}/src/test
   ${XERCESC_INCLUDE_DIR}
   )
 set(FSP_TARGET_${b_target}_LIBS PRIVATE
@@ -461,27 +511,28 @@ set(FSP_TARGET_${b_target}_LIBS PRIVATE
     XercesC::XercesC
 )
 add_fsp_target(${b_target} EXECUTABLE ${${b_target}_SOURCES})
+endif() # FSP_BUILD_EXECUTABLES
 # -----------------------------------------------------------------------------
 # --- target: unit_tests
 # -----------------------------------------------------------------------------
-if(BUILD_TESTING)
+if(BUILD_TESTING AND FSP_BUILD_TESTS)
     set(b_target unit_tests) # name of the target
     set(${b_target}_SOURCES
-        ${CMAKE_SOURCE_DIR}/src/test/test_x_str.cpp
-        ${CMAKE_SOURCE_DIR}/src/test/test_xerces_mgr.cpp
-        ${CMAKE_SOURCE_DIR}/src/test/test_lock_queue.cpp
-        ${CMAKE_SOURCE_DIR}/src/test/test_mmap_file.cpp
-        ${CMAKE_SOURCE_DIR}/src/test/test_xml_writer.cpp
-        ${CMAKE_SOURCE_DIR}/src/test/test_exporter_error.cpp
-        ${CMAKE_SOURCE_DIR}/src/test/test_exporter_state.cpp
-        ${CMAKE_SOURCE_DIR}/src/test/test_cb_exporter.cpp
-        ${CMAKE_SOURCE_DIR}/src/test/test_exporter.cpp
-        ${CMAKE_SOURCE_DIR}/src/common/xercesc_helpers/x_str.cpp
-        ${CMAKE_SOURCE_DIR}/src/common/xercesc_helpers/xerces_mgr.cpp
-        ${CMAKE_SOURCE_DIR}/src/common/mmap/mmap_file.cpp
-        ${CMAKE_SOURCE_DIR}/src/importer/error_info.cpp
-        ${CMAKE_SOURCE_DIR}/src/exporter/exporter_error.cpp
-        ${CMAKE_SOURCE_DIR}/src/exporter/exporter_state.cpp
+        ${PROJECT_SOURCE_DIR}/src/test/test_x_str.cpp
+        ${PROJECT_SOURCE_DIR}/src/test/test_xerces_mgr.cpp
+        ${PROJECT_SOURCE_DIR}/src/test/test_lock_queue.cpp
+        ${PROJECT_SOURCE_DIR}/src/test/test_mmap_file.cpp
+        ${PROJECT_SOURCE_DIR}/src/test/test_xml_writer.cpp
+        ${PROJECT_SOURCE_DIR}/src/test/test_exporter_error.cpp
+        ${PROJECT_SOURCE_DIR}/src/test/test_exporter_state.cpp
+        ${PROJECT_SOURCE_DIR}/src/test/test_cb_exporter.cpp
+        ${PROJECT_SOURCE_DIR}/src/test/test_exporter.cpp
+        ${PROJECT_SOURCE_DIR}/src/common/xercesc_helpers/x_str.cpp
+        ${PROJECT_SOURCE_DIR}/src/common/xercesc_helpers/xerces_mgr.cpp
+        ${PROJECT_SOURCE_DIR}/src/common/mmap/mmap_file.cpp
+        ${PROJECT_SOURCE_DIR}/src/importer/error_info.cpp
+        ${PROJECT_SOURCE_DIR}/src/exporter/exporter_error.cpp
+        ${PROJECT_SOURCE_DIR}/src/exporter/exporter_state.cpp
     )
     set(FSP_TARGET_${b_target}_LIBS
         Catch2::Catch2WithMain
@@ -512,9 +563,9 @@ if(BUILD_TESTING)
             COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/coverage
             COMMAND $<TARGET_FILE:${b_target}>
             COMMAND ${GCOVR_EXECUTABLE}
-                --root ${CMAKE_SOURCE_DIR}
-                --filter ${CMAKE_SOURCE_DIR}/src/
-                --exclude ${CMAKE_SOURCE_DIR}/src/test/
+                --root ${PROJECT_SOURCE_DIR}
+                --filter ${PROJECT_SOURCE_DIR}/src/
+                --exclude ${PROJECT_SOURCE_DIR}/src/test/
                 --exclude-unreachable-branches
                 --exclude-throw-branches
                 --print-summary
