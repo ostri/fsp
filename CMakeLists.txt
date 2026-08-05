@@ -272,7 +272,7 @@ set(SRC_IMPORTER
     ${CMAKE_SOURCE_DIR}/src/importer/pipeline_hooks.cpp
     ${CMAKE_SOURCE_DIR}/src/importer/xml_worker.cpp
     ${CMAKE_SOURCE_DIR}/src/importer/load_grammar.cpp
-    ${CMAKE_SOURCE_DIR}/src/importer/process_docs.cpp
+    ${CMAKE_SOURCE_DIR}/src/importer/importer.cpp
     ${CMAKE_SOURCE_DIR}/src/importer/stats.cpp
     ${CMAKE_SOURCE_DIR}/src/importer/segment_sax.cpp
     ${CMAKE_SOURCE_DIR}/src/importer/xpath_set.cpp

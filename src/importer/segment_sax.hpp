@@ -8,7 +8,7 @@
 #include <string_view>
 #include <utility>
 #include <vector>
-#include <string>
+// #include <string>
 #include <span>
 #include <bit>
 #include <cstdint>
@@ -17,29 +17,30 @@ namespace fsp
   using cstr_t = std::string_view;
   struct xml_path_el
   { // NOLINTBEGIN(misc-non-private-member-variables-in-classes)
-    cstr_t           uri;
-    cstr_t           tag;
-    bool             operator==(const xml_path_el& other) const { return tag == other.tag && uri == other.uri; }
+    cstr_t uri;
+    cstr_t tag;
+    bool   operator==(const xml_path_el& other) const { return tag == other.tag && uri == other.uri; }
     // NOLINTEND(misc-non-private-member-variables-in-classes)
   };
 
   struct sax_ctx
-  {                                           // NOLINTBEGIN(misc-non-private-member-variables-in-classes)
-    const logger::Logger&    log_;            // NOLINT(cppcoreguidelines-avoid-const-or-ref-data-members)
-    const xpath_set*         targets = nullptr; // non-owning -- points at the caller's (static/long-lived) xpath_set for this segment's own subtree_type()
+  {                             // NOLINTBEGIN(misc-non-private-member-variables-in-classes)
+    const logger::Logger& log_; // NOLINT(cppcoreguidelines-avoid-const-or-ref-data-members)
+    const xpath_set*      targets =
+      nullptr; // non-owning -- points at the caller's (static/long-lived) xpath_set for this segment's own subtree_type()
     std::vector<xml_path_el> path_stack;
-    result_values             results;
-    std::uint64_t             remaining_mask    = 0;
-    bool                      stop_parsing      = false;
-    int                       active_target_idx = -1;
-    xmlParserCtxtPtr          ctxt              = nullptr; // to stop the parser
-    str_t                     current_buffer;              // for temporary tag values
-    bool                      log_trace_ = log_.active(logger::level::trace);
-    bool                      log_debug_ = log_.active(logger::level::debug);
-    bool                      log_info_  = log_.active(logger::level::info);
-    bool                      log_warn_  = log_.active(logger::level::warn);
-    bool                      log_error_ = log_.active(logger::level::error);
-    bool                      log_crit_  = log_.active(logger::level::critical);
+    result_values            results;
+    std::uint64_t            remaining_mask    = 0;
+    bool                     stop_parsing      = false;
+    int                      active_target_idx = -1;
+    xmlParserCtxtPtr         ctxt              = nullptr; // to stop the parser
+    str_t                    current_buffer;              // for temporary tag values
+    bool                     log_trace_ = log_.active(logger::level::trace);
+    bool                     log_debug_ = log_.active(logger::level::debug);
+    bool                     log_info_  = log_.active(logger::level::info);
+    bool                     log_warn_  = log_.active(logger::level::warn);
+    bool                     log_error_ = log_.active(logger::level::error);
+    bool                     log_crit_  = log_.active(logger::level::critical);
     // NOLINTEND(misc-non-private-member-variables-in-classes)
 
     explicit sax_ctx(const logger::Logger& log);
@@ -81,16 +82,16 @@ namespace fsp
     static bool   is_path_match(const std::vector<xml_path_el>& stack, const xml_attr& attr);
     static cstr_t resolve_uri(const xmlChar* prefix, const xmlChar* URI, int nb_namespaces, const xmlChar** namespaces);
   private:
-    const logger::Logger& log_;        //< logger
-    xmlSAXHandler     handler_{};      // sax parser handler
-    xmlParserCtxtPtr  ctxt_ = nullptr; // sax parser context
-    sax_ctx           ctx_;            // user data associated with the parsing
-    const bool        log_trace_ = log_.active(logger::level::trace);
-    const bool        log_debug_ = log_.active(logger::level::debug);
-    const bool        log_info_  = log_.active(logger::level::info);
-    const bool        log_warn_  = log_.active(logger::level::warn);
-    const bool        log_error_ = log_.active(logger::level::error);
-    const bool        log_crit_  = log_.active(logger::level::critical);
+    const logger::Logger& log_;            //< logger
+    xmlSAXHandler         handler_{};      // sax parser handler
+    xmlParserCtxtPtr      ctxt_ = nullptr; // sax parser context
+    sax_ctx               ctx_;            // user data associated with the parsing
+    const bool            log_trace_ = log_.active(logger::level::trace);
+    const bool            log_debug_ = log_.active(logger::level::debug);
+    const bool            log_info_  = log_.active(logger::level::info);
+    const bool            log_warn_  = log_.active(logger::level::warn);
+    const bool            log_error_ = log_.active(logger::level::error);
+    const bool            log_crit_  = log_.active(logger::level::critical);
   };
 
   inline sax_ctx::sax_ctx(const logger::Logger& log)
@@ -102,7 +103,7 @@ namespace fsp
 
   inline void sax_ctx::reset_for_reuse(const xpath_set& t)
   {
-    targets = &t; // non-owning -- t is expected to outlive this call (a static/long-lived xpath_set)
+    targets = &t;     // non-owning -- t is expected to outlive this call (a static/long-lived xpath_set)
     results.reset(t); // reuses scalars_/arrays_' already-allocated capacity instead of reallocating every segment
     path_stack.reserve(targets->max_xpath_size());
     remaining_mask    = targets->full_mask();
@@ -189,8 +190,8 @@ namespace fsp
               target.attr_name() == reinterpret_cast<const char*>(attr_localname) &&
               target.attr_uri() == (nullptr != attr_uri ? reinterpret_cast<const char*>(attr_uri) : ""))
           {
-            str_t       value(reinterpret_cast<const char*>(val_ptr), static_cast<std::size_t>(val_end - val_ptr));
-            const bool  is_array = (ctx->targets->array_mask() & (std::uint64_t{1} << static_cast<std::size_t>(t))) != 0;
+            str_t      value(reinterpret_cast<const char*>(val_ptr), static_cast<std::size_t>(val_end - val_ptr));
+            const bool is_array = (ctx->targets->array_mask() & (std::uint64_t{1} << static_cast<std::size_t>(t))) != 0;
             if (ctx->log_trace_) ctx->log_.trace(fmt::format("assign attr [{}] '{}' = '{}'", t, target.name(), value));
             if (is_array) ctx->results.add(static_cast<std::size_t>(t), std::move(value));
             else ctx->results.set(static_cast<std::size_t>(t), std::move(value));
@@ -278,7 +279,8 @@ namespace fsp
       auto       idx      = ctx->active_target_idx;
       const bool is_array = (ctx->targets->array_mask() & (std::uint64_t{1} << static_cast<unsigned int>(idx))) != 0U;
       if (ctx->log_trace_)
-        ctx->log_.trace(fmt::format("assign elem [{}] '{}' = '{}'", idx, (*ctx->targets)[static_cast<std::size_t>(idx)].name(), ctx->current_buffer));
+        ctx->log_.trace(
+          fmt::format("assign elem [{}] '{}' = '{}'", idx, (*ctx->targets)[static_cast<std::size_t>(idx)].name(), ctx->current_buffer));
       if (is_array) ctx->results.add(static_cast<std::size_t>(idx), std::move(ctx->current_buffer));
       else ctx->results.set(static_cast<std::size_t>(idx), std::move(ctx->current_buffer));
       ctx->current_buffer.clear();

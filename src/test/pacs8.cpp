@@ -1,6 +1,6 @@
-#include "process_docs.hpp"
+#include "importer.hpp"
 #include "common.hpp"
-#include "work.hpp"
+#include "work.hpp" // IWYU pragma: keep
 #include <fmt/format.h>
 #include <iostream>
 #include <logger/logger.hpp>
@@ -19,7 +19,7 @@ namespace
   // One config/log.<debug|release>.json (see add_log_config() in CMakeLists.txt) is shared by
   // every fsp program -- app_name (the log file name, and spdlog's %n) is overwritten here with
   // this program's own name after loading it, rather than baked into the file itself. The actual
-  // logger::Logger is built later, inside process_docs's constructor (see process_docs.hpp's
+  // logger::Logger is built later, inside importer's constructor (see importer.hpp's
   // detail::make_main_logger()) -- this only prepares the config it is built from.
   [[nodiscard]] logger::logger_config load_program_logger_config(fsp::cstr_t program_name)
   {
@@ -41,8 +41,8 @@ int main(int argc, const char* argv[])
                                                    .num_of_workers = no_of_cores,
                                                    .log_config     = load_program_logger_config(args.p_name),
                                                    .program_name   = args.p_name};
-    auto       p           = fsp::process_docs(cfg);
-    auto       res         = p.process_files(args.files, args.xsd_file);
+    auto       p           = fsp::importer(cfg);
+    auto       res         = p.import_docs(args.files, args.xsd_file);
     if (! res)
     {
       fmt::print("Processing failed: '{}'\n", res.error().to_string());
