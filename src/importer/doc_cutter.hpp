@@ -1,7 +1,7 @@
 #pragma once
 
 #include "handler.hpp"
-#include "processor_config.hpp"
+#include "importer_config.hpp"
 #include "doc_set_dscr.hpp"
 #include "segment_pool.hpp"
 #include "xpath_helpers.hpp"
@@ -16,7 +16,7 @@ namespace fsp
   class doc_cutter
   {
   public:
-    doc_cutter(const processor_config& cfg, const logger::Logger& log, segment_pool& pool, const doc_set_dscr& ds_dscr);
+    doc_cutter(const importer_config& cfg, const logger::Logger& log, segment_pool& pool, const doc_set_dscr& ds_dscr);
     void_result               init();                   //< once, when the hybrid thread starts
     void_result               cut(std::size_t doc_ndx); //< cuts ONE document; caller checks doc_status before calling
     [[nodiscard]] std::size_t segments_found() const noexcept;
@@ -28,10 +28,10 @@ namespace fsp
     void_result setup_parser_with_validation();
   private:
     // NOLINTBEGIN(cppcoreguidelines-avoid-const-or-ref-data-members)
-    const logger::Logger&    log_;
-    const processor_config&  cfg_;
-    segment_pool&            seg_pool_;
-    const doc_set_dscr&      ds_dscr_;
+    const logger::Logger&  log_;
+    const importer_config& cfg_;
+    segment_pool&          seg_pool_;
+    const doc_set_dscr&    ds_dscr_;
     // Declared before parser_ so it outlives it (members destroyed in reverse declaration order)
     // -- only ever constructed when cfg_.cut_with_validation is actually used, see init().
     std::unique_ptr<xercesc::XMLGrammarPoolImpl> grammar_pool_;

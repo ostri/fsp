@@ -296,7 +296,7 @@ set(SRC_IMPORTER
     ${PROJECT_SOURCE_DIR}/src/importer/handler.cpp
     ${PROJECT_SOURCE_DIR}/src/importer/xml_segment.cpp
     ${PROJECT_SOURCE_DIR}/src/importer/error_info.cpp
-    ${PROJECT_SOURCE_DIR}/src/importer/processor_config.cpp
+    ${PROJECT_SOURCE_DIR}/src/importer/importer_config.cpp
     ${PROJECT_SOURCE_DIR}/src/importer/xpath_helpers.cpp
     ${PROJECT_SOURCE_DIR}/src/importer/parsing_util.cpp
     ${PROJECT_SOURCE_DIR}/src/importer/e_tag_wide.cpp

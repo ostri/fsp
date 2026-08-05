@@ -9,7 +9,7 @@ namespace fsp
 {
   using std::make_unique;
 
-  doc_cutter::doc_cutter(const processor_config& cfg, const logger::Logger& log, segment_pool& pool, const doc_set_dscr& ds_dscr)
+  doc_cutter::doc_cutter(const importer_config& cfg, const logger::Logger& log, segment_pool& pool, const doc_set_dscr& ds_dscr)
   : log_(log)
   , cfg_(cfg)
   , seg_pool_(pool)
@@ -62,8 +62,8 @@ namespace fsp
       loader->setFeature(xercesc::XMLUni::fgXercesDynamic, false);
       // NOLINTEND(hicpp-no-array-decay)
 
-      const str_t       xsd_path{ds_dscr_.xsd_file()};
-      auto*             grammar = loader->loadGrammar(xsd_path.c_str(), xercesc::Grammar::SchemaGrammarType, true);
+      const str_t xsd_path{ds_dscr_.xsd_file()};
+      auto*       grammar = loader->loadGrammar(xsd_path.c_str(), xercesc::Grammar::SchemaGrammarType, true);
       if (grammar == nullptr)
         return std::unexpected(
           error_info{processor_error::internal_error, fmt::format("Failed to load XSD grammar: '{}'", xsd_path), "", 0});
@@ -97,7 +97,7 @@ namespace fsp
     // Must match pipeline::process_files()'s identical computation of the same condition exactly
     // -- both independently decide from the same (has_grammar(), doc count) inputs, since pipeline
     // needs it to decide whether to also run a separate V pass, and doc_cutter needs it to decide
-    // which parser/scanner to set up. See processor_config.hpp for the measured break-even this
+    // which parser/scanner to set up. See importer_config.hpp for the measured break-even this
     // default (single doc: separate: multiple docs: merged) is based on.
     const bool validate_here = ds_dscr_.has_grammar() && cfg_.cut_with_validation.value_or(ds_dscr_.size() > 1);
     auto       ps            = validate_here ? setup_parser_with_validation() : setup_parser_no_validation();

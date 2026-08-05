@@ -35,12 +35,12 @@ int main(int argc, const char* argv[])
   if (args.files.empty()) return help(args.p_name);
   try
   {
-    const auto no_of_cores = 16U;                  // number of paralell worker threads
-    auto       cfg         = fsp::processor_config{//
-                                                   .targets        = fsp::proc_data_of<^^fsp::work>(),
-                                                   .num_of_workers = no_of_cores,
-                                                   .log_config     = load_program_logger_config(args.p_name),
-                                                   .program_name   = args.p_name};
+    const auto no_of_cores = 16U;                 // number of paralell worker threads
+    auto       cfg         = fsp::importer_config{//
+                                                  .targets        = fsp::proc_data_of<^^fsp::work>(),
+                                                  .num_of_workers = no_of_cores,
+                                                  .log_config     = load_program_logger_config(args.p_name),
+                                                  .program_name   = args.p_name};
     auto       p           = fsp::importer(cfg);
     auto       res         = p.import_docs(args.files, args.xsd_file);
     if (! res)

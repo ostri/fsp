@@ -15,7 +15,7 @@ top-level [CMakeLists.txt](../CMakeLists.txt)).
   sudo dnf install -y xerces-c-devel xerces-c-doc.noarch libxml2 libxml2-devel
   ```
 - **`fsp::importer` requires GCC's experimental C++26 reflection branch (GCC 16.1.1) and the
-  `-freflection` compiler flag.** `fsp::importer::import_docs()` takes a `processor_config`
+  `-freflection` compiler flag.** `fsp::importer`'s constructor takes an `importer_config`
   whose `targets` field is built with `fsp::proc_data_of<^^YourNamespace>()` -- a consteval
   reflection call over your own schema types (see `src/test/work.hpp` for a worked example, and
   `src/test/pacs8.cpp:40` for the call site). Your own project's target that calls
@@ -136,7 +136,7 @@ public:
 
 int main()
 {
-  auto cfg = fsp::processor_config{
+  auto cfg = fsp::importer_config{
       .targets        = fsp::proc_data_of<^^my_ns::my_schema>(), // requires -freflection
       .num_of_workers = 16U,
       .log_config     = my_logger_config(),

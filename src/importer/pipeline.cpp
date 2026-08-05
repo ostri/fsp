@@ -5,7 +5,7 @@
 
 namespace fsp
 {
-  pipeline::pipeline(const processor_config& cfg, const logger::Logger& log, str_t parent_log_name)
+  pipeline::pipeline(const importer_config& cfg, const logger::Logger& log, str_t parent_log_name)
   : log_(log)
   , cfg_(std::move(cfg))
   , parent_log_name_(std::move(parent_log_name))
@@ -107,7 +107,7 @@ namespace fsp
   pipeline::run_plan pipeline::plan_run(std::size_t doc_count)
   {
     // Whether C folds XSD validation into its own SAX pass instead of running it separately as
-    // V (see doc_cutter.cpp / processor_config.hpp for the measured break-even). cfg_.cut_with_validation
+    // V (see doc_cutter.cpp / importer_config.hpp for the measured break-even). cfg_.cut_with_validation
     // lets a caller force either mode; left unset, default to the empirically-best choice for the
     // actual document count: separate for a single document, merged from 2 documents up. This
     // must match doc_cutter::init()'s own computation of the same condition exactly, since both

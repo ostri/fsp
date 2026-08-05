@@ -6,8 +6,8 @@
 #include <optional>
 namespace fsp
 {
-  // Configuration for the processor
-  struct processor_config
+  // Configuration for the importer
+  struct importer_config
   {
     // NOLINTBEGIN(misc-non-private-member-variables-in-classes)
     proc_data   targets;            // target points to split the xml document
@@ -43,7 +43,7 @@ namespace fsp
     [[nodiscard]] str_t dump(int offs) const;
   };
 
-  inline str_t processor_config::dump(int offs) const
+  inline str_t importer_config::dump(int offs) const
   {
     const str_t ind(offs, ' ');
     cstr_t      cut_with_validation_str = "unset";
@@ -60,18 +60,18 @@ namespace fsp
   {0}log_config.file_level: {10}
   {0}log_config.log_folder: {11}
   {0}program_name: {12})",
-                      ind,
-                      targets.dump(offs),
-                      num_of_workers,
-                      cut_with_validation_str,
-                      cutter_ratio_num,
-                      cutter_ratio_den,
-                      pool_shard_count,
-                      log_config.app_name,
-                      magic_enum::enum_name(log_config.run_mode),
-                      magic_enum::enum_name(log_config.console_level),
-                      magic_enum::enum_name(log_config.file_level),
-                      log_config.log_folder,
-                      program_name);
+                       ind,
+                       targets.dump(offs),
+                       num_of_workers,
+                       cut_with_validation_str,
+                       cutter_ratio_num,
+                       cutter_ratio_den,
+                       pool_shard_count,
+                       log_config.app_name,
+                       magic_enum::enum_name(log_config.run_mode),
+                       magic_enum::enum_name(log_config.console_level),
+                       magic_enum::enum_name(log_config.file_level),
+                       log_config.log_folder,
+                       program_name);
   }
 } // namespace fsp

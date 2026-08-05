@@ -2,7 +2,7 @@
 
 #include "pipeline.hpp"
 #include "xerces_mgr.hpp"
-#include "processor_config.hpp"
+#include "importer_config.hpp"
 #include <logger/logger.hpp>
 #include "segment_result.hpp"
 #include <memory>
@@ -16,8 +16,8 @@ namespace fsp
   class importer
   {
   public:
-    explicit importer(const processor_config& cfg);
-    //    import_docs(processor_config cfg, const str_t& parent_log_name);
+    explicit importer(const importer_config& cfg);
+    //    import_docs(importer_config cfg, const str_t& parent_log_name);
     ~importer()                          = default;
     importer(const importer&)            = delete;
     importer(importer&&)                 = delete;
@@ -60,7 +60,7 @@ namespace fsp
     }
   } // namespace detail
 
-  inline importer::importer(const processor_config& cfg)
+  inline importer::importer(const importer_config& cfg)
   : log_ptr_(detail::make_main_logger(cfg.log_config))
   , xerces_life_()
   , impl_(cfg, *log_ptr_, cfg.program_name)

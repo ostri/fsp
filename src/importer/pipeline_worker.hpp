@@ -5,7 +5,7 @@
 #include "pipeline_hooks.hpp"
 #include "xml_worker.hpp"
 #include <logger/logger.hpp>
-#include "processor_config.hpp"
+#include "importer_config.hpp"
 #include <stop_token>
 #include <memory>
 
@@ -21,9 +21,9 @@ namespace fsp
   class pipeline_worker
   {
   public:
-    pipeline_worker(pipeline& pl, const processor_config& cfg, const logger::Logger& log, str_t parent_log_name, pipeline_hooks& hooks);
-    void_result init(); // sets up the doc_cutter (xerces parser + Handler); call once before operator()
-    void        operator()(const std::stop_token& st, int worker_id);
+    pipeline_worker(pipeline& pl, const importer_config& cfg, const logger::Logger& log, str_t parent_log_name, pipeline_hooks& hooks);
+    void_result                         init(); // sets up the doc_cutter (xerces parser + Handler); call once before operator()
+    void                                operator()(const std::stop_token& st, int worker_id);
     [[nodiscard]] const pipeline_hooks& hooks() const noexcept { return *hooks_; }
   private:
     void do_cut(std::size_t doc_ndx);
