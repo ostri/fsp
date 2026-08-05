@@ -41,7 +41,6 @@ namespace fsp::ach
      * @return the IBAN formatted as e.g. "SI56 0100 0000 0100 090"
      */
     [[nodiscard]] static str_t print_iban(cstr_t iban);
-
   private:
     [[nodiscard]] static bool                       iso_checksum_ok(cstr_t iban) noexcept;
     [[nodiscard]] static bool                       si_national_check_ok(cstr_t bban) noexcept;
@@ -57,8 +56,8 @@ namespace fsp::ach
    */
   struct iban_t
   {
-    str_t value; // NOLINT(misc-non-private-member-variables-in-classes)
-
-    [[nodiscard]] static std::expected<iban_t, error_info> parse(cstr_t s);
+    using e_iban = std::expected<iban_t, error_info>;
+    str_t                               value; // NOLINT(misc-non-private-member-variables-in-classes)
+    [[nodiscard]] static iban_t::e_iban parse(cstr_t s);
   };
 } // namespace fsp::ach

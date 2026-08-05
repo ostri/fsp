@@ -289,6 +289,8 @@ set(SRC_IMPORTER
 
 set(SRC_EXPORTER
     ${CMAKE_SOURCE_DIR}/src/exporter/xml_writer.cpp
+    ${CMAKE_SOURCE_DIR}/src/exporter/exporter_error.cpp
+    ${CMAKE_SOURCE_DIR}/src/exporter/exporter_state.cpp
 )
 
 set(SRC_COMMON
@@ -470,10 +472,16 @@ if(BUILD_TESTING)
         ${CMAKE_SOURCE_DIR}/src/test/test_lock_queue.cpp
         ${CMAKE_SOURCE_DIR}/src/test/test_mmap_file.cpp
         ${CMAKE_SOURCE_DIR}/src/test/test_xml_writer.cpp
+        ${CMAKE_SOURCE_DIR}/src/test/test_exporter_error.cpp
+        ${CMAKE_SOURCE_DIR}/src/test/test_exporter_state.cpp
+        ${CMAKE_SOURCE_DIR}/src/test/test_cb_exporter.cpp
+        ${CMAKE_SOURCE_DIR}/src/test/test_exporter.cpp
         ${CMAKE_SOURCE_DIR}/src/common/xercesc_helpers/x_str.cpp
         ${CMAKE_SOURCE_DIR}/src/common/xercesc_helpers/xerces_mgr.cpp
         ${CMAKE_SOURCE_DIR}/src/common/mmap/mmap_file.cpp
         ${CMAKE_SOURCE_DIR}/src/importer/error_info.cpp
+        ${CMAKE_SOURCE_DIR}/src/exporter/exporter_error.cpp
+        ${CMAKE_SOURCE_DIR}/src/exporter/exporter_state.cpp
     )
     set(FSP_TARGET_${b_target}_LIBS
         Catch2::Catch2WithMain

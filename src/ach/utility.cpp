@@ -142,7 +142,6 @@ namespace fsp::ach
     if (! iso_checksum_ok(iban)) return false;
 
     if (country == "SI" && ! si_national_check_ok(bban)) return false;
-
     return true;
   }
 
@@ -165,7 +164,7 @@ namespace fsp::ach
     return out;
   }
 
-  std::expected<iban_t, error_info> iban_t::parse(cstr_t s)
+  auto iban_t::parse(cstr_t s) -> iban_t::e_iban
   {
     if (! utility::check_iban(s)) return std::unexpected(error_info::semantic("invalid_iban", fmt::format("invalid IBAN: '{}'", s)));
     return iban_t{str_t(s)};
