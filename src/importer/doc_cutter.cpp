@@ -9,7 +9,7 @@ namespace fsp
 {
   using std::make_unique;
 
-  doc_cutter::doc_cutter(const processor_config& cfg, const fsp_logger& log, segment_pool& pool, const doc_set_dscr& ds_dscr)
+  doc_cutter::doc_cutter(const processor_config& cfg, const logger::Logger& log, segment_pool& pool, const doc_set_dscr& ds_dscr)
   : log_(log)
   , cfg_(cfg)
   , seg_pool_(pool)

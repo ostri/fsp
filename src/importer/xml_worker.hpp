@@ -5,7 +5,7 @@
 #include "parsing_util.hpp"
 #include "pipeline_hooks.hpp"
 #include "segment_result.hpp"
-#include "logger.hpp"
+#include <logger/logger.hpp>
 #include "xml_segment.hpp"
 #include "xpath_helpers.hpp"
 #include "segment_sax.hpp"
@@ -54,7 +54,7 @@ namespace fsp
       vec_seg_result&     errors,        // where to store non correct segmetns
       std::mutex&         results_mutex, // mutex for managing result structure
       std::mutex&         errors_mutex,  // mutex for managing errors structure
-      const fsp_logger&   log,           // reference to logger
+      const logger::Logger& log,         // reference to logger
       const proc_data&    targets, // structure that holds information about cutting points and xpaths of the values we are looking for
       str_t               parent_log_name, // parent thread log thread name
       pipeline&           pl,             // for record_segment_done()/record_segment_failed() (doc_counters bookkeeping + hook dispatch)
@@ -90,7 +90,7 @@ namespace fsp
   private:
     // --- worker context ---
     // NOLINTBEGIN(cppcoreguidelines-avoid-const-or-ref-data-members)
-    const fsp_logger&            log_;           //< logger
+    const logger::Logger&        log_;           //< logger
     const doc_set_dscr&          ds_dscr_;       //< structre of all input documents
     std::vector<segment_result>& results_;       //< result after parsing
     std::vector<segment_result>& errors_;        //< errors after parsing
@@ -100,12 +100,12 @@ namespace fsp
     pipeline&                    pipeline_;      //< for record_segment_done()/record_segment_failed()
     pipeline_hooks&              hooks_;         //< this worker thread's own hooks clone
                                                  //     UniqueXmlTextReader          reader_;        //< libxml2 reader
-    const bool log_trace_ = log_.active(fsp::lvl_enum::trace);
-    const bool log_debug_ = log_.active(fsp::lvl_enum::debug);
-    const bool log_info_  = log_.active(fsp::lvl_enum::info);
-    const bool log_warn_  = log_.active(fsp::lvl_enum::warn);
-    const bool log_error_ = log_.active(fsp::lvl_enum::err);
-    const bool log_crit_  = log_.active(fsp::lvl_enum::crit);
+    const bool log_trace_ = log_.active(logger::level::trace);
+    const bool log_debug_ = log_.active(logger::level::debug);
+    const bool log_info_  = log_.active(logger::level::info);
+    const bool log_warn_  = log_.active(logger::level::warn);
+    const bool log_error_ = log_.active(logger::level::error);
+    const bool log_crit_  = log_.active(logger::level::critical);
     //     std::size_t                  depth_     = 0UL; // depth within the tree/xpath
     //     std::stack<stack_struct>     tree_stack_;      // node and limits on specific depth
     //     int                          value_ndx_ = -1;  // index of the xpath value; -1 -> no value found

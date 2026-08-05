@@ -1,6 +1,6 @@
 #pragma once
 
-#include "logger_config.hpp"
+#include <logger/logger_config.hpp>
 #include "parsing_util.hpp"
 #include <magic_enum.hpp>
 #include <optional>
@@ -36,9 +36,9 @@ namespace fsp
     // Number of independent shards segment_pool splits its ready/free queues into, to reduce
     // lock/condition_variable contention between concurrent C/P threads. Default 2 was found
     // empirically fastest against N=1,3,4 (see pipeline.cpp / segment_pool.hpp).
-    std::size_t   pool_shard_count = 2; // NOLINT(readability-magic-numbers)
-    logger_config log_config;           // configuration of the
-    str_t         program_name;         // program name as displayed in the log file
+    std::size_t           pool_shard_count = 2; // NOLINT(readability-magic-numbers)
+    logger::logger_config log_config;           // configuration of the
+    str_t                 program_name;         // program name as displayed in the log file
     // NOLINTEND(misc-non-private-member-variables-in-classes)
     [[nodiscard]] str_t dump(int offs) const;
   };
@@ -54,11 +54,12 @@ namespace fsp
   {0}cutter_ratio_num: {4}
   {0}cutter_ratio_den: {5}
   {0}pool_shard_count: {6}
-  {0}log_config.enable_console: {7}
-  {0}log_config.enable_file: {8}
-  {0}log_config.log_file_path: {9}
-  {0}log_config.log_level: {10}
-  {0}program_name: {11})",
+  {0}log_config.app_name: {7}
+  {0}log_config.run_mode: {8}
+  {0}log_config.console_level: {9}
+  {0}log_config.file_level: {10}
+  {0}log_config.log_folder: {11}
+  {0}program_name: {12})",
                       ind,
                       targets.dump(offs),
                       num_of_workers,
@@ -66,10 +67,11 @@ namespace fsp
                       cutter_ratio_num,
                       cutter_ratio_den,
                       pool_shard_count,
-                      log_config.enable_console,
-                      log_config.enable_file,
-                      log_config.log_file_path,
-                      magic_enum::enum_name(log_config.log_level),
+                      log_config.app_name,
+                      magic_enum::enum_name(log_config.run_mode),
+                      magic_enum::enum_name(log_config.console_level),
+                      magic_enum::enum_name(log_config.file_level),
+                      log_config.log_folder,
                       program_name);
   }
 } // namespace fsp

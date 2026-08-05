@@ -1,4 +1,4 @@
-#include "logger.hpp"
+#include <logger/logger.hpp>
 #include "result_values.hpp"
 #include "xml_attr.hpp"
 #include "xpath_set.hpp"
@@ -25,7 +25,7 @@ namespace fsp
 
   struct sax_ctx
   {                                           // NOLINTBEGIN(misc-non-private-member-variables-in-classes)
-    const fsp_logger&        log_;            // NOLINT(cppcoreguidelines-avoid-const-or-ref-data-members)
+    const logger::Logger&    log_;            // NOLINT(cppcoreguidelines-avoid-const-or-ref-data-members)
     const xpath_set*         targets = nullptr; // non-owning -- points at the caller's (static/long-lived) xpath_set for this segment's own subtree_type()
     std::vector<xml_path_el> path_stack;
     result_values             results;
@@ -34,15 +34,15 @@ namespace fsp
     int                       active_target_idx = -1;
     xmlParserCtxtPtr          ctxt              = nullptr; // to stop the parser
     str_t                     current_buffer;              // for temporary tag values
-    bool                      log_trace_ = log_.active(lvl_enum::trace);
-    bool                      log_debug_ = log_.active(lvl_enum::debug);
-    bool                      log_info_  = log_.active(lvl_enum::info);
-    bool                      log_warn_  = log_.active(lvl_enum::warn);
-    bool                      log_error_ = log_.active(lvl_enum::err);
-    bool                      log_crit_  = log_.active(lvl_enum::crit);
+    bool                      log_trace_ = log_.active(logger::level::trace);
+    bool                      log_debug_ = log_.active(logger::level::debug);
+    bool                      log_info_  = log_.active(logger::level::info);
+    bool                      log_warn_  = log_.active(logger::level::warn);
+    bool                      log_error_ = log_.active(logger::level::error);
+    bool                      log_crit_  = log_.active(logger::level::critical);
     // NOLINTEND(misc-non-private-member-variables-in-classes)
 
-    explicit sax_ctx(const fsp_logger& log);
+    explicit sax_ctx(const logger::Logger& log);
     void reset_for_reuse(const xpath_set& t);
   };
 
@@ -50,7 +50,7 @@ namespace fsp
   {
   public:
     using result_t = result_values;
-    explicit segment_sax(const fsp_logger& log);
+    explicit segment_sax(const logger::Logger& log);
     ~segment_sax();
     segment_sax(segment_sax&&)                 = delete;
     segment_sax& operator=(segment_sax&&)      = delete;
@@ -81,19 +81,19 @@ namespace fsp
     static bool   is_path_match(const std::vector<xml_path_el>& stack, const xml_attr& attr);
     static cstr_t resolve_uri(const xmlChar* prefix, const xmlChar* URI, int nb_namespaces, const xmlChar** namespaces);
   private:
-    const fsp_logger& log_;            //< logger
+    const logger::Logger& log_;        //< logger
     xmlSAXHandler     handler_{};      // sax parser handler
     xmlParserCtxtPtr  ctxt_ = nullptr; // sax parser context
     sax_ctx           ctx_;            // user data associated with the parsing
-    const bool        log_trace_ = log_.active(fsp::lvl_enum::trace);
-    const bool        log_debug_ = log_.active(fsp::lvl_enum::debug);
-    const bool        log_info_  = log_.active(fsp::lvl_enum::info);
-    const bool        log_warn_  = log_.active(fsp::lvl_enum::warn);
-    const bool        log_error_ = log_.active(fsp::lvl_enum::err);
-    const bool        log_crit_  = log_.active(fsp::lvl_enum::crit);
+    const bool        log_trace_ = log_.active(logger::level::trace);
+    const bool        log_debug_ = log_.active(logger::level::debug);
+    const bool        log_info_  = log_.active(logger::level::info);
+    const bool        log_warn_  = log_.active(logger::level::warn);
+    const bool        log_error_ = log_.active(logger::level::error);
+    const bool        log_crit_  = log_.active(logger::level::critical);
   };
 
-  inline sax_ctx::sax_ctx(const fsp_logger& log)
+  inline sax_ctx::sax_ctx(const logger::Logger& log)
   : log_(log)
   {
     static const int buf_size = 1024;
@@ -112,7 +112,7 @@ namespace fsp
     current_buffer.clear();
   }
 
-  inline segment_sax::segment_sax(const fsp_logger& log)
+  inline segment_sax::segment_sax(const logger::Logger& log)
   : log_(log)
   , ctx_(log)
 

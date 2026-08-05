@@ -3,7 +3,8 @@
 #include "work.hpp"
 #include <fmt/format.h>
 #include <iostream>
-#include <spdlog/common.h>
+#include <logger/logger.hpp>
+#include <logger/logger_config.hpp>
 #include <vector>
 namespace
 {
@@ -13,6 +14,18 @@ namespace
                                  "Example: {0} data.xml schema.xsd \n";
     std::cerr << fmt::format(msg, prog_name);
     return 1;
+  }
+
+  // One config/log.<debug|release>.json (see add_log_config() in CMakeLists.txt) is shared by
+  // every fsp program -- app_name (the log file name, and spdlog's %n) is overwritten here with
+  // this program's own name after loading it, rather than baked into the file itself. The actual
+  // logger::Logger is built later, inside process_docs's constructor (see process_docs.hpp's
+  // detail::make_main_logger()) -- this only prepares the config it is built from.
+  [[nodiscard]] logger::logger_config load_program_logger_config(fsp::cstr_t program_name)
+  {
+    auto cfg     = logger::load_logger_config(fmt::format("config/log.{}.json", logger::build_type_name()));
+    cfg.app_name = program_name;
+    return cfg;
   }
 }; // namespace
 ////////////////////////////////////////////////////////////////////////////////////////////
@@ -26,7 +39,7 @@ int main(int argc, const char* argv[])
     auto       cfg         = fsp::processor_config{//
                                                    .targets        = fsp::proc_data_of<^^fsp::work>(),
                                                    .num_of_workers = no_of_cores,
-                                                   .log_config     = fsp::load_logger_config(args.p_name),
+                                                   .log_config     = load_program_logger_config(args.p_name),
                                                    .program_name   = args.p_name};
 
     auto     p = fsp::process_docs(cfg);

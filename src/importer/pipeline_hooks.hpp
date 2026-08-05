@@ -3,7 +3,7 @@
 #include "doc_dscr.hpp"
 #include "doc_set_counter.hpp"
 #include "doc_set_dscr.hpp"
-#include "logger.hpp"
+#include <logger/logger.hpp>
 #include "result_values.hpp"
 #include "segment_result.hpp"
 #include "xml_segment.hpp"
@@ -38,7 +38,7 @@ namespace fsp
     [[nodiscard]] virtual std::unique_ptr<pipeline_hooks> clone() const = 0;
 
     /** @brief Main thread, once, before any document is cut/processed. */
-    virtual void on_run_start([[maybe_unused]] const doc_set_dscr& ds_dscr, [[maybe_unused]] const fsp_logger& log) { }
+    virtual void on_run_start([[maybe_unused]] const doc_set_dscr& ds_dscr, [[maybe_unused]] const logger::Logger& log) { }
     /**
      * @brief Main thread, once, after every worker thread has finished. worker_clones holds one
      * entry per worker thread (see clone()); the original instance's own on_run_end() is the only
@@ -47,26 +47,26 @@ namespace fsp
     virtual void on_run_end([[maybe_unused]] const doc_set_counter&           counters,
                             [[maybe_unused]] const doc_set_dscr&              ds_dscr,
                             [[maybe_unused]] std::span<const pipeline_hooks*> worker_clones,
-                            [[maybe_unused]] const fsp_logger&                log)
+                            [[maybe_unused]] const logger::Logger&           log)
     {
     }
 
     /** @brief The pipeline_worker thread itself, once at start and once at end of its lifetime. */
-    virtual void on_wrk_start([[maybe_unused]] int worker_id, [[maybe_unused]] cstr_t thread_name, [[maybe_unused]] const fsp_logger& log)
+    virtual void on_wrk_start([[maybe_unused]] int worker_id, [[maybe_unused]] cstr_t thread_name, [[maybe_unused]] const logger::Logger& log)
     {
     }
-    virtual void on_wrk_end([[maybe_unused]] int worker_id, [[maybe_unused]] cstr_t thread_name, [[maybe_unused]] const fsp_logger& log) { }
+    virtual void on_wrk_end([[maybe_unused]] int worker_id, [[maybe_unused]] cstr_t thread_name, [[maybe_unused]] const logger::Logger& log) { }
 
     /** @brief The cutter thread for this specific document (cutting just started/just finished). */
     virtual void on_doc_open([[maybe_unused]] std::size_t       doc_ndx,
                              [[maybe_unused]] const doc_dscr&   dscr,
-                             [[maybe_unused]] const fsp_logger& log)
+                             [[maybe_unused]] const logger::Logger& log)
     {
     }
     virtual void on_doc_close([[maybe_unused]] std::size_t       doc_ndx,
                               [[maybe_unused]] doc_status        status,
                               [[maybe_unused]] const doc_dscr&   dscr,
-                              [[maybe_unused]] const fsp_logger& log)
+                              [[maybe_unused]] const logger::Logger& log)
     {
     }
 
@@ -90,7 +90,7 @@ namespace fsp
                              segment_result&                     result,
                              [[maybe_unused]] bool               is_first,
                              [[maybe_unused]] bool               is_last,
-                             [[maybe_unused]] const fsp_logger&  log)
+                             [[maybe_unused]] const logger::Logger& log)
     { return result.values().complete(); }
   };
 

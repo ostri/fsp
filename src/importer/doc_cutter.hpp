@@ -16,7 +16,7 @@ namespace fsp
   class doc_cutter
   {
   public:
-    doc_cutter(const processor_config& cfg, const fsp_logger& log, segment_pool& pool, const doc_set_dscr& ds_dscr);
+    doc_cutter(const processor_config& cfg, const logger::Logger& log, segment_pool& pool, const doc_set_dscr& ds_dscr);
     void_result               init();                   //< once, when the hybrid thread starts
     void_result               cut(std::size_t doc_ndx); //< cuts ONE document; caller checks doc_status before calling
     [[nodiscard]] std::size_t segments_found() const noexcept;
@@ -28,7 +28,7 @@ namespace fsp
     void_result setup_parser_with_validation();
   private:
     // NOLINTBEGIN(cppcoreguidelines-avoid-const-or-ref-data-members)
-    const fsp_logger&        log_;
+    const logger::Logger&    log_;
     const processor_config&  cfg_;
     segment_pool&            seg_pool_;
     const doc_set_dscr&      ds_dscr_;
@@ -37,7 +37,7 @@ namespace fsp
     std::unique_ptr<xercesc::XMLGrammarPoolImpl> grammar_pool_;
     std::unique_ptr<xercesc::SAX2XMLReader>      parser_;
     std::unique_ptr<Handler>                     handler_;
-    const bool                                   log_debug_ = log_.active(lvl_enum::debug);
+    const bool                                   log_debug_ = log_.active(logger::level::debug);
     // NOLINTEND(cppcoreguidelines-avoid-const-or-ref-data-members)
   };
 

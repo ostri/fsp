@@ -112,6 +112,23 @@ CPMAddPackage(
     EXCLUDE_FROM_ALL YES
 )
 
+# logger::logger - thin facade over spdlog, replaces the former in-tree
+# fsp_logger (src/common/logger, now removed). Not a singleton: every
+# consumer takes a logger::Logger& handed down from main(), see
+# src/test/pacs8.cpp / pacs8-cb.cpp. Publishes fmt::fmt and stdc++exp
+# PUBLIC itself, so nothing below needs to link either just for logging.
+# Must come after the fmt/spdlog CPMAddPackage() calls above with matching
+# GIT_TAG/OPTIONS -- CPM de-duplicates by NAME, so logger's own internal
+# fmt/spdlog fetch becomes a no-op against the ones already resolved here;
+# a version/option mismatch would otherwise be an ODR violation at link time.
+CPMAddPackage(
+    NAME logger
+    GITHUB_REPOSITORY ostri/logger
+    GIT_TAG v0.1.3
+    SYSTEM YES
+    EXCLUDE_FROM_ALL YES
+)
+
 # --- 3a. Unit testing (Catch2, fetched via CPM) ---
 # BUILD_TESTING is CTest's standard opt-out switch, defaulted ON here since
 # this project has no separate packaging/consumer mode to skip it for.
@@ -148,7 +165,6 @@ function(add_fsp_target TARGET_NAME TYPE)
         ${CMAKE_SOURCE_DIR}/src/common
         ${CMAKE_SOURCE_DIR}/src/common/lock_queue
         ${CMAKE_SOURCE_DIR}/src/common/mmap
-        ${CMAKE_SOURCE_DIR}/src/common/logger
         ${CMAKE_SOURCE_DIR}/src/common/xercesc_helpers
     )
 
@@ -201,23 +217,28 @@ function(add_fsp_target TARGET_NAME TYPE)
     endif()
 endfunction()
 
-# Generates TARGET_NAME's logger config from the checked-in template
-# (config/log_debug.conf.in or config/log_release.conf.in, picked by the current
-# CMAKE_BUILD_TYPE), substituting @PROGRAM_NAME@ for the target's own name, into
-# log_<TARGET_NAME>_<debug|release>.conf in the build directory -- see
-# fsp::load_logger_config() in src/common/logger/logger.cpp for the matching runtime lookup.
-# configure_file() also makes CMake re-run (and thus regenerate this file) whenever the
-# template changes, even without an explicit `cmake ..`.
+# Copies both checked-in logger config files (config/log.debug.json,
+# config/log.release.json) into the build directory as config/log.<debug|release>.json
+# -- every fsp executable target lands directly in CMAKE_BINARY_DIR (no per-target
+# RUNTIME_OUTPUT_DIRECTORY is set), so one copy under CMAKE_BINARY_DIR/config/ is
+# reachable from any of them via their shared cwd at runtime.
+# logger::load_logger_config() resolves its config_path argument relative to the
+# process's cwd, and a program's main() picks debug vs. release by name (see
+# logger::build_type_name(), used in pacs8.cpp/pacs8-cb.cpp) rather than this
+# function choosing one at configure time, so both files must be present. Unlike the
+# old @PROGRAM_NAME@ substitution this used to do, app_name (used for the log file
+# name and spdlog's %n) is no longer baked into the file -- it is set in code from
+# argv[0] after loading the config, since one shared config covers every fsp program
+# (see pacs8.cpp's call site comment). configure_file(..., COPYONLY) also makes
+# CMake re-run (and thus re-copy) whenever either source file changes, even without
+# an explicit `cmake ..`. TARGET_NAME is unused now that the destination no longer
+# depends on it, but kept as a parameter so call sites (pacs8, pacs8-cb) don't need
+# to change if per-target output directories are introduced later.
 function(add_log_config TARGET_NAME)
-    set(PROGRAM_NAME ${TARGET_NAME})
-    if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-        set(FSP_LOG_TEMPLATE ${CMAKE_SOURCE_DIR}/config/log_debug.conf.in)
-        set(FSP_LOG_KIND debug)
-    else()
-        set(FSP_LOG_TEMPLATE ${CMAKE_SOURCE_DIR}/config/log_release.conf.in)
-        set(FSP_LOG_KIND release)
-    endif()
-    configure_file(${FSP_LOG_TEMPLATE} ${CMAKE_BINARY_DIR}/log_${TARGET_NAME}_${FSP_LOG_KIND}.conf @ONLY)
+    configure_file(${CMAKE_SOURCE_DIR}/config/log.debug.json
+                   ${CMAKE_BINARY_DIR}/config/log.debug.json COPYONLY)
+    configure_file(${CMAKE_SOURCE_DIR}/config/log.release.json
+                   ${CMAKE_BINARY_DIR}/config/log.release.json COPYONLY)
 endfunction()
 
 # WORKAROUND (remove once GCC 16.2 ships): on this GCC 16.1.1 -freflection branch,
@@ -275,10 +296,7 @@ set(SRC_COMMON
     ${CMAKE_SOURCE_DIR}/src/common/xercesc_helpers/xerces_mgr.cpp
     ${CMAKE_SOURCE_DIR}/src/common/lock_queue/lock_queue.cpp
     ${CMAKE_SOURCE_DIR}/src/common/mmap/mmap_file.cpp
-    ${CMAKE_SOURCE_DIR}/src/common/logger/logger_config.cpp
     ${CMAKE_SOURCE_DIR}/src/common/common.cpp
-    ${CMAKE_SOURCE_DIR}/src/common/logger/logger.cpp
-    ${CMAKE_SOURCE_DIR}/src/common/logger/logger_impl.cpp
     ${CMAKE_SOURCE_DIR}/src/ach/utility.cpp
 )
 
@@ -295,17 +313,20 @@ set(${b_target}_SOURCES
     ${SOURCES}
 )
 # Specify additional libraries for fsp_lib (if needed)
-# fmt/spdlog/magic_enum weren't listed here even under find_package(), which
-# went unnoticed only because that fmt/spdlog were consistent between compile
+# fmt/magic_enum weren't listed here even under find_package(), which
+# went unnoticed only because that fmt was consistent between compile
 # and link across every consumer (all from the same distro package). Now that
-# fmt/spdlog come from CPM as compiled libraries (not header-only), a fsp_lib
+# fmt comes from CPM as a compiled library (not header-only), a fsp_lib
 # .cpp that calls fmt::vformat (via error_info.hpp etc.) has an unresolved
-# symbol unless fsp_lib links fmt::fmt itself -- so all three are explicit here.
+# symbol unless fsp_lib links fmt::fmt itself -- so it, and magic_enum, are
+# explicit here. logger::logger publishes spdlog and fmt::fmt PUBLIC itself
+# (see the CPMAddPackage(logger) comment above), so it is the only thing
+# fsp_lib needs to link for logging -- no separate spdlog::spdlog.
 set(FSP_TARGET_${b_target}_LIBS
     XercesC::XercesC
     LibXml2::LibXml2
     fmt::fmt
-    spdlog::spdlog
+    logger::logger
     magic_enum::magic_enum
 )
 add_fsp_target(fsp_lib STATIC ${fsp_lib_SOURCES})
@@ -388,7 +409,7 @@ set(FSP_TARGET_${b_target}_INCLUDES
 set(FSP_TARGET_${b_target}_LIBS
     fsp_lib
     fmt::fmt
-    spdlog::spdlog
+    logger::logger
     magic_enum::magic_enum
 )
 disable_ubsan_for_reflection(${CMAKE_SOURCE_DIR}/src/test/pacs8.cpp)
@@ -409,7 +430,7 @@ set(FSP_TARGET_${b_target}_INCLUDES
 set(FSP_TARGET_${b_target}_LIBS
     fsp_lib
     fmt::fmt
-    spdlog::spdlog
+    logger::logger
     magic_enum::magic_enum
 )
 disable_ubsan_for_reflection(${CMAKE_SOURCE_DIR}/src/test/pacs8-cb.cpp)
@@ -448,20 +469,16 @@ if(BUILD_TESTING)
         ${CMAKE_SOURCE_DIR}/src/test/test_xerces_mgr.cpp
         ${CMAKE_SOURCE_DIR}/src/test/test_lock_queue.cpp
         ${CMAKE_SOURCE_DIR}/src/test/test_mmap_file.cpp
-        ${CMAKE_SOURCE_DIR}/src/test/test_logger.cpp
         ${CMAKE_SOURCE_DIR}/src/test/test_xml_writer.cpp
         ${CMAKE_SOURCE_DIR}/src/common/xercesc_helpers/x_str.cpp
         ${CMAKE_SOURCE_DIR}/src/common/xercesc_helpers/xerces_mgr.cpp
         ${CMAKE_SOURCE_DIR}/src/common/mmap/mmap_file.cpp
-        ${CMAKE_SOURCE_DIR}/src/common/logger/logger.cpp
-        ${CMAKE_SOURCE_DIR}/src/common/logger/logger_impl.cpp
-        ${CMAKE_SOURCE_DIR}/src/common/logger/logger_config.cpp
         ${CMAKE_SOURCE_DIR}/src/importer/error_info.cpp
     )
     set(FSP_TARGET_${b_target}_LIBS
         Catch2::Catch2WithMain
         fmt::fmt
-        spdlog::spdlog
+        logger::logger
         magic_enum::magic_enum
         XercesC::XercesC
     )

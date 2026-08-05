@@ -4,7 +4,7 @@
 #include "doc_validator.hpp"
 #include "pipeline_hooks.hpp"
 #include "xml_worker.hpp"
-#include "logger.hpp"
+#include <logger/logger.hpp>
 #include "processor_config.hpp"
 #include <stop_token>
 #include <memory>
@@ -21,7 +21,7 @@ namespace fsp
   class pipeline_worker
   {
   public:
-    pipeline_worker(pipeline& pl, const processor_config& cfg, const fsp_logger& log, str_t parent_log_name, pipeline_hooks& hooks);
+    pipeline_worker(pipeline& pl, const processor_config& cfg, const logger::Logger& log, str_t parent_log_name, pipeline_hooks& hooks);
     void_result init(); // sets up the doc_cutter (xerces parser + Handler); call once before operator()
     void        operator()(const std::stop_token& st, int worker_id);
     [[nodiscard]] const pipeline_hooks& hooks() const noexcept { return *hooks_; }
@@ -31,13 +31,13 @@ namespace fsp
   private:
     // NOLINTBEGIN(cppcoreguidelines-avoid-const-or-ref-data-members)
     pipeline&                       pipeline_;
-    const fsp_logger&               log_;
+    const logger::Logger&           log_;
     str_t                           parent_log_name_;
     std::unique_ptr<pipeline_hooks> hooks_; // this thread's own clone, made once at construction
     std::unique_ptr<doc_cutter>     cutter_;
     std::unique_ptr<xml_worker>     processor_;
     std::unique_ptr<doc_validator>  validator_;
-    const bool                      log_info_ = log_.active(lvl_enum::info);
+    const bool                      log_info_ = log_.active(logger::level::info);
     // NOLINTEND(cppcoreguidelines-avoid-const-or-ref-data-members)
   };
 } // namespace fsp

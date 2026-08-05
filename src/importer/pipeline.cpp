@@ -5,7 +5,7 @@
 
 namespace fsp
 {
-  pipeline::pipeline(const processor_config& cfg, const fsp_logger& log, str_t parent_log_name)
+  pipeline::pipeline(const processor_config& cfg, const logger::Logger& log, str_t parent_log_name)
   : log_(log)
   , cfg_(std::move(cfg))
   , parent_log_name_(std::move(parent_log_name))

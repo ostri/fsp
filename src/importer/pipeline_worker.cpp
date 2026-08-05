@@ -5,7 +5,7 @@
 namespace fsp
 {
   pipeline_worker::pipeline_worker(
-    pipeline& pl, const processor_config& cfg, const fsp_logger& log, str_t parent_log_name, pipeline_hooks& hooks)
+    pipeline& pl, const processor_config& cfg, const logger::Logger& log, str_t parent_log_name, pipeline_hooks& hooks)
   : pipeline_(pl)
   , log_(log)
   , parent_log_name_(std::move(parent_log_name))

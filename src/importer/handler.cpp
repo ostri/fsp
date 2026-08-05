@@ -12,7 +12,7 @@ namespace fsp
   // Konstrukcija
   // ============================================================================
   Handler::Handler(const proc_data&              targets, //
-                   const fsp_logger&             log,
+                   const logger::Logger&         log,
                    const xercesc::SAX2XMLReader* parser,
                    segment_pool&                 pool,
                    const doc_set_dscr&           ds_dscr)

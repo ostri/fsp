@@ -1,6 +1,6 @@
 #pragma once
 
-#include "logger.hpp"
+#include <logger/logger.hpp>
 #include "xml_segment.hpp"
 #include "segment_result.hpp"
 #include "lock_queue.hpp"
@@ -15,7 +15,7 @@ namespace fsp
   {
   public:
     // segment_pool();
-    explicit segment_pool(const fsp_logger& log, std::size_t no_of_slots, std::size_t num_shards = 1);
+    explicit segment_pool(const logger::Logger& log, std::size_t no_of_slots, std::size_t num_shards = 1);
     void                         init(std::size_t capacity = 1024UL); // NOLINT(readability-magic-numbers)
     std::size_t                  acquire_slot(std::size_t segment_id); // get free slot for segment_id's shard (blocks if none)
     void                         push_ready(std::size_t idx);
@@ -41,7 +41,7 @@ namespace fsp
     // opposed to capacity_ (the fixed size it was allocated with up front).
     [[nodiscard]] std::size_t high_water_mark() const noexcept { return next_unallocated_slot_.load(std::memory_order_relaxed); }
   private:
-    const fsp_logger&        log_;
+    const logger::Logger&    log_;
     std::size_t              capacity_{0};
     std::size_t              num_shards_{1};
     std::atomic<std::size_t> next_unallocated_slot_{0};
@@ -60,15 +60,15 @@ namespace fsp
     // the write) in push_ready()/retrieve_segment() via the happens-before edge each queue's
     // mutex already provides, so a plain array is enough, no atomics needed.
     std::unique_ptr<std::size_t[]>    shard_of_slot_; // NOLINT(hicpp-avoid-c-arrays)
-    const bool                        log_trace_ = log_.active(fsp::lvl_enum::trace);
-    const bool                        log_debug_ = log_.active(fsp::lvl_enum::debug);
-    const bool                        log_info_  = log_.active(fsp::lvl_enum::info);
-    const bool                        log_warn_  = log_.active(fsp::lvl_enum::warn);
-    const bool                        log_error_ = log_.active(fsp::lvl_enum::err);
-    const bool                        log_crit_  = log_.active(fsp::lvl_enum::crit);
+    const bool                        log_trace_ = log_.active(logger::level::trace);
+    const bool                        log_debug_ = log_.active(logger::level::debug);
+    const bool                        log_info_  = log_.active(logger::level::info);
+    const bool                        log_warn_  = log_.active(logger::level::warn);
+    const bool                        log_error_ = log_.active(logger::level::error);
+    const bool                        log_crit_  = log_.active(logger::level::critical);
   };
   // inline segment_pool::segment_pool() { init(); }
-  inline segment_pool::segment_pool(const fsp_logger& log, std::size_t no_of_slots, std::size_t num_shards)
+  inline segment_pool::segment_pool(const logger::Logger& log, std::size_t no_of_slots, std::size_t num_shards)
   : log_(log)
   , num_shards_(std::max<std::size_t>(1, num_shards))
   , ready_queues_(num_shards_)

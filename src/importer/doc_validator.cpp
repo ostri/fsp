@@ -16,7 +16,7 @@ namespace fsp
     message_   = fmt::format("row:{} col:{} - {}", e.getLineNumber(), e.getColumnNumber(), x_str(e.getMessage()).to_string());
   }
 
-  doc_validator::doc_validator(const fsp_logger& log, const doc_set_dscr& ds_dscr)
+  doc_validator::doc_validator(const logger::Logger& log, const doc_set_dscr& ds_dscr)
   : log_(log)
   , ds_dscr_(ds_dscr)
   {

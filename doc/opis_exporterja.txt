@@ -1,12 +1,12 @@
 exporter razred
 
-cilj naloge je čim hitrejša priprava xml/utf-8 dokumentov na disk na  podlagi vsebine, ki jo podaja
+cilj naloge je čim hitrejša priprava xml/utf-8 dokumentov na disku na podlagi vsebine, ki jo podaja
 callback razred. Vsak klic fetch_doc_data prinese dovolj vsebine za izdelavo enega dokumenta.
 Ogrodje je maksimalno paralelizirano. Število delovnih niti je parameter klica.
-Vsaka delovna nit dela neodvisno.
+Vsaka delovna nit dela neodvisno. cilje je maksimizacijo hitrosti in minimizacija porabe resursev (v tem zaporedju)
 
 glavna nit:
-- zažene vse delovne niti
+- zažene vse delovne niti (workerje)
 - počaka na izhod niti
 - izračuna statistiko obdelav
 
@@ -14,20 +14,24 @@ worker pred zanko
 - inicializiraj xml_writter instanco
 worker nit dela v zanki
   - če zahteva za konec dela -> logiraj prisilen izhod; izračunaj statistiko in jo logiraj in izhod iz zanke
-  - available_drains_ je prazen: izračunaj statistiko in jo logiraj, izhod iz zanke (normalen izhod)
+  - če smo vse naredili (available_drains_ je prazen): izračunaj statistiko niti in jo logiraj, izhod iz zanke (normalen izhod)
   - pridobi drain-id iz available_drains_ (če, že imamo work-drain-id, ga ohranimo, drugače random selection, če size > 1)
-  - ali drain-id že ima urejeno statistiko -> nima: zakleni in zberi statistiko cb.
+  - ali drain-id že ima urejeno inicialno statistiko -> nima: zakleni in zberi inicialno statistiko cb.fetch_run_stat (loaded == true)
   - pridobi blok transakcij cb.fetch_doc_data
     - po potrebi izloči drain, če size < block_size
-    - če size == 0 -> loop
+    - če size == 0 -> loop (poiščemo drug drain-id, ker smo pri tem že obdelali vse transakcije)
   - cb.prepare_header -> xml_writter
-  - za vsako transakcijo:
+  - za vsako transakcijo v prejetem bloku:
     - cb.prepare_transaction
     - če je prekoračena meja -> xml_writter
   - cb.prepare_footer -> xml_writter
+  - zapišin na disk na tmp lokacijo in zapri datoteko
+  - cb.document_prepared - obvestilo, klicočemu, da je dokument prirpavljen na začasnem področju
+    - če true -> premakni dokument na ciljno področje, logiraj
+    - ne -> logiraj, da generiran ni ustrezen, dokument premakni v err področje
   - dopolni statistiko niti
   - popravi globalno statistiko run-a (drain-id, število dokumentov+1)
-
+worker nit po zanki
 
 
 
@@ -37,11 +41,10 @@ worker nit dela v zanki
 
 
 konfiguracijski podatki:
-- tip izhodnega dokumenta
 - polje prejemnikov (drain_list) {id, name, maksimalno-število-transakcij-na-dokument}
 - number_of threads
 - filename prefix
-- kvalifikatorji runa - (vektor stringov) recimo številka klirinškega cikla
+- kvalifikatorji runa - (vektor stringov) recimo številka klirinškega cikla, ali imamo lahko tukaj template
   - npr. št poravnalnega cikla, tip dokumenta,
   - exporter ne pozna semantike kvalifikatorjev, cb metode pa morajo poznati to semantiko
 callback razred:

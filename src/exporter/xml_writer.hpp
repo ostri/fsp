@@ -65,7 +65,7 @@
 #include <fmt/format.h>
 
 #include "error_info.hpp"
-#include "logger.hpp"
+#include <logger/logger.hpp>
 
 namespace fsp
 {
@@ -113,7 +113,7 @@ namespace fsp
      * writer is left closed (is_open() == false) rather than propagating the failure --
      * callers that need to react to the failure themselves should use open() directly instead.
      */
-    xml_writer(const fsp_logger& log, const char* path) noexcept;
+    xml_writer(const logger::Logger& log, const char* path) noexcept;
     // Non-copyable
     xml_writer(const xml_writer&)            = delete;
     xml_writer& operator=(const xml_writer&) = delete;
@@ -148,11 +148,11 @@ namespace fsp
     // -------------------------------------------------------------------------
     // Data members
     // -------------------------------------------------------------------------
-    const fsp_logger* log_  = nullptr;           // pointer (not reference) so the writer stays default-constructible/movable
+    const logger::Logger* log_  = nullptr;       // pointer (not reference) so the writer stays default-constructible/movable
     FILE*             file_ = nullptr;           // file interface
     std::string       batch_;                    //< strings to be flushed to the file
     std::size_t       written_since_advise_ = 0; //< # of characters written since last advise_
-    // Cached level checks (see fsp_logger::active()) -- false when log_ is null (default-constructed
+    // Cached level checks (see logger::Logger::active()) -- false when log_ is null (default-constructed
     // writer). Plain bool (not const, unlike segment_pool/doc_cutter's own log_*_ caches) because
     // xml_writer is movable and a move-assignment must be able to overwrite them.
     bool log_trace_ = false;
@@ -175,14 +175,14 @@ namespace fsp
    * @brief Constructs a writer bound to @p log and immediately tries to open @p path.
    * @details Never throws; see the declaration's doc comment for the failure behavior.
    */
-  inline xml_writer::xml_writer(const fsp_logger& log, const char* path) noexcept
+  inline xml_writer::xml_writer(const logger::Logger& log, const char* path) noexcept
   : log_(&log)
-  , log_trace_(log_->active(lvl_enum::trace))
-  , log_debug_(log_->active(lvl_enum::debug))
-  , log_info_(log_->active(lvl_enum::info))
-  , log_warn_(log_->active(lvl_enum::warn))
-  , log_error_(log_->active(lvl_enum::err))
-  , log_crit_(log_->active(lvl_enum::crit))
+  , log_trace_(log_->active(logger::level::trace))
+  , log_debug_(log_->active(logger::level::debug))
+  , log_info_(log_->active(logger::level::info))
+  , log_warn_(log_->active(logger::level::warn))
+  , log_error_(log_->active(logger::level::error))
+  , log_crit_(log_->active(logger::level::critical))
   {
     if (auto res = open(path); ! res && log_warn_) { log_->warn(fmt::format("xml_writer: {}", res.error().to_string())); }
   }

@@ -31,20 +31,20 @@ public:
   std::chrono::steady_clock::time_point run_start_;    // NOLINT(misc-non-private-member-variables-in-classes)
   std::chrono::steady_clock::time_point worker_start_; // NOLINT(misc-non-private-member-variables-in-classes)
 
-  void on_run_start(const fsp::doc_set_dscr& ds_dscr, const fsp::fsp_logger& log) override;
+  void on_run_start(const fsp::doc_set_dscr& ds_dscr, const logger::Logger& log) override;
   void on_run_end(const fsp::doc_set_counter&           counters,
                   const fsp::doc_set_dscr&              ds_dscr,
                   std::span<const fsp::pipeline_hooks*> worker_clones,
-                  const fsp::fsp_logger&                log) override;
-  void on_wrk_start(int worker_id, fsp::cstr_t thread_name, const fsp::fsp_logger& log) override;
-  void on_wrk_end(int worker_id, fsp::cstr_t thread_name, const fsp::fsp_logger& log) override;
-  void on_doc_open(std::size_t doc_ndx, const fsp::doc_dscr& dscr, const fsp::fsp_logger& log) override;
-  void on_doc_close(std::size_t doc_ndx, fsp::doc_status status, const fsp::doc_dscr& dscr, const fsp::fsp_logger& log) override;
+                  const logger::Logger&                log) override;
+  void on_wrk_start(int worker_id, fsp::cstr_t thread_name, const logger::Logger& log) override;
+  void on_wrk_end(int worker_id, fsp::cstr_t thread_name, const logger::Logger& log) override;
+  void on_doc_open(std::size_t doc_ndx, const fsp::doc_dscr& dscr, const logger::Logger& log) override;
+  void on_doc_close(std::size_t doc_ndx, fsp::doc_status status, const fsp::doc_dscr& dscr, const logger::Logger& log) override;
   bool on_seg_proc(const fsp::xml_segment& segment,
                    fsp::segment_result&    result,
                    bool                    is_first,
                    bool                    is_last,
-                   const fsp::fsp_logger&  log) override;
+                   const logger::Logger&  log) override;
 private:
   /**
    * @brief Per-segment-type processing, factored out of on_seg_proc() so it stays pure plumbing.
@@ -54,10 +54,10 @@ private:
                                     const fsp::segment_result&     result,
                                     bool                           is_first,
                                     bool                           is_last,
-                                    const fsp::fsp_logger&         log) const;
+                                    const logger::Logger&         log) const;
   [[nodiscard]] bool process_txn(const fsp::work::pacs8_txn& txn,
                                  const fsp::segment_result&  result,
                                  bool                        is_first,
                                  bool                        is_last,
-                                 const fsp::fsp_logger&      log) const;
+                                 const logger::Logger&      log) const;
 };

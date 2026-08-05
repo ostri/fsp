@@ -5,7 +5,7 @@
 #include "pipeline_hooks.hpp"
 #include "segment_pool.hpp"
 #include "processor_config.hpp"
-#include "logger.hpp"
+#include <logger/logger.hpp>
 #include "segment_result.hpp"
 #include "error_info.hpp"
 #include "stats.hpp"
@@ -27,7 +27,7 @@ namespace fsp
   class pipeline
   {
   public:
-    pipeline(const processor_config& cfg, const fsp_logger& log, str_t parent_log_name);
+    pipeline(const processor_config& cfg, const logger::Logger& log, str_t parent_log_name);
     [[nodiscard]] result<doc_set_counter> process_files(const std::vector<str_t>& xml_paths,
                                                         cstr_t                    xsd_path,
                                                         pipeline_hooks&           hooks = default_pipeline_hooks);
@@ -88,7 +88,7 @@ namespace fsp
     [[nodiscard]] str_t build_summary(std::size_t doc_count, double elapsed_ms, std::size_t failed_count) const;
   private:
     // NOLINTBEGIN(cppcoreguidelines-avoid-const-or-ref-data-members)
-    const fsp_logger&        log_;             //< reference to the logger
+    const logger::Logger&    log_;             //< reference to the logger
     const processor_config&  cfg_;             //< copy of the config passed to the constructor, used by process_files() and its helpers
     str_t                    parent_log_name_; //< parent worker thread's name (parent_log_name_ + ".worker_N")
     doc_set_dscr             ds_dscr_;         //< doc_set_dscr is thread-safe, so one instance is shared by all workers

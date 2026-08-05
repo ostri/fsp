@@ -1,7 +1,7 @@
 // doc_set_dscr.hpp
 #pragma once
 #include "doc_dscr.hpp"
-#include "logger.hpp"
+#include <logger/logger.hpp>
 #include <vector>
 
 namespace fsp
@@ -22,7 +22,7 @@ namespace fsp
     static constexpr const auto init_vec_size = 16UL;
 
     doc_set_dscr() = delete;
-    explicit doc_set_dscr(const fsp_logger& logger, size_type initial_size = init_vec_size);
+    explicit doc_set_dscr(const logger::Logger& logger, size_type initial_size = init_vec_size);
     ~doc_set_dscr() = default;
     // Copy/move semantics
     doc_set_dscr(const doc_set_dscr&)                                    = delete;
@@ -50,13 +50,13 @@ namespace fsp
     [[nodiscard]] iterator                     end() noexcept;
     [[nodiscard]] const_iterator               end() const noexcept;
     [[nodiscard]] const_iterator               cend() const noexcept;
-    [[nodiscard]] const fsp_logger&            log() const noexcept;
+    [[nodiscard]] const logger::Logger&        log() const noexcept;
     [[nodiscard]] const std::vector<doc_dscr>& doc_set() const;
     std::vector<doc_dscr>&                     doc_set();
     [[nodiscard]] cstr_t                       xsd_file() const;
   private:
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
-    const fsp_logger&     log_;     ///< Reference to logger (must outlive this object)
+    const logger::Logger& log_;     ///< Reference to logger (must outlive this object)
     std::vector<doc_dscr> doc_set_; ///< Vector of document descriptors
     doc_dscr              grammar_; ///< Grammar document descriptor
   };
@@ -71,7 +71,7 @@ namespace fsp
    *       valid for the lifetime of this object. Consider using shared_ptr
    *       if lifetime management is uncertain.
    */
-  inline doc_set_dscr::doc_set_dscr(const fsp_logger& logger, size_type initial_size)
+  inline doc_set_dscr::doc_set_dscr(const logger::Logger& logger, size_type initial_size)
   : log_(logger)
   {
     doc_set_.reserve(initial_size);
@@ -303,7 +303,7 @@ namespace fsp
    *
    * @return Reference to the logger
    */
-  inline const fsp_logger&            doc_set_dscr::log() const noexcept { return log_; }
+  inline const logger::Logger&        doc_set_dscr::log() const noexcept { return log_; }
   inline const std::vector<doc_dscr>& doc_set_dscr::doc_set() const { return doc_set_; }
   inline std::vector<doc_dscr>&       doc_set_dscr::doc_set() { return doc_set_; }
   inline cstr_t                       doc_set_dscr::xsd_file() const

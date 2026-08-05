@@ -5,7 +5,7 @@
 #include <type_traits>
 #include <variant>
 
-void pacs8_cb::on_run_start(const fsp::doc_set_dscr& ds_dscr, const fsp::fsp_logger& log)
+void pacs8_cb::on_run_start(const fsp::doc_set_dscr& ds_dscr, const logger::Logger& log)
 {
   run_start_ = std::chrono::steady_clock::now();
   log.info(fmt::format("[pacs8_cb] {:12}: ds_dscr.size()={}", "on_run_start", ds_dscr.size()));
@@ -14,7 +14,7 @@ void pacs8_cb::on_run_start(const fsp::doc_set_dscr& ds_dscr, const fsp::fsp_log
 void pacs8_cb::on_run_end(const fsp::doc_set_counter&           counters,
                           const fsp::doc_set_dscr&              ds_dscr,
                           std::span<const fsp::pipeline_hooks*> worker_clones,
-                          const fsp::fsp_logger&                log)
+                          const logger::Logger&                log)
 {
   const auto elapsed_sec = std::chrono::duration_cast<std::chrono::duration<double>>(std::chrono::steady_clock::now() - run_start_).count();
   log.info(fmt::format("[pacs8_cb] {:12}: counters.total_docs()={} ds_dscr.size()={} worker_clones.size()={} elapsed={:.3f} sec",
@@ -45,13 +45,13 @@ void pacs8_cb::on_run_end(const fsp::doc_set_counter&           counters,
                        elapsed_sec));
 }
 
-void pacs8_cb::on_wrk_start(int worker_id, fsp::cstr_t thread_name, const fsp::fsp_logger& log)
+void pacs8_cb::on_wrk_start(int worker_id, fsp::cstr_t thread_name, const logger::Logger& log)
 {
   worker_start_ = std::chrono::steady_clock::now();
   log.info(fmt::format("[pacs8_cb] {:12}: worker_id={} thread_name='{}'", "on_wrk_start", worker_id, thread_name));
 }
 
-void pacs8_cb::on_wrk_end(int worker_id, fsp::cstr_t thread_name, const fsp::fsp_logger& log)
+void pacs8_cb::on_wrk_end(int worker_id, fsp::cstr_t thread_name, const logger::Logger& log)
 {
   const auto elapsed_sec =
     std::chrono::duration_cast<std::chrono::duration<double>>(std::chrono::steady_clock::now() - worker_start_).count();
@@ -67,13 +67,13 @@ void pacs8_cb::on_wrk_end(int worker_id, fsp::cstr_t thread_name, const fsp::fsp
     elapsed_sec));
 }
 
-void pacs8_cb::on_doc_open(std::size_t doc_ndx, const fsp::doc_dscr& dscr, const fsp::fsp_logger& log)
+void pacs8_cb::on_doc_open(std::size_t doc_ndx, const fsp::doc_dscr& dscr, const logger::Logger& log)
 {
   ++documents_seen;
   log.info(fmt::format("[pacs8_cb] {:12}: doc_ndx={} path='{}'", "on_doc_open", doc_ndx, dscr.path()));
 }
 
-void pacs8_cb::on_doc_close(std::size_t doc_ndx, fsp::doc_status status, const fsp::doc_dscr& dscr, const fsp::fsp_logger& log)
+void pacs8_cb::on_doc_close(std::size_t doc_ndx, fsp::doc_status status, const fsp::doc_dscr& dscr, const logger::Logger& log)
 {
   log.info(
     fmt::format("[pacs8_cb] {:12}: doc_ndx={} status={} path='{}'", "on_doc_close", doc_ndx, magic_enum::enum_name(status), dscr.path()));
@@ -83,7 +83,7 @@ bool pacs8_cb::process_header(const fsp::work::pacs8_header& hdr,
                               const fsp::segment_result&     result,
                               bool                           is_first,
                               bool                           is_last,
-                              const fsp::fsp_logger&         log) const
+                              const logger::Logger&         log) const
 {
   // Artificial rule for this demo: every ODD seg_id is a semantic error, every EVEN is ok.
   const bool ok = (result.seg_id() % 2 == 0);
@@ -103,7 +103,7 @@ bool pacs8_cb::process_txn(const fsp::work::pacs8_txn& txn,
                            const fsp::segment_result&  result,
                            bool                        is_first,
                            bool                        is_last,
-                           const fsp::fsp_logger&      log) const
+                           const logger::Logger&      log) const
 {
   // Artificial rule for this demo: every ODD seg_id is a semantic error, every EVEN is ok.
   const bool       ok = (result.seg_id() % 2 == 0);
@@ -125,7 +125,7 @@ bool pacs8_cb::on_seg_proc([[maybe_unused]] const fsp::xml_segment& segment,
                            fsp::segment_result&                     result,
                            bool                                     is_first,
                            bool                                     is_last,
-                           const fsp::fsp_logger&                   log)
+                           const logger::Logger&                   log)
 {
   // materialize_variant() hands back the segment as the developer's own work.hpp schema type
   // (pacs8_header or pacs8_txn) instead of the generic, name-indexed result_values. result is

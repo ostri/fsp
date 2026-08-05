@@ -1,12 +1,13 @@
 #include "xml_writer.hpp"
-#include "logger.hpp"
-#include "logger_config.hpp"
+#include <logger/logger.hpp>
+#include <logger/logger_config.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <ios>
 #include <iterator>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -14,8 +15,8 @@
 #include <utility>
 
 using fsp::e_result;
-using fsp::fsp_logger;
-using fsp::logger_config;
+using logger::Logger;
+using logger::logger_config;
 using fsp::xml_writer;
 
 namespace
@@ -62,9 +63,20 @@ namespace
     return content;
   }
 
-  // Console-only, level-off logger -- tests just need something to bind to fsp_logger&
+  // Console-only, level-off logger -- tests just need something to bind to logger::Logger&
   // without cluttering test output.
-  logger_config silent_log_cfg() { return logger_config{.enable_console = true, .enable_file = false, .log_level = fsp::lvl_enum::off}; }
+  logger_config silent_log_cfg() { return logger_config{.console_level = logger::level::off, .file_level = logger::level::off}; }
+
+  // logger::Logger has no public constructor (only Logger::create(), see logger.hpp), and is
+  // neither copyable nor movable -- tests that need one hold it through this unique_ptr and bind
+  // to *log_ptr wherever a Logger& is needed. silent_log_cfg() never fails to build (console
+  // sink only), so REQUIRE'ing success here keeps every call site below simple.
+  std::unique_ptr<Logger> make_silent_logger()
+  {
+    auto log_ptr = Logger::create(silent_log_cfg());
+    REQUIRE(log_ptr.has_value());
+    return std::move(*log_ptr);
+  }
 } // namespace
 
 // --- constructors ------------------------------------------------------------------------
@@ -78,18 +90,18 @@ TEST_CASE("xml_writer default-constructs closed", "[xml_writer][positive]")
 
 TEST_CASE("xml_writer(log, path) opens a writable path and leaves the writer open", "[xml_writer][positive]")
 {
-  const temp_dir_guard  tmp;
-  const fsp_logger      log(silent_log_cfg());
-  const xml_writer      w(log, tmp.file("out.xml").c_str());
+  const temp_dir_guard tmp;
+  const auto           log_ptr = make_silent_logger();
+  const xml_writer     w(*log_ptr, tmp.file("out.xml").c_str());
   CHECK(w.is_open());
   CHECK(w.native_handle() != nullptr);
 }
 
 TEST_CASE("xml_writer(log, path) never throws and leaves the writer closed for an unwritable path", "[xml_writer][negative]")
 {
-  const fsp_logger log(silent_log_cfg());
-  CHECK_NOTHROW([&] { const xml_writer w(log, path_in_missing_dir().c_str()); }());
-  const xml_writer w(log, path_in_missing_dir().c_str());
+  const auto log_ptr = make_silent_logger();
+  CHECK_NOTHROW([&] { const xml_writer w(*log_ptr, path_in_missing_dir().c_str()); }());
+  const xml_writer w(*log_ptr, path_in_missing_dir().c_str());
   CHECK_FALSE(w.is_open());
 }
 

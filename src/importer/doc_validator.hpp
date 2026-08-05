@@ -2,7 +2,7 @@
 
 #include "error_info.hpp"
 #include "doc_set_dscr.hpp"
-#include "logger.hpp"
+#include <logger/logger.hpp>
 #include "xpath_helpers.hpp"
 #include <xercesc/sax2/SAX2XMLReader.hpp>
 #include <xercesc/framework/XMLGrammarPoolImpl.hpp>
@@ -55,7 +55,7 @@ namespace fsp
   class doc_validator
   {
   public:
-    doc_validator(const fsp_logger& log, const doc_set_dscr& ds_dscr);
+    doc_validator(const logger::Logger& log, const doc_set_dscr& ds_dscr);
     // Validates ONE document. Returns true/false (valid/invalid) on success, or an error_info
     // for infrastructure failures (e.g. the XSD itself could not be loaded/compiled) -- that
     // case is fatal for the whole run, distinct from an ordinary "this document is invalid".
@@ -65,14 +65,14 @@ namespace fsp
     void_result ensure_grammar_loaded();
   private:
     // NOLINTBEGIN(cppcoreguidelines-avoid-const-or-ref-data-members)
-    const fsp_logger&                            log_;
+    const logger::Logger&                        log_;
     const doc_set_dscr&                          ds_dscr_;
     std::unique_ptr<xercesc::XMLGrammarPoolImpl> grammar_pool_;
     std::unique_ptr<xercesc::SAX2XMLReader>      parser_;
     validation_error_handler                     err_handler_;
     bool                                         grammar_loaded_ = false;
-    const bool                                   log_debug_      = log_.active(lvl_enum::debug);
-    const bool                                   log_info_       = log_.active(lvl_enum::info);
+    const bool                                   log_debug_      = log_.active(logger::level::debug);
+    const bool                                   log_info_       = log_.active(logger::level::info);
     // NOLINTEND(cppcoreguidelines-avoid-const-or-ref-data-members)
   };
 } // namespace fsp

@@ -1,0 +1,12 @@
+{
+  "app_name": "fsp",
+  "mode": "sync",
+  "console_level": "info",
+  "file_level": "off",
+  "rotation_hour": 2,
+  "rotation_minute": 0,
+  "keep_days": 7,
+  "pattern": "[%Y-%m-%d %H:%M:%S.%e] [%n] [%l] [%*] %v",
+  "log_folder": "./logs",
+  "flush_on": "warn"
+}

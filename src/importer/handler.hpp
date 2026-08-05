@@ -10,7 +10,7 @@
 
 #include "doc_set_dscr.hpp"
 #include "e_tag_wide.hpp"
-#include "logger.hpp"
+#include <logger/logger.hpp>
 #include "parsing_util.hpp"
 #include "x_str.hpp"
 #include "xml_segment.hpp"
@@ -28,7 +28,7 @@ namespace fsp
   {
   public:
     Handler(const proc_data&              targets, //
-            const fsp_logger&             log,
+            const logger::Logger&         log,
             const xercesc::SAX2XMLReader* parser,
             segment_pool&                 pool,
             const doc_set_dscr&           ds_dscr);
@@ -76,7 +76,7 @@ namespace fsp
     str_t       prepare_msg(const xercesc::SAXParseException& e);
     void        rebuild_ns_decl_for_current_level();
   private:                  /// members
-    const fsp_logger& log_; // must be first logger NOLINT(cppcoreguidelines-avoid-const-or-ref-data-members)
+    const logger::Logger& log_; // must be first logger NOLINT(cppcoreguidelines-avoid-const-or-ref-data-members)
     // --- subtree xpaths ---
     proc_data                 targets_;      // xpath rules
     std::vector<xpath_wide_t> targets_wide_; // xpath rules as XMLCh* strings
@@ -119,12 +119,12 @@ namespace fsp
     str_XMLCh_t                   buf_;                    //< space for "make_open_tag" as XMLCh
     segment_pool&                 pool_;                   //< segment pool
     bool                          validating_      = false; //< see set_validating()
-    const bool                    log_trace_       = log_.active(lvl_enum::trace);
-    const bool                    log_debug_       = log_.active(lvl_enum::debug);
-    const bool                    log_info_        = log_.active(lvl_enum::info);
-    const bool                    log_warn_        = log_.active(lvl_enum::warn);
-    const bool                    log_err_         = log_.active(lvl_enum::err);
-    const bool                    log_crit_        = log_.active(lvl_enum::crit);
+    const bool                    log_trace_       = log_.active(logger::level::trace);
+    const bool                    log_debug_       = log_.active(logger::level::debug);
+    const bool                    log_info_        = log_.active(logger::level::info);
+    const bool                    log_warn_        = log_.active(logger::level::warn);
+    const bool                    log_err_         = log_.active(logger::level::error);
+    const bool                    log_crit_        = log_.active(logger::level::critical);
     int                           max_xpath_depth_ = 0; //< max depth of all xpaths
   };
   /////////////////////////////////////////////////////////////////////////////////////////////////

@@ -32,7 +32,7 @@ namespace fsp
     vec_seg_result&     errors,        // where to store non correct segmetns
     std::mutex&         results_mutex, // mutex for managing result structure
     std::mutex&         errors_mutex,  // mutex for managing errors structure
-    const fsp_logger&   log,           // reference to logger
+    const logger::Logger& log,         // reference to logger
     const proc_data&    targets,       // structure that holds information about cutting points and xpaths of the values we are looking for
     str_t               parent_log_name, // parent thread log thread name
     pipeline&           pl,
