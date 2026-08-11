@@ -1,5 +1,12 @@
 cmake_minimum_required(VERSION 3.10)
-project(fsp LANGUAGES CXX)
+
+# Single source of truth for the release number - bump the top-level VERSION
+# file (one line, e.g. "0.2.0") to release a new version; nothing else needs
+# to change. See scripts/bump_git_tag.sh.
+file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/VERSION" FSP_VERSION LIMIT_COUNT 1)
+string(STRIP "${FSP_VERSION}" FSP_VERSION)
+
+project(fsp VERSION ${FSP_VERSION} LANGUAGES CXX)
 
 #
 # for profiling
@@ -161,7 +168,7 @@ CPMAddPackage(
 CPMAddPackage(
     NAME logger
     GITHUB_REPOSITORY ostri/logger
-    GIT_TAG v0.1.3
+    GIT_TAG v0.1.9
     SYSTEM YES
     EXCLUDE_FROM_ALL YES
 )
@@ -579,6 +586,25 @@ if(BUILD_TESTING AND FSP_BUILD_TESTS)
     else()
         message(STATUS "gcovr not found -- 'coverage' target not available (install gcovr to enable it)")
     endif()
+endif()
+
+# ===================================================================
+# bump_git_tag - maintainer-only release helper, not a build step: bumps
+# this project's own PATCH version by 1 (source of truth is the top-level
+# VERSION file), commits, tags, and pushes both to origin - see
+# scripts/bump_git_tag.sh for the actual logic (refuses to run on a dirty
+# working tree). PROJECT_IS_TOP_LEVEL guarded: a consumer pulling this in
+# via add_subdirectory()/CPMAddPackage() has no business tagging/pushing
+# this repository's own releases from its build.
+# ===================================================================
+if(PROJECT_IS_TOP_LEVEL)
+    add_custom_target(bump_git_tag
+        COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/scripts/bump_git_tag.sh
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+        COMMENT "Bumping version, committing, tagging, and pushing to origin"
+        VERBATIM
+        USES_TERMINAL
+    )
 endif()
 #-------------------------------------------------------------------------------
 # --- 6. (Optional) Display built targets ---
