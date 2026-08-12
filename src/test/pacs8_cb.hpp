@@ -1,7 +1,6 @@
 // pacs8_cb.hpp
 #pragma once
 #include "pipeline_hooks.hpp"
-#include <chrono>
 #include <cstddef>
 #include <span>
 
@@ -25,17 +24,11 @@ public:
   std::size_t segments_ok    = 0; // NOLINT(misc-non-private-member-variables-in-classes)
   std::size_t segments_error = 0; // NOLINT(misc-non-private-member-variables-in-classes)
 
-  // run_start_ is only meaningful on the ORIGINAL instance (on_run_start/on_run_end are the
-  // only two hooks called on it, never on a clone). worker_start_ is per-clone, set and read
-  // by the one thread that owns that clone.
-  std::chrono::steady_clock::time_point run_start_;    // NOLINT(misc-non-private-member-variables-in-classes)
-  std::chrono::steady_clock::time_point worker_start_; // NOLINT(misc-non-private-member-variables-in-classes)
-
   void on_run_start(const fsp::doc_set_dscr& ds_dscr, const logger::Logger& log) override;
   void on_run_end(const fsp::doc_set_counter&           counters,
                   const fsp::doc_set_dscr&              ds_dscr,
                   std::span<const fsp::pipeline_hooks*> worker_clones,
-                  const logger::Logger&                log) override;
+                  const logger::Logger&                 log) override;
   void on_wrk_start(int worker_id, fsp::cstr_t thread_name, const logger::Logger& log) override;
   void on_wrk_end(int worker_id, fsp::cstr_t thread_name, const logger::Logger& log) override;
   void on_doc_open(std::size_t doc_ndx, const fsp::doc_dscr& dscr, const logger::Logger& log) override;
@@ -44,7 +37,7 @@ public:
                    fsp::segment_result&    result,
                    bool                    is_first,
                    bool                    is_last,
-                   const logger::Logger&  log) override;
+                   const logger::Logger&   log) override;
 private:
   /**
    * @brief Per-segment-type processing, factored out of on_seg_proc() so it stays pure plumbing.
@@ -54,10 +47,10 @@ private:
                                     const fsp::segment_result&     result,
                                     bool                           is_first,
                                     bool                           is_last,
-                                    const logger::Logger&         log) const;
+                                    const logger::Logger&          log) const;
   [[nodiscard]] bool process_txn(const fsp::work::pacs8_txn& txn,
                                  const fsp::segment_result&  result,
                                  bool                        is_first,
                                  bool                        is_last,
-                                 const logger::Logger&      log) const;
+                                 const logger::Logger&       log) const;
 };

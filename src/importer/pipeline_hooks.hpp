@@ -7,6 +7,7 @@
 #include "result_values.hpp"
 #include "segment_result.hpp"
 #include "xml_segment.hpp"
+#include <chrono>
 #include <memory>
 #include <span>
 
@@ -29,6 +30,11 @@ namespace fsp
   class pipeline_hooks // NOLINT(hicpp-special-member-functions)
   {
   public:
+    // Explicit noexcept default ctor: run_start_/worker_start_ (added below) make the
+    // implicitly-generated ctor's noexcept-ness non-obvious to static analysis, which otherwise
+    // flags default_pipeline_hooks' static-storage-duration initialization as a potential
+    // uncaught-throw hazard (bugprone-throwing-static-initialization / cert-err58-cpp).
+    pipeline_hooks() noexcept = default;
     virtual ~pipeline_hooks() = default;
 
     /**
@@ -37,8 +43,14 @@ namespace fsp
      */
     [[nodiscard]] virtual std::unique_ptr<pipeline_hooks> clone() const = 0;
 
-    /** @brief Main thread, once, before any document is cut/processed. */
-    virtual void on_run_start([[maybe_unused]] const doc_set_dscr& ds_dscr, [[maybe_unused]] const logger::Logger& log) { }
+    /**
+     * @brief Main thread, once, before any document is cut/processed. Stamps run_start_ so a
+     * derived class's own on_run_end() can call elapsed_run_sec() -- a derived override that
+     * wants this must call pipeline_hooks::on_run_start() itself, since overriding replaces
+     * rather than extends the base body.
+     */
+    virtual void on_run_start([[maybe_unused]] const doc_set_dscr& ds_dscr, [[maybe_unused]] const logger::Logger& log)
+    { run_start_ = std::chrono::steady_clock::now(); }
     /**
      * @brief Main thread, once, after every worker thread has finished. worker_clones holds one
      * entry per worker thread (see clone()); the original instance's own on_run_end() is the only
@@ -47,25 +59,32 @@ namespace fsp
     virtual void on_run_end([[maybe_unused]] const doc_set_counter&           counters,
                             [[maybe_unused]] const doc_set_dscr&              ds_dscr,
                             [[maybe_unused]] std::span<const pipeline_hooks*> worker_clones,
-                            [[maybe_unused]] const logger::Logger&           log)
+                            [[maybe_unused]] const logger::Logger&            log)
     {
     }
 
-    /** @brief The pipeline_worker thread itself, once at start and once at end of its lifetime. */
-    virtual void on_wrk_start([[maybe_unused]] int worker_id, [[maybe_unused]] cstr_t thread_name, [[maybe_unused]] const logger::Logger& log)
+    /**
+     * @brief The pipeline_worker thread itself, once at start and once at end of its lifetime.
+     * Stamps worker_start_ so a derived class's own on_wrk_end() can call
+     * elapsed_worker_sec() -- see on_run_start()'s note on calling the base body explicitly.
+     */
+    virtual void on_wrk_start([[maybe_unused]] int                   worker_id,
+                              [[maybe_unused]] cstr_t                thread_name,
+                              [[maybe_unused]] const logger::Logger& log)
+    { worker_start_ = std::chrono::steady_clock::now(); }
+    virtual void on_wrk_end([[maybe_unused]] int worker_id, [[maybe_unused]] cstr_t thread_name, [[maybe_unused]] const logger::Logger& log)
     {
     }
-    virtual void on_wrk_end([[maybe_unused]] int worker_id, [[maybe_unused]] cstr_t thread_name, [[maybe_unused]] const logger::Logger& log) { }
 
     /** @brief The cutter thread for this specific document (cutting just started/just finished). */
-    virtual void on_doc_open([[maybe_unused]] std::size_t       doc_ndx,
-                             [[maybe_unused]] const doc_dscr&   dscr,
+    virtual void on_doc_open([[maybe_unused]] std::size_t           doc_ndx,
+                             [[maybe_unused]] const doc_dscr&       dscr,
                              [[maybe_unused]] const logger::Logger& log)
     {
     }
-    virtual void on_doc_close([[maybe_unused]] std::size_t       doc_ndx,
-                              [[maybe_unused]] doc_status        status,
-                              [[maybe_unused]] const doc_dscr&   dscr,
+    virtual void on_doc_close([[maybe_unused]] std::size_t           doc_ndx,
+                              [[maybe_unused]] doc_status            status,
+                              [[maybe_unused]] const doc_dscr&       dscr,
                               [[maybe_unused]] const logger::Logger& log)
     {
     }
@@ -86,12 +105,29 @@ namespace fsp
      * pipeline_hooks_crtp's doc comment for why the earlier "detect override, skip the call"
      * idea was dropped).
      */
-    virtual bool on_seg_proc([[maybe_unused]] const xml_segment& segment,
-                             segment_result&                     result,
-                             [[maybe_unused]] bool               is_first,
-                             [[maybe_unused]] bool               is_last,
+    virtual bool on_seg_proc([[maybe_unused]] const xml_segment&    segment,
+                             segment_result&                        result,
+                             [[maybe_unused]] bool                  is_first,
+                             [[maybe_unused]] bool                  is_last,
                              [[maybe_unused]] const logger::Logger& log)
     { return result.values().complete(); }
+  protected:
+    /**
+     * @brief Seconds elapsed since on_run_start() stamped run_start_. Only meaningful on the
+     * ORIGINAL instance (on_run_start/on_run_end are the only two hooks called on it, never on a
+     * clone) -- mirrors run_start_'s own precondition.
+     */
+    [[nodiscard]] double elapsed_run_sec() const
+    { return std::chrono::duration_cast<std::chrono::duration<double>>(std::chrono::steady_clock::now() - run_start_).count(); }
+    /**
+     * @brief Seconds elapsed since on_wrk_start() stamped worker_start_. Per-clone, set and read
+     * by the one thread that owns that clone -- mirrors worker_start_'s own precondition.
+     */
+    [[nodiscard]] double elapsed_worker_sec() const
+    { return std::chrono::duration_cast<std::chrono::duration<double>>(std::chrono::steady_clock::now() - worker_start_).count(); }
+  private:
+    std::chrono::steady_clock::time_point run_start_;
+    std::chrono::steady_clock::time_point worker_start_;
   };
 
   /**
