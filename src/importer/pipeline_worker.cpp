@@ -74,8 +74,8 @@ namespace fsp
 
   void pipeline_worker::operator()(const std::stop_token& st, int worker_id)
   {
-    log_.make_log_name(parent_log_name_, fmt::format("pipe-wrk.{:02}", worker_id));
-    const auto thread_name = log_.log_name();
+    logger::Logger::make_log_name(parent_log_name_, fmt::format("pipe-wrk.{:02}", worker_id));
+    const auto thread_name = logger::Logger::log_name();
     hooks_->on_wrk_start(worker_id, thread_name, log_);
     auto&             pool       = pipeline_.pool();
     const std::size_t num_shards = pool.num_shards();

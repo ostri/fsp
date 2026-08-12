@@ -26,17 +26,17 @@ namespace fsp
 {
   //   using xml_char = std::unique_ptr<xmlChar, xml_deleter>;
   xml_worker::xml_worker(
-    segment_pool&       pool,          // reference to segment pool
-    const doc_set_dscr& ds_dscr,       // reference to document set structure
-    vec_seg_result&     results,       // where to store correct segments
-    vec_seg_result&     errors,        // where to store non correct segmetns
-    std::mutex&         results_mutex, // mutex for managing result structure
-    std::mutex&         errors_mutex,  // mutex for managing errors structure
-    const logger::Logger& log,         // reference to logger
-    const proc_data&    targets,       // structure that holds information about cutting points and xpaths of the values we are looking for
-    str_t               parent_log_name, // parent thread log thread name
-    pipeline&           pl,
-    pipeline_hooks&     hooks)
+    segment_pool&         pool,          // reference to segment pool
+    const doc_set_dscr&   ds_dscr,       // reference to document set structure
+    vec_seg_result&       results,       // where to store correct segments
+    vec_seg_result&       errors,        // where to store non correct segmetns
+    std::mutex&           results_mutex, // mutex for managing result structure
+    std::mutex&           errors_mutex,  // mutex for managing errors structure
+    const logger::Logger& log,           // reference to logger
+    const proc_data&      targets, // structure that holds information about cutting points and xpaths of the values we are looking for
+    str_t                 parent_log_name, // parent thread log thread name
+    pipeline&             pl,
+    pipeline_hooks&       hooks)
   : log_(log)
   , ds_dscr_(ds_dscr)
   , results_(results)
@@ -454,8 +454,7 @@ namespace fsp
     // Umik: dokument je bil medtem validiran kot neveljaven -> prihranimo SAX ekstrakcijo.
     if (ds_dscr_[seg.doc_ndx()].status() == doc_status::validation_failed)
     {
-      if (log_debug_)
-        log_.debug(fmt::format("Segment {} (doc {}): dokument neveljaven, procesiranje preskočeno.", seg.id(), seg.doc_ndx()));
+      if (log_debug_) log_.debug(fmt::format("Segment {} (doc {}): document invalid, skipped processing.", seg.id(), seg.doc_ndx()));
       return seg.doc_ndx();
     }
 
