@@ -1,5 +1,6 @@
 #include "pacs8_cb.hpp"
 #include "importer.hpp"
+#include "exe_path.hpp"
 #include "work.hpp"
 #include <fmt/format.h>
 #include <iostream>
@@ -20,11 +21,16 @@ namespace
   // every fsp program -- app_name (the log file name, and spdlog's %n) is overwritten here with
   // this program's own name after loading it, rather than baked into the file itself. The actual
   // logger::Logger is built later, inside importer's constructor (see importer.hpp's
-  // detail::make_main_logger()) -- this only prepares the config it is built from.
+  // detail::make_main_logger()) -- this only prepares the config it is built from. The path is
+  // resolved against fsp::exe_dir() (the running binary's own directory, where add_log_config() in
+  // CMakeLists.txt copies both files), not against the process's current working directory --
+  // otherwise launching pacs8-cb from anywhere other than the build directory would silently miss
+  // the config file and fall back to logger::load_logger_config()'s hardcoded defaults.
   [[nodiscard]] logger::logger_config load_program_logger_config(fsp::cstr_t program_name)
   {
-    auto cfg     = logger::load_logger_config(fmt::format("config/log.{}.json", logger::build_type_name()));
-    cfg.app_name = program_name;
+    const auto config_path = fsp::exe_dir() / "log.conf";
+    auto       cfg         = logger::load_logger_config(config_path.string());
+    cfg.app_name           = program_name;
     return cfg;
   }
 }; // namespace

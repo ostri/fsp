@@ -342,6 +342,7 @@ set(SRC_COMMON
     ${PROJECT_SOURCE_DIR}/src/common/lock_queue/lock_queue.cpp
     ${PROJECT_SOURCE_DIR}/src/common/mmap/mmap_file.cpp
     ${PROJECT_SOURCE_DIR}/src/common/common.cpp
+    ${PROJECT_SOURCE_DIR}/src/common/exe_path.cpp
     ${PROJECT_SOURCE_DIR}/src/ach/utility.cpp
 )
 
