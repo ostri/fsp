@@ -95,11 +95,27 @@ namespace fsp
     return out;
   }
 
-  void_result pipeline::add_documents(const std::vector<str_t>& xml_paths, cstr_t xsd_path)
+  void_result pipeline::add_documents(const std::vector<str_t>& xml_paths, cstr_t xsd_path, pipeline_hooks& hooks)
   {
-    for (const auto& file : xml_paths)
-      if (! ds_dscr_.add_document(file))
-        return std::unexpected(error_info{processor_error::file_open_failed, fmt::format("Failed to add document: '{}'", file), file, 0});
+    for (std::size_t doc_ndx = 0; doc_ndx < xml_paths.size(); ++doc_ndx)
+    {
+      const auto& file = xml_paths[doc_ndx]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- doc_ndx < xml_paths.size() by the loop condition
+      try
+      {
+        // Built here, not via doc_set_dscr::add_document(cstr_t), so out_doc_id() can be filled
+        // in BEFORE the doc_dscr is handed to doc_set_dscr -- see get_doc_id()'s own doc comment
+        // on why this must happen strictly before any worker thread starts.
+        doc_dscr doc(file);
+        doc.set_out_doc_id(hooks.get_doc_id(doc_ndx % doc_id_node_hint_modulo));
+        if (! ds_dscr_.add_document(std::move(doc)))
+          return std::unexpected(error_info{processor_error::file_open_failed, fmt::format("Failed to add document: '{}'", file), file, 0});
+      }
+      catch (const std::exception& e)
+      {
+        return std::unexpected(
+          error_info{processor_error::file_open_failed, fmt::format("Failed to open document '{}': {}", file, e.what()), file, 0});
+      }
+    }
     ds_dscr_.set_grammar(xsd_path);
     return {};
   }
@@ -238,7 +254,7 @@ namespace fsp
       return doc_set_counter(0);
     }
 
-    if (auto added = add_documents(xml_paths, xsd_path); ! added) return std::unexpected(added.error());
+    if (auto added = add_documents(xml_paths, xsd_path, hooks); ! added) return std::unexpected(added.error());
     hooks.on_run_start(ds_dscr_, log_);
 
     const auto doc_count = xml_paths.size();

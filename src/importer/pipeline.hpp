@@ -73,7 +73,15 @@ namespace fsp
 
     // --- process_files() broken into named phases, purely to keep each piece small and
     // separately readable -- none of these are meant to be called from anywhere else. ---
-    [[nodiscard]] void_result add_documents(const std::vector<str_t>& xml_paths, cstr_t xsd_path);
+    // hooks: only get_doc_id() is called here, once per document, on the main thread, before
+    // add_documents() returns -- see pipeline_hooks::get_doc_id()'s own doc comment.
+    [[nodiscard]] void_result add_documents(const std::vector<str_t>& xml_paths, cstr_t xsd_path, pipeline_hooks& hooks);
+    // Modulo used to turn a doc_ndx into get_doc_id()'s node_hint parameter -- deliberately
+    // generic (not, say, a Snowflake-specific "max node id"): pipeline/importer stay
+    // domain-neutral, a hook implementation (e.g. one built on a Snowflake-style id generator) is
+    // the one that gives node_hint any real meaning. 1024 is simply a round number comfortably
+    // above realistic worker-thread counts.
+    static constexpr std::size_t doc_id_node_hint_modulo = 1024; // NOLINT(readability-magic-numbers)
     struct run_plan
     {
       bool        run_validation; // NOLINT(misc-non-private-member-variables-in-classes)

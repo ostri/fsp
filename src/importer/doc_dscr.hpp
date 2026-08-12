@@ -3,6 +3,7 @@
 #include "error_info.hpp"
 #include "mmap_file.hpp"
 #include <atomic>
+#include <cstdint>
 #include <string_view>
 
 namespace fsp
@@ -47,12 +48,23 @@ namespace fsp
     [[nodiscard]] doc_status                 status() const noexcept;
     void                            set_validation_result(doc_status result, error_info err = {}) noexcept; // SPREMENJENO iz set_status()
     [[nodiscard]] const error_info& error() const noexcept;                                                 // NOVO
-  private:                                                                                                  //< methods
+    /**
+     * @brief The caller-assigned output document id (see pipeline_hooks::get_doc_id()) --
+     * plain, non-atomic: written exactly once, from the main thread, in
+     * doc_set_dscr::add_document(), before this doc_dscr is shared with any worker thread (see
+     * pipeline::add_documents(), called before any std::jthread is started). Every later read
+     * (from any worker thread, once running) is therefore safe without synchronization -- the
+     * std::jthread launch itself is the happens-before edge.
+     */
+    [[nodiscard]] std::uint64_t out_doc_id() const noexcept { return out_doc_id_; }
+    void                        set_out_doc_id(std::uint64_t id) noexcept { out_doc_id_ = id; }
+  private: //< methods
     void open(cstr_t path);
   private:
     mmap_file               doc_;             // core document functionality
     std::atomic<doc_status> status_{unknown}; // validation status of the document
     error_info              err_;             // if there is an error, here it is the error description
+    std::uint64_t           out_doc_id_ = 0;  // caller-assigned output document id, see out_doc_id() above
   };
   ///////////////////////////////////////////////////////////////////////////////////////////
   inline doc_dscr::doc_dscr(cstr_t path)
@@ -72,6 +84,7 @@ namespace fsp
   : doc_(std::move(o.doc_))
   , status_(o.status_.load(std::memory_order_relaxed))
   , err_(std::move(o.err_))
+  , out_doc_id_(o.out_doc_id_)
   {
   }
   inline doc_dscr& doc_dscr::operator=(doc_dscr&& o) noexcept
@@ -80,7 +93,8 @@ namespace fsp
     {
       doc_ = std::move(o.doc_);
       status_.store(o.status_.load(std::memory_order_relaxed), std::memory_order_relaxed);
-      err_ = std::move(o.err_);
+      err_        = std::move(o.err_);
+      out_doc_id_ = o.out_doc_id_;
     }
     return *this;
   }

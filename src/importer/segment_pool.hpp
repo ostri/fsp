@@ -4,8 +4,9 @@
 #include "xml_segment.hpp"
 #include "segment_result.hpp"
 #include "lock_queue.hpp"
-#include <mutex>
 #include <atomic>
+#include <mutex>
+#include <span>
 #include <vector>
 
 namespace fsp
@@ -27,6 +28,24 @@ namespace fsp
     void                      set_segment(std::size_t ndx, xml_segment seg);
     void                      set_result(std::size_t ndx, const segment_result& seg_r);
     xml_segment               retrieve_segment(std::size_t ndx);
+    /**
+     * @brief In-place access to slot ndx's xml_segment/segment_result -- unlike
+     * retrieve_segment(), does NOT free the slot: the caller (see xml_worker::process_one())
+     * keeps it "locked" until it later calls release_slots() itself, once a store_block()/
+     * store_block_failed() hook has finished reading it. It is the caller's own responsibility
+     * to never call these on an ndx it has already released.
+     */
+    [[nodiscard]] xml_segment&          segment_at(std::size_t ndx) noexcept { return segments_[ndx]; }
+    [[nodiscard]] const xml_segment&    segment_at(std::size_t ndx) const noexcept { return segments_[ndx]; }
+    [[nodiscard]] segment_result&       result_at(std::size_t ndx) noexcept { return results_[ndx]; }
+    [[nodiscard]] const segment_result& result_at(std::size_t ndx) const noexcept { return results_[ndx]; }
+    /**
+     * @brief Batch counterpart to retrieve_segment()'s own free_queues_ push: returns every
+     * index in indices to its shard's free_queues_ entry, grouping by shard first (indices may
+     * span more than one shard -- see shard_of_slot_) so each shard's push_range() takes its own
+     * queue's mutex only once, not once per index.
+     */
+    void                      release_slots(std::span<const std::size_t> indices);
     [[nodiscard]] std::size_t ready_queue_size() const
     {
       std::size_t total = 0;
@@ -162,4 +181,16 @@ namespace fsp
   inline void           segment_pool::set_result(std::size_t ndx, const segment_result& seg_r) { results_[ndx] = seg_r; }
   inline std::ptrdiff_t segment_pool::ready_queue_size_approx(std::size_t shard) const noexcept
   { return ready_queues_[shard].size_approx(); }
+
+  inline void segment_pool::release_slots(std::span<const std::size_t> indices)
+  {
+    if (indices.empty()) return;
+    // Bucket by shard first: a mixed-document batch can span more than one shard, and
+    // push_range() (see lock_queue.hpp) takes its queue's mutex once for however many elements
+    // it's given, so grouping avoids taking each shard's mutex once per individual index.
+    std::vector<std::vector<std::size_t>> by_shard(num_shards_);
+    for (const std::size_t ndx : indices) by_shard[shard_of_slot_[ndx]].push_back(ndx);
+    for (std::size_t shard = 0; shard < num_shards_; ++shard)
+      if (! by_shard[shard].empty()) free_queues_[shard].push_range(by_shard[shard]);
+  }
 } // namespace fsp

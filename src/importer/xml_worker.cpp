@@ -36,7 +36,9 @@ namespace fsp
     const proc_data&      targets, // structure that holds information about cutting points and xpaths of the values we are looking for
     str_t                 parent_log_name, // parent thread log thread name
     pipeline&             pl,
-    pipeline_hooks&       hooks)
+    pipeline_hooks&       hooks,
+    std::size_t           ok_block_flush_size,
+    std::size_t           nak_block_flush_size)
   : log_(log)
   , ds_dscr_(ds_dscr)
   , results_(results)
@@ -49,7 +51,12 @@ namespace fsp
   , parent_log_name_(std::move(parent_log_name))
   , sax_(std::make_unique<segment_sax>(log_))
   , pool_(pool)
+  , ok_block_flush_size_(ok_block_flush_size)
+  , nak_block_flush_size_(nak_block_flush_size)
   {
+    ok_block_indices_.reserve(ok_block_flush_size_);
+    nak_block_indices_.reserve(nak_block_flush_size_);
+    nak_block_errors_.reserve(nak_block_flush_size_);
     //     reader_.reset(xmlReaderForMemory("", 0, "noname.xml", nullptr, reader_flags_));
     //     if (reader_.get() == nullptr) { throw std::runtime_error("Failed to initialize xmlTextReader"); }
   }
@@ -445,40 +452,100 @@ namespace fsp
    * @brief processes ONE segment from the pool (for the hybrid pipeline_worker)
    * Unlike operator(), it does not run its own loop over pool_.pop_segment_ndx() --
    * the caller must already have idx (e.g. from pool_.try_pop_ready() or pool_.pop_segment_ndx()).
+   * Unlike the old pool_.retrieve_segment()-based version, idx is NOT released back to pool_
+   * here -- it stays "locked" (see segment_pool::segment_at()'s own doc comment) until
+   * flush_ok_block()/flush_nak_block() releases it, once a store_block()/store_block_failed()
+   * hook has had a chance to read it.
    * @param idx index of the segment in the pool
    */
   int xml_worker::process_one(std::size_t idx)
   {
-    const xml_segment seg = pool_.retrieve_segment(idx); // slot is freed here, regardless of the outcome below
+    xml_segment& seg = pool_.segment_at(idx);
 
     // Bail out: the document was meanwhile validated as invalid -> skip the SAX extraction.
+    // Still goes through record_nak() below (as a failure) so idx is eventually released the
+    // same way every other slot is -- there is no separate release path here.
     if (ds_dscr_[seg.doc_ndx()].status() == doc_status::validation_failed)
     {
       if (log_debug_) log_.debug(fmt::format("Segment {} (doc {}): document invalid, skipped processing.", seg.id(), seg.doc_ndx()));
+      pipeline_.record_segment_failed(static_cast<std::size_t>(seg.doc_ndx()), seg.id());
+      record_nak(
+        idx,
+        seg,
+        segment_result{seg.id(), seg.subtree_type(), seg.doc_ndx()},
+        error_info{processor_error::syntax_error, "document invalid, segment skipped", "", static_cast<std::size_t>(seg.doc_ndx())});
       return seg.doc_ndx();
     }
 
     if (auto res = process_segment(seg))
     {
-      pipeline_.record_segment_done(seg, *res, hooks_);
-      if (loc_res_ok_.size() + 1 == loc_res_ok_.capacity()) loc_res_ok_.reserve(loc_res_ok_.size() * 2);
-      loc_res_ok_.emplace_back(std::move(*res));
+      const bool semantically_ok = pipeline_.record_segment_done(seg, *res, hooks_);
+      // Both loc_res_ok_/loc_res_nak_ (the existing route into pipeline_.results()/errors(), see
+      // xml_worker::flush_results()) and pool_.result_at(idx) (for a later store_block()/
+      // store_block_failed() hook) need their own copy of *res -- hence the copy into the pool
+      // before *res is moved into record_ok()/record_nak() below.
+      pool_.result_at(idx) = *res;
+      if (semantically_ok) record_ok(idx, seg, std::move(*res));
+      else record_nak(idx, seg, std::move(*res), error_info::semantic("on_seg_proc", "segment failed semantic validation"));
     }
     else
     {
       // res holds an error_info here, not a segment_result -- *res would be UB (dereferencing a
       // disengaged std::expected). Record the failure with the id-only constructor instead.
       pipeline_.record_segment_failed(static_cast<std::size_t>(seg.doc_ndx()), seg.id());
-      if (loc_res_nak_.size() + 1 == loc_res_nak_.capacity()) loc_res_nak_.reserve(loc_res_nak_.size() * 2);
-      loc_res_nak_.emplace_back(seg.id(), seg.subtree_type(), seg.doc_ndx());
+      record_nak(idx, seg, segment_result{seg.id(), seg.subtree_type(), seg.doc_ndx()}, res.error());
     }
     return seg.doc_ndx();
   }
+
+  // Common tail of every "this segment turned out OK" path above: marks seg valid, appends to
+  // loc_res_ok_ (see flush_results()) and to ok_block_indices_ (see flush_ok_block()), flushing
+  // the latter once ok_block_flush_size_ is reached.
+  void xml_worker::record_ok(std::size_t idx, xml_segment& seg, segment_result result)
+  {
+    seg.set_valid(true);
+    if (loc_res_ok_.size() + 1 == loc_res_ok_.capacity()) loc_res_ok_.reserve(loc_res_ok_.size() * 2);
+    loc_res_ok_.push_back(std::move(result));
+    ok_block_indices_.push_back(idx);
+    if (ok_block_indices_.size() >= ok_block_flush_size_) flush_ok_block();
+  }
+
+  // Common tail of every "this segment failed" path above -- see record_ok()'s own doc comment,
+  // mirrored for the nak side (plus nak_block_errors_, parallel to nak_block_indices_).
+  void xml_worker::record_nak(std::size_t idx, xml_segment& seg, segment_result result, error_info err)
+  {
+    seg.set_valid(false);
+    if (loc_res_nak_.size() + 1 == loc_res_nak_.capacity()) loc_res_nak_.reserve(loc_res_nak_.size() * 2);
+    loc_res_nak_.push_back(std::move(result));
+    nak_block_indices_.push_back(idx);
+    nak_block_errors_.push_back(std::move(err));
+    if (nak_block_indices_.size() >= nak_block_flush_size_) flush_nak_block();
+  }
+
+  void xml_worker::flush_ok_block()
+  {
+    if (! ok_block_indices_.empty()) hooks_.store_block(ok_block_indices_, pool_, ds_dscr_, log_);
+    pool_.release_slots(ok_block_indices_);
+    ok_block_indices_.clear();
+  }
+
+  void xml_worker::flush_nak_block()
+  {
+    if (! nak_block_indices_.empty()) hooks_.store_block_failed(nak_block_indices_, nak_block_errors_, pool_, ds_dscr_, log_);
+    pool_.release_slots(nak_block_indices_);
+    nak_block_indices_.clear();
+    nak_block_errors_.clear();
+  }
+
   /**
-   * @brief moves the locally accumulated results into the shared results_/errors_ (called by pipeline_worker at thread end)
+   * @brief moves the locally accumulated results into the shared results_/errors_, and flushes
+   * whatever remains in the ok/nak blocks (see flush_ok_block()/flush_nak_block()) -- called by
+   * pipeline_worker at thread end.
    */
   void xml_worker::flush_results()
   {
+    flush_ok_block();
+    flush_nak_block();
     {
       std::lock_guard lock(results_mutex_);
       results_.append_range(std::move(loc_res_ok_));

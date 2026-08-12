@@ -36,9 +36,17 @@ namespace fsp
     // Number of independent shards segment_pool splits its ready/free queues into, to reduce
     // lock/condition_variable contention between concurrent C/P threads. Default 2 was found
     // empirically fastest against N=1,3,4 (see pipeline.cpp / segment_pool.hpp).
-    std::size_t           pool_shard_count = 2; // NOLINT(readability-magic-numbers)
-    logger::logger_config log_config;           // configuration of the
-    str_t                 program_name;         // program name as displayed in the log file
+    std::size_t pool_shard_count = 2; // NOLINT(readability-magic-numbers)
+    // Batch sizes for pipeline_hooks::store_block()/store_block_failed(): a P-role thread flushes
+    // its locally accumulated ok/failed segment indices once one of these many have piled up (or,
+    // for whatever remains, once at thread-loop end -- see xml_worker::process_one()/
+    // flush_results()). Also used to pre-size the two accumulator vectors at worker construction,
+    // so normal-case operation never reallocates. Two separate knobs because ok segments are
+    // expected to vastly outnumber failed ones in a healthy run.
+    std::size_t           ok_block_flush_size  = 1024; // NOLINT(readability-magic-numbers)
+    std::size_t           nak_block_flush_size = 128;  // NOLINT(readability-magic-numbers)
+    logger::logger_config log_config;                  // configuration of the
+    str_t                 program_name;                // program name as displayed in the log file
     // NOLINTEND(misc-non-private-member-variables-in-classes)
     [[nodiscard]] str_t dump(int offs) const;
   };
@@ -54,12 +62,14 @@ namespace fsp
   {0}cutter_ratio_num: {4}
   {0}cutter_ratio_den: {5}
   {0}pool_shard_count: {6}
-  {0}log_config.app_name: {7}
-  {0}log_config.run_mode: {8}
-  {0}log_config.console_level: {9}
-  {0}log_config.file_level: {10}
-  {0}log_config.log_folder: {11}
-  {0}program_name: {12})",
+  {0}ok_block_flush_size: {7}
+  {0}nak_block_flush_size: {8}
+  {0}log_config.app_name: {9}
+  {0}log_config.run_mode: {10}
+  {0}log_config.console_level: {11}
+  {0}log_config.file_level: {12}
+  {0}log_config.log_folder: {13}
+  {0}program_name: {14})",
                        ind,
                        targets.dump(offs),
                        num_of_workers,
@@ -67,6 +77,8 @@ namespace fsp
                        cutter_ratio_num,
                        cutter_ratio_den,
                        pool_shard_count,
+                       ok_block_flush_size,
+                       nak_block_flush_size,
                        log_config.app_name,
                        magic_enum::enum_name(log_config.run_mode),
                        magic_enum::enum_name(log_config.console_level),

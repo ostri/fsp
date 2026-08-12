@@ -3,11 +3,14 @@
 #include "doc_dscr.hpp"
 #include "doc_set_counter.hpp"
 #include "doc_set_dscr.hpp"
+#include "error_info.hpp"
 #include <logger/logger.hpp>
 #include "result_values.hpp"
+#include "segment_pool.hpp"
 #include "segment_result.hpp"
 #include "xml_segment.hpp"
 #include <chrono>
+#include <cstdint>
 #include <memory>
 #include <span>
 
@@ -64,6 +67,21 @@ namespace fsp
     }
 
     /**
+     * @brief Main thread, once per document, right after its doc_dscr is constructed but before
+     * it is added to doc_set_dscr -- the returned id is stored as that document's
+     * doc_dscr::out_doc_id() (see pipeline::add_documents()), for a block-writer hook
+     * (store_block()/store_block_failed()) to attach to whatever it writes downstream. Called
+     * strictly before any worker thread starts, so the default body below (a plain, non-atomic
+     * counter) needs no locking.
+     * @param node_hint doc_ndx modulo some caller-meaningful block size (e.g. a Snowflake
+     * implementation's node-id range) -- deterministic per document, not tied to which thread
+     * later processes it (pipeline_hooks intentionally never exposes worker/thread identity to a
+     * hook, see the class's own doc comment). The default body ignores it.
+     * @return an opaque, caller-chosen 64-bit id; the default is a simple 1, 2, 3, ... counter.
+     */
+    [[nodiscard]] virtual std::uint64_t get_doc_id([[maybe_unused]] std::size_t node_hint) { return next_doc_id_++; }
+
+    /**
      * @brief The pipeline_worker thread itself, once at start and once at end of its lifetime.
      * Stamps worker_start_ so a derived class's own on_wrk_end() can call
      * elapsed_worker_sec() -- see on_run_start()'s note on calling the base body explicitly.
@@ -111,6 +129,42 @@ namespace fsp
                              [[maybe_unused]] bool                  is_last,
                              [[maybe_unused]] const logger::Logger& log)
     { return result.values().complete(); }
+
+    /**
+     * @brief A P-role thread hands off a batch of semantically OK segments (on_seg_proc()
+     * returned true) for external storage (file/db/message queue). Called from the one worker
+     * thread that accumulated indices -- either once importer_config::ok_block_flush_size worth
+     * of segments have piled up, or once, with whatever remains, when that thread's loop ends
+     * (see xml_worker/pipeline_worker). indices are still-live slots in pool -- neither
+     * pool.segment_at(idx) nor pool.result_at(idx) is reused by anyone else until THIS call
+     * returns and the caller (not store_block() itself) releases them via
+     * segment_pool::release_slots(). ds_dscr resolves each segment's mmap_base
+     * (ds_dscr[seg.doc_ndx()].mmf().data(), for xml_segment::view()) and out_doc_id() -- a batch
+     * can freely mix segments from different documents, so ds_dscr is looked up per index, not
+     * once for the whole batch.
+     * @param indices pool slot indices belonging to this batch; empty is possible only for the
+     * final end-of-loop flush and is a valid, harmless no-op call.
+     */
+    virtual void store_block([[maybe_unused]] std::span<const std::size_t> indices,
+                             [[maybe_unused]] segment_pool&                pool,
+                             [[maybe_unused]] const doc_set_dscr&          ds_dscr,
+                             [[maybe_unused]] const logger::Logger&        log)
+    {
+    }
+
+    /**
+     * @brief Same as store_block(), for the batch of semantically FAILED segments
+     * (on_seg_proc() returned false) -- see importer_config::nak_block_flush_size. errors holds
+     * one entry per index, same order, same length as indices (errors[i] describes why
+     * indices[i] failed).
+     */
+    virtual void store_block_failed([[maybe_unused]] std::span<const std::size_t> indices,
+                                    [[maybe_unused]] std::span<const error_info>  errors,
+                                    [[maybe_unused]] segment_pool&                pool,
+                                    [[maybe_unused]] const doc_set_dscr&          ds_dscr,
+                                    [[maybe_unused]] const logger::Logger&        log)
+    {
+    }
   protected:
     /**
      * @brief Seconds elapsed since on_run_start() stamped run_start_. Only meaningful on the
@@ -128,6 +182,7 @@ namespace fsp
   private:
     std::chrono::steady_clock::time_point run_start_;
     std::chrono::steady_clock::time_point worker_start_;
+    std::uint64_t                         next_doc_id_ = 1; // get_doc_id()'s default counter -- main-thread-only, see its doc comment
   };
 
   /**

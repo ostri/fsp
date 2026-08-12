@@ -25,7 +25,9 @@ namespace fsp
                                               cfg.targets,
                                               parent_log_name_,
                                               pipeline_,
-                                              *hooks_);
+                                              *hooks_,
+                                              cfg.ok_block_flush_size,
+                                              cfg.nak_block_flush_size);
     validator_ = std::make_unique<doc_validator>(log_, pipeline_.ds_dscr());
   }
 

@@ -44,6 +44,15 @@ namespace fsp
     [[nodiscard]] const str_XMLCh_t& attrs_raw() const noexcept;
     [[nodiscard]] int                doc_ndx() const;
     void                             set_doc_ndx(int doc_ndx);
+    /**
+     * @brief Semantic verdict from pipeline_hooks::on_seg_proc() (true = semantically correct),
+     * set by pipeline::record_segment_done() right after the hook call returns. Lets a
+     * store_block()/store_block_failed() hook, running later against a batch of pool indices,
+     * tell which of the two blocks this slot's segment was already sorted into without needing
+     * its own separate lookup -- see segment_pool::segment_at().
+     */
+    [[nodiscard]] bool valid() const noexcept;
+    void               set_valid(bool valid) noexcept;
   private:
     std::size_t id_           = 0;  //< unique id of the segment
     int         subtree_type_ = -1; //< subtree type, used later for data extraction (index of the xpath rule)
@@ -52,6 +61,7 @@ namespace fsp
     std::size_t length_       = 0;  //< length of the subtree / segmetn in bytes
     str_XMLCh_t ns_;                //< namespaces values of the top tag (utf-16)
     str_XMLCh_t attrs_;             //< attribute values of the top tag (utf-16)
+    bool        valid_ = false;     //< semantic verdict, see valid() above
   };
 
   inline bool               xml_segment::empty() const noexcept { return length_ == 0; }
@@ -61,5 +71,7 @@ namespace fsp
   inline const str_XMLCh_t& xml_segment::ns_raw() const noexcept { return ns_; }
   inline const str_XMLCh_t& xml_segment::attrs_raw() const noexcept { return attrs_; }
   inline int                xml_segment::doc_ndx() const { return doc_ndx_; }
+  inline bool               xml_segment::valid() const noexcept { return valid_; }
+  inline void               xml_segment::set_valid(bool valid) noexcept { valid_ = valid; }
 
 } // namespace fsp

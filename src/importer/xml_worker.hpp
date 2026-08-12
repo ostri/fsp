@@ -1,6 +1,7 @@
 #pragma once
 
 #include "doc_set_dscr.hpp"
+#include "error_info.hpp"
 #include "lock_queue.hpp"
 #include "parsing_util.hpp"
 #include "pipeline_hooks.hpp"
@@ -58,7 +59,9 @@ namespace fsp
       const proc_data&      targets, // structure that holds information about cutting points and xpaths of the values we are looking for
       str_t                 parent_log_name, // parent thread log thread name
       pipeline&             pl,              // for record_segment_done()/record_segment_failed() (doc_counters bookkeeping + hook dispatch)
-      pipeline_hooks&       hooks            // this worker thread's own hooks clone (see pipeline_worker)
+      pipeline_hooks&       hooks,           // this worker thread's own hooks clone (see pipeline_worker)
+      std::size_t           ok_block_flush_size, // see importer_config::ok_block_flush_size
+      std::size_t           nak_block_flush_size // see importer_config::nak_block_flush_size
     );
 
     //     // main functor method
@@ -68,6 +71,16 @@ namespace fsp
   private:
     // Former free functions, now member methods
     result<segment_result> process_segment(const xml_segment& seg);
+    // Common tail shared by every process_one() outcome -- see their own doc comments in
+    // xml_worker.cpp. idx/seg refer to the same pool slot; result is moved/copied into
+    // loc_res_ok_/loc_res_nak_ (the existing route into pipeline_.results()/errors()).
+    void record_ok(std::size_t idx, xml_segment& seg, segment_result result);
+    void record_nak(std::size_t idx, xml_segment& seg, segment_result result, error_info err);
+    // Calls hooks_.store_block()/store_block_failed() on whatever's accumulated in
+    // ok_block_indices_/nak_block_indices_ (a no-op if empty), then releases those slots back to
+    // pool_ via segment_pool::release_slots() and clears the accumulator(s) for reuse.
+    void flush_ok_block();
+    void flush_nak_block();
     //     result<segment_result>               extract_xml_values(cstr_t xml_buf, const xml_segment& seg);
     //     std::expected<pp_result, err_result> process_and_prune_node( //
     //       const xpath_set&    xpaths,
@@ -124,6 +137,21 @@ namespace fsp
     segment_pool&                pool_; // segment pool
     vec_seg_result               loc_res_ok_;
     vec_seg_result               loc_res_nak_;
+    // Pool slot indices for store_block()/store_block_failed() -- pre-sized to
+    // ok_block_flush_size_/nak_block_flush_size_ at construction so normal-case operation never
+    // reallocates (see importer_config::ok_block_flush_size's own doc comment). A slot's index
+    // stays in one of these two vectors -- "locked" against reuse -- from the moment
+    // process_one() decides its segment's fate until flush_ok_block()/flush_nak_block() releases
+    // it back to pool_ via segment_pool::release_slots().
+    std::vector<std::size_t> ok_block_indices_;
+    std::vector<std::size_t> nak_block_indices_;
+    // Parallel to nak_block_indices_ (same length, same order): why each of those segments
+    // failed semantically (on_seg_proc() returned false). No ok_block equivalent -- an ok
+    // segment's own segment_result (via segment_pool::result_at()) already carries everything a
+    // store_block() hook needs.
+    std::vector<error_info> nak_block_errors_;
+    const std::size_t       ok_block_flush_size_;
+    const std::size_t       nak_block_flush_size_;
     //  NOLINTEND(cppcoreguidelines-avoid-const-or-ref-data-members)
   };
 
