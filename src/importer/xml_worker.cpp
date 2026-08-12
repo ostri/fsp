@@ -79,7 +79,7 @@ namespace fsp
   //         break;
   //       }
 
-  //       const xml_segment seg = pool_.retrieve_segment(idx); // LOKALNA KOPIJA!
+  //       const xml_segment seg = pool_.retrieve_segment(idx); // LOCAL COPY!
   //       if (auto res = process_segment(seg))
   //       {
   //         if (loc_res_ok.size() + 1 == loc_res_ok.capacity()) loc_res_ok.reserve(loc_res_ok.size() * 2);
@@ -88,7 +88,7 @@ namespace fsp
   //       else
   //       {
   //         if (loc_res_nak.size() + 1 == loc_res_nak.capacity()) loc_res_nak.reserve(loc_res_nak.size() * 2);
-  //         loc_res_nak.emplace_back(std::move(*res)); // prilagodi glede na tvoj error tip
+  //         loc_res_nak.emplace_back(std::move(*res)); // adjust based on your error type
   //       }
   //     }
   //     if (log_debug_)
@@ -144,10 +144,10 @@ namespace fsp
 
       error_info err( //
         processor_error::error_extracting_xpath_values,
-        fmt::format("Error extracting xpath values: {}", "krneki"),
+        fmt::format("Error extracting xpath values: {}", "unspecified"),
         "",
         0UL);
-      if (log_warn_) log_.warn(fmt::format("Segment {}: {} :: ", seg.id(), "krneki"));
+      if (log_warn_) log_.warn(fmt::format("Segment {}: {} :: ", seg.id(), "unspecified"));
       return std::unexpected(err);
     }
     catch (const std::exception& e)
@@ -210,7 +210,7 @@ namespace fsp
   //     int ret = xmlReaderNewMemory(reader_.get(), xml_buf.data(), static_cast<int>(xml_buf.size()), "noname.xml", nullptr,
   //     reader_flags_); if (ret == 0)
   //     {
-  //       // Uspešno smo zamenjali vsebino
+  //       // Successfully swapped the content
   //       xmlTextReaderSetParserProp(reader_.get(), XML_PARSER_LOADDTD, 0);
   //       xmlTextReaderSetParserProp(reader_.get(), XML_PARSER_DEFAULTATTRS, 0);
   //       xmlTextReaderSetParserProp(reader_.get(), XML_PARSER_VALIDATE, 0);
@@ -442,16 +442,16 @@ namespace fsp
   //     throw std::runtime_error(fmt::format("attribute '{}:{}' has no value.", local_name, uri));
   //   }
   /**
-   * @brief obdela EN segment iz pool-a (za hibridni pipeline_worker)
-   * V nasprotju z operator() ne pozna svoje zanke po pool_.pop_segment_ndx() —
-   * idx mora klicatelj že imeti (npr. iz pool_.try_pop_ready() ali pool_.pop_segment_ndx()).
-   * @param idx indeks segmenta v pool-u
+   * @brief processes ONE segment from the pool (for the hybrid pipeline_worker)
+   * Unlike operator(), it does not run its own loop over pool_.pop_segment_ndx() --
+   * the caller must already have idx (e.g. from pool_.try_pop_ready() or pool_.pop_segment_ndx()).
+   * @param idx index of the segment in the pool
    */
   int xml_worker::process_one(std::size_t idx)
   {
-    const xml_segment seg = pool_.retrieve_segment(idx); // slot se sprosti tukaj, ne glede na izid spodaj
+    const xml_segment seg = pool_.retrieve_segment(idx); // slot is freed here, regardless of the outcome below
 
-    // Umik: dokument je bil medtem validiran kot neveljaven -> prihranimo SAX ekstrakcijo.
+    // Bail out: the document was meanwhile validated as invalid -> skip the SAX extraction.
     if (ds_dscr_[seg.doc_ndx()].status() == doc_status::validation_failed)
     {
       if (log_debug_) log_.debug(fmt::format("Segment {} (doc {}): document invalid, skipped processing.", seg.id(), seg.doc_ndx()));
@@ -475,7 +475,7 @@ namespace fsp
     return seg.doc_ndx();
   }
   /**
-   * @brief prenese lokalno nabrane rezultate v skupne results_/errors_ (kliče pipeline_worker ob koncu niti)
+   * @brief moves the locally accumulated results into the shared results_/errors_ (called by pipeline_worker at thread end)
    */
   void xml_worker::flush_results()
   {

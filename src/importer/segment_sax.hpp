@@ -158,7 +158,7 @@ namespace fsp
     return std::move(ctx_.results); // faster than copy
   }
 
-  // Pomožna funkcija za iteracijo čez nastavljene bite
+  // Helper function to iterate over the set bits
   template <typename F>
   inline void segment_sax::for_each_set_bit(std::uint64_t bits, F&& func)
   {
@@ -166,13 +166,13 @@ namespace fsp
     {
       const int t = std::countr_zero(bits);
       std::forward<F>(func)(t);
-      bits &= (bits - 1); // Pobriši najnižji nastavljen bit
+      bits &= (bits - 1); // Clear the lowest set bit
     }
   }
 
   inline void segment_sax::process_attributes(sax_ctx* ctx, int nb_attributes, const xmlChar** attributes, std::uint64_t attr_bits)
   {
-    // Uporaba vaše predlagane for_each_set_bit za čistočo
+    // Using the proposed for_each_set_bit for clarity
     for (int i = 0; i < nb_attributes; ++i)
     { // NOLINTBEGIN(cppcoreguidelines-pro-bounds-pointer-arithmetic, readability-magic-numbers)
       const xmlChar* attr_localname = attributes[static_cast<ptrdiff_t>(i * 5)];

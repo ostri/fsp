@@ -27,9 +27,9 @@ namespace fsp
     handleError("Fatal error", exc);
   }
 
-  void                             EH::resetErrors() { hasErrors = false; }
-  [[nodiscard]] bool               EH::hasValidationErrors() const { return hasErrors; }
-  void                             EH::handleError(const char* type, const xercesc::SAXParseException& exc)
+  void               EH::resetErrors() { hasErrors = false; }
+  [[nodiscard]] bool EH::hasValidationErrors() const { return hasErrors; }
+  void               EH::handleError(const char* type, const xercesc::SAXParseException& exc)
   {
     // Convert from UTF-16 to UTF-8 for console output
     auto system_id = fsp::x_str(exc.getSystemId()).to_string_view();
@@ -74,7 +74,7 @@ namespace fsp
     try
     {
       parser->loadGrammar(xsdFile.c_str(), xercesc::Grammar::SchemaGrammarType,
-                          true); // true = naloži tudi imported sheme
+                          true); // true = also load imported schemas
     }
     catch (const xercesc::XMLException& e)
     {
@@ -143,9 +143,9 @@ int main(int argc, char* argv[])
     return 1;
   }
 
-  fsp::str_t  xmlFile   = argv[1]; // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic)
-  fsp::str_t  xsdFile   = argv[2]; // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic)
-  bool        quietMode = false;
+  fsp::str_t xmlFile   = argv[1]; // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic)
+  fsp::str_t xsdFile   = argv[2]; // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic)
+  bool       quietMode = false;
 
   // Check optional mode parameter
   if (argc == 4)

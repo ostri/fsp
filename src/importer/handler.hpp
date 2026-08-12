@@ -18,11 +18,11 @@
 
 namespace fsp
 {
-  using cstr_t        = std::string_view;
-  using str_t         = std::string;
-  using cstr_XMLCh_t  = std::basic_string_view<XMLCh>;
-  using ns_def_t      = std::vector<std::pair<x_str, x_str>>;
-  using RuleMask      = uint64_t;
+  using cstr_t       = std::string_view;
+  using str_t        = std::string;
+  using cstr_XMLCh_t = std::basic_string_view<XMLCh>;
+  using ns_def_t     = std::vector<std::pair<x_str, x_str>>;
+  using RuleMask     = uint64_t;
 
   class Handler : public xercesc::DefaultHandler
   {
@@ -62,20 +62,20 @@ namespace fsp
                              //                             const XMLCh*               qname, // it is not used to make it faster
                              const xercesc::Attributes& attrs);
     // --- NS context stack ---
-    // Vsak nivo je map prefix→uri za en XML element scope.
-    // open_ns_scope() potisne nov nivo, close_ns_scope() ga odstrani.
+    // Each level is a prefix→uri map for one XML element scope.
+    // open_ns_scope() pushes a new level, close_ns_scope() removes it.
     void               open_ns_scope();
     void               close_ns_scope();
     void               push_ns_mapping(const XMLCh* prefix, const XMLCh* uri);
     [[nodiscard]] bool is_capturing() const { return frag_depth_ != -1; }
-    // Razreši NS URI za e_tag (enkrat, ko je NS context zgrajen).
+    // Resolves the NS URI for e_tag (once the NS context has been built).
     [[nodiscard]] bool tag_matches(const e_tag_wide& tag, const XMLCh* local_name, const XMLCh* ns_uri) const noexcept;
     str_t              make_open_tag(const XMLCh* qname, const xercesc::Attributes& attrs);
     str_XMLCh_t        attr_values_str(const xercesc::Attributes& attrs);
     /// prepare message to report exception
-    str_t       prepare_msg(const xercesc::SAXParseException& e);
-    void        rebuild_ns_decl_for_current_level();
-  private:                  /// members
+    str_t prepare_msg(const xercesc::SAXParseException& e);
+    void  rebuild_ns_decl_for_current_level();
+  private:                      /// members
     const logger::Logger& log_; // must be first logger NOLINT(cppcoreguidelines-avoid-const-or-ref-data-members)
     // --- subtree xpaths ---
     proc_data                 targets_;      // xpath rules
@@ -102,22 +102,22 @@ namespace fsp
                           // methods startPrefixMapping and startElement. It is cleared after startElement
     int doc_depth_ = 0;   // depth in the document (1 = root elem.)
     // --- segment acumutate sdata ---
-    int                           frag_depth_        = -1; //< depth inside the fragment
-    int                           seg_type_          = -1; //< type/structure of the segment. document is split into segments.
-    std::size_t                   frag_start_offset_ = 0;  //< byte offset of start of the fragment
-    std::size_t                   counter_           = 0;  //< counter to obtain unique segment id within the file
+    int         frag_depth_        = -1;                    //< depth inside the fragment
+    int         seg_type_          = -1;                    //< type/structure of the segment. document is split into segments.
+    std::size_t frag_start_offset_ = 0;                     //< byte offset of start of the fragment
+    std::size_t counter_           = 0;                     //< counter to obtain unique segment id within the file
                                                             //< (reset per document in set_doc_ndx() -- this Handler
                                                             //< is owned by one worker thread and reused across every
                                                             //< document that thread cuts, not one Handler per document)
-    const xercesc::SAX2XMLReader* parser_;                 //< pointer to related parser; only for getSrcOffs, not owner
-    cstr_t                        doc_;                    //< xml document mapped as string view over mmap file
-    const doc_set_dscr&           ds_dscr_;                //< structure of all documents to be processed
-    int                           doc_ndx_ = -1;           //< index of the document within the ds_dscr global structure
-    str_XMLCh_t                   ns_;                     //< current and inherited namespaces as string (for current segment)
-    str_XMLCh_t                   attr_;                   //< current tag attributes as a string (for current segment)
-    std::size_t                   element_counter_ = 0;    //< pooling counter check also "every"
-    str_XMLCh_t                   buf_;                    //< space for "make_open_tag" as XMLCh
-    segment_pool&                 pool_;                   //< segment pool
+    const xercesc::SAX2XMLReader* parser_;                  //< pointer to related parser; only for getSrcOffs, not owner
+    cstr_t                        doc_;                     //< xml document mapped as string view over mmap file
+    const doc_set_dscr&           ds_dscr_;                 //< structure of all documents to be processed
+    int                           doc_ndx_ = -1;            //< index of the document within the ds_dscr global structure
+    str_XMLCh_t                   ns_;                      //< current and inherited namespaces as string (for current segment)
+    str_XMLCh_t                   attr_;                    //< current tag attributes as a string (for current segment)
+    std::size_t                   element_counter_ = 0;     //< pooling counter check also "every"
+    str_XMLCh_t                   buf_;                     //< space for "make_open_tag" as XMLCh
+    segment_pool&                 pool_;                    //< segment pool
     bool                          validating_      = false; //< see set_validating()
     const bool                    log_trace_       = log_.active(logger::level::trace);
     const bool                    log_debug_       = log_.active(logger::level::debug);
@@ -132,5 +132,9 @@ namespace fsp
   inline void        Handler::set_doc(cstr_t doc) { doc_ = doc; }
   inline cstr_t      Handler::doc() const { return doc_; }
   inline int         Handler::doc_ndx() const { return doc_ndx_; }
-  inline void        Handler::set_doc_ndx(int doc_ndx) { doc_ndx_ = doc_ndx; counter_ = 0; }
+  inline void        Handler::set_doc_ndx(int doc_ndx)
+  {
+    doc_ndx_ = doc_ndx;
+    counter_ = 0;
+  }
 } // namespace fsp

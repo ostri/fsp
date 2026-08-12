@@ -48,25 +48,25 @@ namespace fsp
   public:
     // Upon construction we provide all relevant global structure references
     xml_worker(
-      segment_pool&       pool,          // reference to segment pool
-      const doc_set_dscr& ds_dscr,       // reference to document set structure
-      vec_seg_result&     results,       // where to store correct segments
-      vec_seg_result&     errors,        // where to store non correct segmetns
-      std::mutex&         results_mutex, // mutex for managing result structure
-      std::mutex&         errors_mutex,  // mutex for managing errors structure
-      const logger::Logger& log,         // reference to logger
-      const proc_data&    targets, // structure that holds information about cutting points and xpaths of the values we are looking for
-      str_t               parent_log_name, // parent thread log thread name
-      pipeline&           pl,             // for record_segment_done()/record_segment_failed() (doc_counters bookkeeping + hook dispatch)
-      pipeline_hooks&     hooks           // this worker thread's own hooks clone (see pipeline_worker)
+      segment_pool&         pool,          // reference to segment pool
+      const doc_set_dscr&   ds_dscr,       // reference to document set structure
+      vec_seg_result&       results,       // where to store correct segments
+      vec_seg_result&       errors,        // where to store non correct segmetns
+      std::mutex&           results_mutex, // mutex for managing result structure
+      std::mutex&           errors_mutex,  // mutex for managing errors structure
+      const logger::Logger& log,           // reference to logger
+      const proc_data&      targets, // structure that holds information about cutting points and xpaths of the values we are looking for
+      str_t                 parent_log_name, // parent thread log thread name
+      pipeline&             pl,              // for record_segment_done()/record_segment_failed() (doc_counters bookkeeping + hook dispatch)
+      pipeline_hooks&       hooks            // this worker thread's own hooks clone (see pipeline_worker)
     );
 
     //     // main functor method
     //     void              operator()(const std::stop_token& st, int worker_id);
-    int process_one(std::size_t idx); // returns the segment's doc_ndx; also records the segment's outcome (and runs the hook) internally
-    void              flush_results();
+    int  process_one(std::size_t idx); // returns the segment's doc_ndx; also records the segment's outcome (and runs the hook) internally
+    void flush_results();
   private:
-    // Nekdanje statične funkcije zdaj kot članske metode
+    // Former free functions, now member methods
     result<segment_result> process_segment(const xml_segment& seg);
     //     result<segment_result>               extract_xml_values(cstr_t xml_buf, const xml_segment& seg);
     //     std::expected<pp_result, err_result> process_and_prune_node( //

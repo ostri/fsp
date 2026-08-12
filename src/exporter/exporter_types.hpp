@@ -216,8 +216,8 @@ namespace fsp
 
   /**
    * @brief The public result of exporter<T,Q>::execute() on success -- the sum of every worker's
-   * exporter_thread_stats_t, computed once after all workers have joined. This is the spec's
-   * "glavna nit ... izračuna statistiko obdelav" (main thread computes run statistics) step.
+   * exporter_thread_stats_t, computed once after all workers have joined. This is
+   * doc/opis_exporterja.txt's "main thread computes run statistics" step.
    */
   struct exporter_run_stats_t
   {

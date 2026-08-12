@@ -16,18 +16,18 @@ namespace fsp
   public:
     // segment_pool();
     explicit segment_pool(const logger::Logger& log, std::size_t no_of_slots, std::size_t num_shards = 1);
-    void                         init(std::size_t capacity = 1024UL); // NOLINT(readability-magic-numbers)
-    std::size_t                  acquire_slot(std::size_t segment_id); // get free slot for segment_id's shard (blocks if none)
-    void                         push_ready(std::size_t idx);
-    auto                         try_pop_ready(std::size_t shard);
-    [[nodiscard]] std::size_t    size() const noexcept;
-    void                         ready_queue_close();
-    void                         abort();
-    queue_status                 pop_segment_ndx(std::size_t shard, std::size_t& ndx);
-    void                         set_segment(std::size_t ndx, xml_segment seg);
-    void                         set_result(std::size_t ndx, const segment_result& seg_r);
-    xml_segment                  retrieve_segment(std::size_t ndx);
-    [[nodiscard]] std::size_t    ready_queue_size() const
+    void                      init(std::size_t capacity = 1024UL);  // NOLINT(readability-magic-numbers)
+    std::size_t               acquire_slot(std::size_t segment_id); // get free slot for segment_id's shard (blocks if none)
+    void                      push_ready(std::size_t idx);
+    auto                      try_pop_ready(std::size_t shard);
+    [[nodiscard]] std::size_t size() const noexcept;
+    void                      ready_queue_close();
+    void                      abort();
+    queue_status              pop_segment_ndx(std::size_t shard, std::size_t& ndx);
+    void                      set_segment(std::size_t ndx, xml_segment seg);
+    void                      set_result(std::size_t ndx, const segment_result& seg_r);
+    xml_segment               retrieve_segment(std::size_t ndx);
+    [[nodiscard]] std::size_t ready_queue_size() const
     {
       std::size_t total = 0;
       for (const auto& q : ready_queues_) total += q.size();
@@ -53,19 +53,19 @@ namespace fsp
     // voluntary-context-switches blowup measured going from 1 to 10 concurrent documents).
     std::vector<lock_queue<std::size_t>> ready_queues_; // C -> P : indices ready for processing, sharded
     std::vector<lock_queue<std::size_t>> free_queues_;  // P -> C : reusable slot indices, sharded
-    mutable std::mutex                resize_mtx_;  // whenever we access segments_ or results_ as whole
-    std::unique_ptr<xml_segment[]>    segments_;    // NOLINT(hicpp-avoid-c-arrays)
-    std::unique_ptr<segment_result[]> results_;     // NOLINT(hicpp-avoid-c-arrays)
+    mutable std::mutex                   resize_mtx_;   // whenever we access segments_ or results_ as whole
+    std::unique_ptr<xml_segment[]>       segments_;     // NOLINT(hicpp-avoid-c-arrays)
+    std::unique_ptr<segment_result[]>    results_;      // NOLINT(hicpp-avoid-c-arrays)
     // Which shard owns each slot -- set once in acquire_slot(), read (never concurrently with
     // the write) in push_ready()/retrieve_segment() via the happens-before edge each queue's
     // mutex already provides, so a plain array is enough, no atomics needed.
-    std::unique_ptr<std::size_t[]>    shard_of_slot_; // NOLINT(hicpp-avoid-c-arrays)
-    const bool                        log_trace_ = log_.active(logger::level::trace);
-    const bool                        log_debug_ = log_.active(logger::level::debug);
-    const bool                        log_info_  = log_.active(logger::level::info);
-    const bool                        log_warn_  = log_.active(logger::level::warn);
-    const bool                        log_error_ = log_.active(logger::level::error);
-    const bool                        log_crit_  = log_.active(logger::level::critical);
+    std::unique_ptr<std::size_t[]> shard_of_slot_; // NOLINT(hicpp-avoid-c-arrays)
+    const bool                     log_trace_ = log_.active(logger::level::trace);
+    const bool                     log_debug_ = log_.active(logger::level::debug);
+    const bool                     log_info_  = log_.active(logger::level::info);
+    const bool                     log_warn_  = log_.active(logger::level::warn);
+    const bool                     log_error_ = log_.active(logger::level::error);
+    const bool                     log_crit_  = log_.active(logger::level::critical);
   };
   // inline segment_pool::segment_pool() { init(); }
   inline segment_pool::segment_pool(const logger::Logger& log, std::size_t no_of_slots, std::size_t num_shards)
@@ -94,7 +94,7 @@ namespace fsp
   {
     const std::size_t shard = segment_id % num_shards_;
     // grab free segment from already allocated ones (this shard's own reuse pool)
-    auto opt = free_queues_[shard].try_pop();
+    auto        opt = free_queues_[shard].try_pop();
     std::size_t slot;
     if (opt) slot = *opt;
     else
@@ -149,7 +149,7 @@ namespace fsp
     if (seg.subtree_type() < 0 || seg.length() == 0)
       log_.critical(fmt::format("Retrieved invalid segment from slot {} {})", ndx, seg.dump()));
     //    log_.debug(fmt::format("retrieve after:  idx: {} {}", ndx, seg.dump()));
-    //    segments_.at(ndx) = xml_segment{}; // default prazen
+    //    segments_.at(ndx) = xml_segment{}; // default empty
     free_queues_[shard_of_slot_[ndx]].push(ndx);
     return seg; // with move the segment slot is also reinitiaized
   }
@@ -159,7 +159,7 @@ namespace fsp
     segments_[ndx] = std::move(seg);
     //    log_.debug(fmt::format("after set segment:  ndx: {} {}", ndx, segments_[ndx].dump()));
   }
-  inline void segment_pool::set_result(std::size_t ndx, const segment_result& seg_r) { results_[ndx] = seg_r; }
+  inline void           segment_pool::set_result(std::size_t ndx, const segment_result& seg_r) { results_[ndx] = seg_r; }
   inline std::ptrdiff_t segment_pool::ready_queue_size_approx(std::size_t shard) const noexcept
   { return ready_queues_[shard].size_approx(); }
 } // namespace fsp

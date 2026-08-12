@@ -4,9 +4,9 @@
  * @file exporter.hpp
  * @brief Main class of the fsp::exporter module: owns the shared exporter_state, starts and
  * joins one worker thread per exporter_config_t::number_of_threads, and computes final run
- * statistics -- the spec's "glavna nit: zažene vse delovne niti, počaka na izhod, izračuna
- * statistiko obdelav" (main thread: starts all worker threads, waits for them to finish,
- * computes run statistics). Analogous to src/importer/pipeline.hpp.
+ * statistics -- matching doc/opis_exporterja.txt's spec: the main thread starts all worker
+ * threads, waits for them to finish, then computes run statistics. Analogous to
+ * src/importer/pipeline.hpp.
  *
  * Header-only, like exporter_worker.hpp: exporter<T,Q> is a template over the caller's own
  * transaction/qualifiers types, so there is no non-template translation unit to put in a .cpp.
@@ -72,8 +72,8 @@ namespace fsp
         {
           threads.emplace_back([w = workers.at(i).get(), worker_id = static_cast<int>(i)] { (*w)(worker_id); });
         }
-        // threads' destructor joins every std::jthread as this scope exits -- "glavna nit ...
-        // počaka na izhod" (main thread waits for every worker to finish).
+        // threads' destructor joins every std::jthread as this scope exits -- matching
+        // doc/opis_exporterja.txt's "main thread waits for every worker to finish" step.
       }
 
       const double elapsed_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start_time).count();

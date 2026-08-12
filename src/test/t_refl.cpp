@@ -5,7 +5,7 @@
 #include <string_view>
 #include <type_traits>
 
-// ---- Podatkovna struktura, v katero shranimo rezultat xpath anotacije ----
+// ---- Data structure into which we store the xpath annotation result ----
 
 struct class_info
 {
@@ -14,10 +14,10 @@ struct class_info
   std::size_t                   field_count = 0;
 };
 
-// Zgradi seznam razredov v podanem imenskem prostoru, ki dedujejo od
-// fsp::seg_schema, za vsak razred pa shrani njegov target-raw_attr in
-// raw_attr tabelo polj -- isti podatki, ki jih fsp::proc_data_of() uporabi
-// za zgraditev fsp::proc_data (glej reflection.hpp), tu samo za izpis.
+// Builds a list of classes in the given namespace that derive from
+// fsp::seg_schema, storing each class's target raw_attr and its raw_attr
+// field table -- the same data fsp::proc_data_of() uses to build
+// fsp::proc_data (see reflection.hpp), here just for printing.
 template <std::meta::info Ns>
 consteval auto get_classes()
 {
@@ -31,9 +31,9 @@ consteval auto get_classes()
   {
     if constexpr (std::meta::is_type(m) && std::meta::has_identifier(m))
     {
-      // gnezden if constexpr: typename[:m:] se preveri za CEL if-constexpr
-      // pogoj tudi, ko is_type(m) ni izpolnjen, zato mora biti ločen (glej
-      // enako opombo pri fsp::classes_of() v reflection.hpp).
+      // Nested if constexpr: typename[:m:] is checked for the WHOLE if-constexpr
+      // condition even when is_type(m) is not satisfied, so it must stay separate
+      // (see the same note on fsp::classes_of() in reflection.hpp).
       if constexpr (std::is_base_of_v<fsp::seg_schema, typename[:m:]>)
       {
         class_info ci{};
@@ -52,9 +52,9 @@ consteval auto get_classes()
 
 namespace
 {
-  // "1" / "0..1" / "1..*" / "0..*" -- glede na is_opt()/is_array(), ki ju
-  // fsp::xml_attr izpelje iz istega raw_attr, ki ga uporablja prava cevovodna
-  // koda (glej fsp::field_attr_of() v reflection.hpp za pomen ?, *, + markerjev).
+  // "1" / "0..1" / "1..*" / "0..*" -- based on is_opt()/is_array(), which
+  // fsp::xml_attr derives from the same raw_attr the real pipeline code
+  // uses (see fsp::field_attr_of() in reflection.hpp for the meaning of the ?, *, + markers).
   std::string_view cardinality(const fsp::xml_attr& a)
   {
     if (a.is_array()) return a.is_opt() ? "0..*" : "1..*";
@@ -73,7 +73,7 @@ int main()
 {
   constexpr auto classes = get_classes<^^fsp::work>();
 
-  std::cout << "Razredi z xpath anotacijo:\n";
+  std::cout << "Classes with xpath annotation:\n";
   for (const auto& ci : classes)
   {
     if (ci.target.name.empty()) break;

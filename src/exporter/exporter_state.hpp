@@ -11,8 +11,8 @@
  * every exporter_worker<T,Q>, mirroring how src/importer/pipeline.hpp shares its own state
  * (results_/errors_/... each behind their own std::mutex) with pipeline_worker.
  *
- * Deliberate deviation from doc/opis_exporterja.txt's "ko rečemo vrsta je to lock_query<int>"
- * note: available_drains_ is a plain std::vector<int> guarded by its own std::mutex, not
+ * Deliberate deviation from doc/opis_exporterja.txt's note that "when we say queue, we mean
+ * lock_query<int>": available_drains_ is a plain std::vector<int> guarded by its own std::mutex, not
  * fsp::lock_queue<int> (src/common/lock_queue/lock_queue.hpp). lock_queue is a FIFO
  * push/pop/try_pop wrapper with no random-access erase and no membership check -- but the actual
  * operations the spec requires on available_drains_ are "keep my drain-id if I already have one"

@@ -4,8 +4,8 @@
 
 namespace fsp
 {
-  // Vrne pogled na XML vsebino segmenta iz mmap bufferja.
-  // mmap_base mora kazati na začetek mmap-ane datoteke.
+  // Returns a view onto the segment's XML content from the mmap buffer.
+  // mmap_base must point to the start of the mmap-ed file.
   xml_segment::xml_segment(std::size_t id,           //< unique segment id
                            int         subtree_type, //< target index / subtree type
                            int         doc_ndx,      //< index of the document the segment belongs to
@@ -145,10 +145,10 @@ namespace fsp
   }
   [[nodiscard]] str_t xml_segment::dump(int offs) const
   {
-    x_str       ns(ns_);
-    x_str       attrs(attrs_);
-    auto        leading = str_t(offs, ' ');
-    str_t       str     = fmt::format( //
+    x_str ns(ns_);
+    x_str attrs(attrs_);
+    auto  leading = str_t(offs, ' ');
+    str_t str     = fmt::format( //
       R"({0}id: {1} subtree type: {2} offset: {3} length: {4} doc_ndx: {5}
 {0}ns:    '{6}'
 {0}attrs: '{7}')",

@@ -274,8 +274,8 @@ namespace fsp
     /**
      * @brief Asks cb_->fetch_doc_name() for a candidate name, retrying with a worker-appended
      * random suffix (before the extension) on collision, bounded to avoid an infinite loop --
-     * matching doc/opis_exporterja.txt's "se obstoječemu imenu doda naključna številka pred
-     * ekstenzijo, to se ponavlja dokler ne uspe". cb_exporter itself is never told about
+     * matching doc/opis_exporterja.txt's "a random number is appended to the existing name
+     * before the extension, repeated until it succeeds". cb_exporter itself is never told about
      * collisions -- the spec's own wording places that responsibility on the exporter/worker
      * layer, not the callback's semantics.
      */

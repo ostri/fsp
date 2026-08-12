@@ -74,7 +74,8 @@ namespace fsp
     // Fixed-width digit concatenation -- the pointer arithmetic and array indexing below are
     // inherent to building the scaled integer's digit string without allocating; 24 is a
     // generous cap on 18 significant digits (see totalDigits=18 above), not a tunable value.
-    // NOLINTBEGIN(cppcoreguidelines-pro-bounds-pointer-arithmetic, cppcoreguidelines-pro-bounds-constant-array-index, readability-magic-numbers)
+    // NOLINTBEGIN(cppcoreguidelines-pro-bounds-pointer-arithmetic, cppcoreguidelines-pro-bounds-constant-array-index,
+    // readability-magic-numbers)
     std::array<char, 24> buf{};
     std::size_t          pos = 0;
     for (char c : int_part) buf[pos++] = c;
@@ -84,7 +85,8 @@ namespace fsp
     big_int_t v = 0;
     std::from_chars(buf.data(), buf.data() + pos, v);
     return amount_t{v};
-    // NOLINTEND(cppcoreguidelines-pro-bounds-pointer-arithmetic, cppcoreguidelines-pro-bounds-constant-array-index, readability-magic-numbers)
+    // NOLINTEND(cppcoreguidelines-pro-bounds-pointer-arithmetic, cppcoreguidelines-pro-bounds-constant-array-index,
+    // readability-magic-numbers)
   }
 
   /**
@@ -132,8 +134,8 @@ namespace fsp
     std::from_chars(s.data() + 14, s.data() + 16, mi);
     std::from_chars(s.data() + 17, s.data() + 19, se);
 
-    auto tp = std::chrono::time_point_cast<std::chrono::milliseconds>(
-      std::chrono::sys_days{date} + std::chrono::hours{h} + std::chrono::minutes{mi} + std::chrono::seconds{se});
+    auto tp = std::chrono::time_point_cast<std::chrono::milliseconds>(std::chrono::sys_days{date} + std::chrono::hours{h} +
+                                                                      std::chrono::minutes{mi} + std::chrono::seconds{se});
 
     std::size_t pos = 19;
     if (pos < s.size() && s[pos] == '.')
@@ -190,8 +192,8 @@ namespace fsp
 
 
   // --- proc_data ----------------------------------------------------------------------
-  // Opomba: xpaths ostane std::vector — proc_data ni constexpr, je runtime struktura.
-  // Če bi hoteli constexpr proc_data, bi potrebovali std::array<xpath_node_struct, N>.
+  // Note: xpaths stays std::vector -- proc_data is not constexpr, it's a runtime structure.
+  // A constexpr proc_data would need std::array<xpath_node_struct, N> instead.
   struct proc_data
   {
     fsp::xpath_set              targets; // NOLINT(misc-non-private-member-variables-in-classes)
