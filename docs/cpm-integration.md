@@ -100,7 +100,7 @@ namespace my_ns::my_schema
 
 Derive from `fsp::pipeline_hooks_crtp<Derived>` (see `src/importer/pipeline_hooks.hpp`) to
 receive lifecycle callbacks -- `on_run_start`/`on_run_end` on the main thread,
-`on_wrk_start`/`on_wrk_end`/`on_doc_open`/`on_doc_close`/`on_seg_proc` on worker threads. One
+`on_wrk_start`/`on_wrk_end`/`on_doc_open`/`on_doc_close`/`on_semantic_check` on worker threads. One
 clone is made per worker thread automatically (via CRTP, no extra code needed), so your own
 per-thread state needs no locking. `src/test/pacs8_cb.hpp` / `pacs8_cb.cpp` in this repo is a
 complete worked example (logs every hook call); skip this step entirely if you only need
@@ -114,7 +114,7 @@ complete worked example (logs every hook call); skip this step entirely if you o
 class my_hooks : public fsp::pipeline_hooks_crtp<my_hooks>
 {
 public:
-  bool on_seg_proc(const fsp::xml_segment& segment,
+  bool on_semantic_check(const fsp::xml_segment& segment,
                    fsp::segment_result&    result,
                    bool                    is_first,
                    bool                    is_last,

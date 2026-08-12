@@ -479,7 +479,7 @@ namespace fsp
   /**
    * @brief Materializes one segment's values directly into the developer's own schema class,
    * wrapped in the union of every schema class Namespace declares -- what a caller's
-   * on_seg_proc() would naturally want instead of the generic, name-indexed result_values.
+   * on_semantic_check() would naturally want instead of the generic, name-indexed result_values.
    * @details seg_type must be the same declaration-order index proc_data_of<Namespace>()
    * assigned to the segment's own schema class (i.e. segment_result::seg_type()).
    * @tparam Namespace reflection of the namespace holding the schema classes

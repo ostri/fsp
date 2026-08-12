@@ -37,7 +37,7 @@ namespace fsp
     // lock/condition_variable contention between concurrent C/P threads. Default 2 was found
     // empirically fastest against N=1,3,4 (see pipeline.cpp / segment_pool.hpp).
     std::size_t pool_shard_count = 2; // NOLINT(readability-magic-numbers)
-    // Batch sizes for pipeline_hooks::store_block()/store_block_failed(): a P-role thread flushes
+    // Batch sizes for pipeline_hooks::on_block_store()/on_failed_block_store(): a P-role thread flushes
     // its locally accumulated ok/failed segment indices once one of these many have piled up (or,
     // for whatever remains, once at thread-loop end -- see xml_worker::process_one()/
     // flush_results()). Also used to pre-size the two accumulator vectors at worker construction,

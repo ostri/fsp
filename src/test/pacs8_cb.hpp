@@ -33,14 +33,14 @@ public:
   void on_wrk_end(int worker_id, fsp::cstr_t thread_name, const logger::Logger& log) override;
   void on_doc_open(std::size_t doc_ndx, const fsp::doc_dscr& dscr, const logger::Logger& log) override;
   void on_doc_close(std::size_t doc_ndx, fsp::doc_status status, const fsp::doc_dscr& dscr, const logger::Logger& log) override;
-  bool on_seg_proc(const fsp::xml_segment& segment,
-                   fsp::segment_result&    result,
-                   bool                    is_first,
-                   bool                    is_last,
-                   const logger::Logger&   log) override;
+  bool on_semantic_check(const fsp::xml_segment& segment,
+                         fsp::segment_result&    result,
+                         bool                    is_first,
+                         bool                    is_last,
+                         const logger::Logger&   log) override;
 private:
   /**
-   * @brief Per-segment-type processing, factored out of on_seg_proc() so it stays pure plumbing.
+   * @brief Per-segment-type processing, factored out of on_semantic_check() so it stays pure plumbing.
    * Each returns its own semantic verdict (true = ok) for the segment it was given.
    */
   [[nodiscard]] bool process_header(const fsp::work::pacs8_header& hdr,

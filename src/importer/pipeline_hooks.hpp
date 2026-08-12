@@ -22,12 +22,12 @@ namespace fsp
    *
    * One clone (see clone()) is made per worker thread -- each clone is exclusively owned and
    * called by that one thread for the thread's whole lifetime, so on_doc_open/close and
-   * on_seg_proc never need any locking around a developer's own state. on_run_start()/
+   * on_semantic_check never need any locking around a developer's own state. on_run_start()/
    * on_run_end() are the only two hooks called from the main thread, on the original instance the
    * caller passed in; on_run_end() receives every worker clone so the developer can aggregate
    * their own per-thread state however they like (sum, max, top-N, ...) in one place.
    *
-   * All hook bodies default to a no-op (or, for on_seg_proc, a sensible default verdict)
+   * All hook bodies default to a no-op (or, for on_semantic_check, a sensible default verdict)
    * so a derived class only needs to override what it actually cares about.
    */
   class pipeline_hooks // NOLINT(hicpp-special-member-functions)
@@ -70,7 +70,7 @@ namespace fsp
      * @brief Main thread, once per document, right after its doc_dscr is constructed but before
      * it is added to doc_set_dscr -- the returned id is stored as that document's
      * doc_dscr::out_doc_id() (see pipeline::add_documents()), for a block-writer hook
-     * (store_block()/store_block_failed()) to attach to whatever it writes downstream. Called
+     * (on_block_store()/on_failed_block_store()) to attach to whatever it writes downstream. Called
      * strictly before any worker thread starts, so the default body below (a plain, non-atomic
      * counter) needs no locking.
      * @param node_hint doc_ndx modulo some caller-meaningful block size (e.g. a Snowflake
@@ -123,21 +123,21 @@ namespace fsp
      * pipeline_hooks_crtp's doc comment for why the earlier "detect override, skip the call"
      * idea was dropped).
      */
-    virtual bool on_seg_proc([[maybe_unused]] const xml_segment&    segment,
-                             segment_result&                        result,
-                             [[maybe_unused]] bool                  is_first,
-                             [[maybe_unused]] bool                  is_last,
-                             [[maybe_unused]] const logger::Logger& log)
+    virtual bool on_semantic_check([[maybe_unused]] const xml_segment&    segment,
+                                   segment_result&                        result,
+                                   [[maybe_unused]] bool                  is_first,
+                                   [[maybe_unused]] bool                  is_last,
+                                   [[maybe_unused]] const logger::Logger& log)
     { return result.values().complete(); }
 
     /**
-     * @brief A P-role thread hands off a batch of semantically OK segments (on_seg_proc()
+     * @brief A P-role thread hands off a batch of semantically OK segments (on_semantic_check()
      * returned true) for external storage (file/db/message queue). Called from the one worker
      * thread that accumulated indices -- either once importer_config::ok_block_flush_size worth
      * of segments have piled up, or once, with whatever remains, when that thread's loop ends
      * (see xml_worker/pipeline_worker). indices are still-live slots in pool -- neither
      * pool.segment_at(idx) nor pool.result_at(idx) is reused by anyone else until THIS call
-     * returns and the caller (not store_block() itself) releases them via
+     * returns and the caller (not on_block_store() itself) releases them via
      * segment_pool::release_slots(). ds_dscr resolves each segment's mmap_base
      * (ds_dscr[seg.doc_ndx()].mmf().data(), for xml_segment::view()) and out_doc_id() -- a batch
      * can freely mix segments from different documents, so ds_dscr is looked up per index, not
@@ -145,24 +145,24 @@ namespace fsp
      * @param indices pool slot indices belonging to this batch; empty is possible only for the
      * final end-of-loop flush and is a valid, harmless no-op call.
      */
-    virtual void store_block([[maybe_unused]] std::span<const std::size_t> indices,
-                             [[maybe_unused]] segment_pool&                pool,
-                             [[maybe_unused]] const doc_set_dscr&          ds_dscr,
-                             [[maybe_unused]] const logger::Logger&        log)
+    virtual void on_block_store([[maybe_unused]] std::span<const std::size_t> indices,
+                                [[maybe_unused]] segment_pool&                pool,
+                                [[maybe_unused]] const doc_set_dscr&          ds_dscr,
+                                [[maybe_unused]] const logger::Logger&        log)
     {
     }
 
     /**
-     * @brief Same as store_block(), for the batch of semantically FAILED segments
-     * (on_seg_proc() returned false) -- see importer_config::nak_block_flush_size. errors holds
+     * @brief Same as on_block_store(), for the batch of semantically FAILED segments
+     * (on_semantic_check() returned false) -- see importer_config::nak_block_flush_size. errors holds
      * one entry per index, same order, same length as indices (errors[i] describes why
      * indices[i] failed).
      */
-    virtual void store_block_failed([[maybe_unused]] std::span<const std::size_t> indices,
-                                    [[maybe_unused]] std::span<const error_info>  errors,
-                                    [[maybe_unused]] segment_pool&                pool,
-                                    [[maybe_unused]] const doc_set_dscr&          ds_dscr,
-                                    [[maybe_unused]] const logger::Logger&        log)
+    virtual void on_failed_block_store([[maybe_unused]] std::span<const std::size_t> indices,
+                                       [[maybe_unused]] std::span<const error_info>  errors,
+                                       [[maybe_unused]] segment_pool&                pool,
+                                       [[maybe_unused]] const doc_set_dscr&          ds_dscr,
+                                       [[maybe_unused]] const logger::Logger&        log)
     {
     }
   protected:
@@ -191,14 +191,14 @@ namespace fsp
    * correctly with zero extra code.
    *
    * @note An earlier version of this class also tried to detect, at construction time, whether
-   * Derived had overridden on_seg_proc (via comparing &Derived::on_seg_proc
-   * != &pipeline_hooks::on_seg_proc), caching the result in a bool so hot call sites
+   * Derived had overridden on_semantic_check (via comparing &Derived::on_semantic_check
+   * != &pipeline_hooks::on_semantic_check), caching the result in a bool so hot call sites
    * could skip the virtual call entirely when it hadn't been overridden. Verified by direct
    * testing that this does NOT work: pointer-to-virtual-member-function values are encoded as a
    * vtable slot index under the Itanium ABI (GCC/Clang on Linux), and overriding a virtual
    * function never changes its vtable slot -- so &Derived::f and &Base::f compare EQUAL
    * regardless of whether Derived actually overrides f. The comparison always reported "not
-   * overridden", silently skipping on_seg_proc for every hook, including ones that did
+   * overridden", silently skipping on_semantic_check for every hook, including ones that did
    * override it. Reverted to a plain, always-invoked virtual call.
    * @tparam Derived The developer's own concrete hook class (Curiously Recurring Template
    * Pattern) -- must be copy-constructible (clone() copies *this via Derived's own copy ctor).

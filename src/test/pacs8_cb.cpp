@@ -92,7 +92,7 @@ bool pacs8_cb::process_header(const fsp::work::pacs8_header& hdr,
   // Artificial rule for this demo: every ODD seg_id is a semantic error, every EVEN is ok.
   const bool ok = (result.seg_id() % 2 == 0);
   log.debug(fmt::format("[pacs8_cb] {:12}: seg_id={} doc_ndx={} is_first={} is_last={} ok={} header: msg_id='{}' amount_sum={}",
-                        "on_seg_proc",
+                        "on_semantic_check",
                         result.seg_id(),
                         result.doc_ndx(),
                         is_first,
@@ -114,7 +114,7 @@ bool pacs8_cb::process_txn(const fsp::work::pacs8_txn& txn,
   const fsp::str_t iban_str =
     txn.debtor_iban ? txn.debtor_iban->value : fmt::format("<invalid: {}>", result.errors()[txn.debtor_iban.error()].to_string());
   log.debug(fmt::format("[pacs8_cb] {:12}: seg_id={} doc_ndx={} is_first={} is_last={} ok={} txn: txn_id='{}' debtor_iban={}",
-                        "on_seg_proc",
+                        "on_semantic_check",
                         result.seg_id(),
                         result.doc_ndx(),
                         is_first,
@@ -125,11 +125,11 @@ bool pacs8_cb::process_txn(const fsp::work::pacs8_txn& txn,
   return ok;
 }
 
-bool pacs8_cb::on_seg_proc([[maybe_unused]] const fsp::xml_segment& segment,
-                           fsp::segment_result&                     result,
-                           bool                                     is_first,
-                           bool                                     is_last,
-                           const logger::Logger&                    log)
+bool pacs8_cb::on_semantic_check([[maybe_unused]] const fsp::xml_segment& segment,
+                                 fsp::segment_result&                     result,
+                                 bool                                     is_first,
+                                 bool                                     is_last,
+                                 const logger::Logger&                    log)
 {
   // materialize_variant() hands back the segment as the developer's own work.hpp schema type
   // (pacs8_header or pacs8_txn) instead of the generic, name-indexed result_values. result is
@@ -141,7 +141,7 @@ bool pacs8_cb::on_seg_proc([[maybe_unused]] const fsp::xml_segment& segment,
     {
       if constexpr (std::is_same_v<T, fsp::work::pacs8_header>) return process_header(s, result, is_first, is_last, log);
       else if constexpr (std::is_same_v<T, fsp::work::pacs8_txn>) return process_txn(s, result, is_first, is_last, log);
-      else static_assert(sizeof(T) == 0, "on_seg_proc: unhandled fsp::work schema type -- add a branch above");
+      else static_assert(sizeof(T) == 0, "on_semantic_check: unhandled fsp::work schema type -- add a branch above");
     },
     seg);
 

@@ -10,7 +10,7 @@ namespace fsp
   using str_t = std::string;
   // Per-document runtime facts collected while processing one document: how many of its segments
   // turned out semantically correct vs. in error (via begin_segment()/end_segment(), driven by
-  // the on_seg_proc hook's verdict), plus end-to-end timing for the cutting phase
+  // the on_semantic_check hook's verdict), plus end-to-end timing for the cutting phase
   // (open/close) and the segment-processing phase (first/last segment). Replaces the old
   // doc_timing_t, which only tracked timing -- this consolidates timing and outcome counts into
   // one per-document structure. No session-wide totals are kept here or anywhere alongside it:
@@ -35,7 +35,7 @@ namespace fsp
     bool record_doc_close(std::size_t total_segments) noexcept;
 
     // Called by whichever P-role thread is about to process one segment of this document,
-    // BEFORE its outcome is known -- this is what lets on_seg_proc's is_first/is_last
+    // BEFORE its outcome is known -- this is what lets on_semantic_check's is_first/is_last
     // parameters be ready before the hook call itself. seg_id is the segment's own position in
     // the document (see xml_segment/segment_result), assigned sequentially by the single cutter
     // thread that cut this document -- is_first/is_last are therefore document-order facts
@@ -47,7 +47,7 @@ namespace fsp
     // (see end_segment()/maybe_complete() for the authoritative, dual-path completion check used
     // for internal bookkeeping instead).
     [[nodiscard]] segment_position begin_segment(std::size_t seg_id) noexcept;
-    // Called once the segment's outcome is known (semantically_ok is the on_seg_proc
+    // Called once the segment's outcome is known (semantically_ok is the on_semantic_check
     // hook's verdict, or false for a segment that failed technically and never reached the
     // hook at all -- not to be confused with technical extraction success in the ok() case).
     // Returns true if this call is the one that completes the document (cutting already

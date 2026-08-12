@@ -54,7 +54,7 @@ namespace fsp
     const auto doc_ndx         = static_cast<std::size_t>(result.doc_ndx());
     auto&      counters        = (*doc_counters_)[doc_ndx];
     const auto pos             = counters.begin_segment(result.seg_id());
-    const bool semantically_ok = hooks.on_seg_proc(segment, result, pos.is_first, pos.is_last, log_);
+    const bool semantically_ok = hooks.on_semantic_check(segment, result, pos.is_first, pos.is_last, log_);
     if (counters.end_segment(semantically_ok)) log_doc_done(doc_ndx);
     return semantically_ok;
   }

@@ -31,8 +31,8 @@ namespace fsp
     /**
      * @brief In-place access to slot ndx's xml_segment/segment_result -- unlike
      * retrieve_segment(), does NOT free the slot: the caller (see xml_worker::process_one())
-     * keeps it "locked" until it later calls release_slots() itself, once a store_block()/
-     * store_block_failed() hook has finished reading it. It is the caller's own responsibility
+     * keeps it "locked" until it later calls release_slots() itself, once a on_block_store()/
+     * on_failed_block_store() hook has finished reading it. It is the caller's own responsibility
      * to never call these on an ndx it has already released.
      */
     [[nodiscard]] xml_segment&          segment_at(std::size_t ndx) noexcept { return segments_[ndx]; }

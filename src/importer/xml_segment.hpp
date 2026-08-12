@@ -45,9 +45,9 @@ namespace fsp
     [[nodiscard]] int                doc_ndx() const;
     void                             set_doc_ndx(int doc_ndx);
     /**
-     * @brief Semantic verdict from pipeline_hooks::on_seg_proc() (true = semantically correct),
+     * @brief Semantic verdict from pipeline_hooks::on_semantic_check() (true = semantically correct),
      * set by pipeline::record_segment_done() right after the hook call returns. Lets a
-     * store_block()/store_block_failed() hook, running later against a batch of pool indices,
+     * on_block_store()/on_failed_block_store() hook, running later against a batch of pool indices,
      * tell which of the two blocks this slot's segment was already sorted into without needing
      * its own separate lookup -- see segment_pool::segment_at().
      */
