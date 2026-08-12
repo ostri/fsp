@@ -41,15 +41,14 @@ int main(int argc, const char* argv[])
                                                   .num_of_workers = no_of_cores,
                                                   .log_config     = load_program_logger_config(args.p_name),
                                                   .program_name   = args.p_name};
-    auto       p           = fsp::importer(cfg);
-    auto       res         = p.import_docs(args.files, args.xsd_file);
+    auto [p, res]          = fsp::importer::exec(cfg, args.files, args.xsd_file);
     if (! res)
     {
       fmt::print("Processing failed: '{}'\n", res.error().to_string());
       return 2;
     }
     assert(args.files.size() == res->total_docs());
-    assert(p.get_results().size() + p.get_errors().size() == res->total_segments());
+    assert(p->get_results().size() + p->get_errors().size() == res->total_segments());
 
     fmt::print("\n=== Document Statistics ===\n"
                "{:<33}{:>10}\n"

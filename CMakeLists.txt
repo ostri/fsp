@@ -168,7 +168,7 @@ CPMAddPackage(
 CPMAddPackage(
     NAME logger
     GITHUB_REPOSITORY ostri/logger
-    GIT_TAG v0.1.9
+    GIT_TAG v0.1.10
     SYSTEM YES
     EXCLUDE_FROM_ALL YES
 )
