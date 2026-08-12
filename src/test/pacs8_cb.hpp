@@ -13,16 +13,18 @@ namespace fsp::work
 /**
  * @brief Demo pipeline_hooks: every hook logs its own name and its parameters at info level.
  *
- * One instance per worker thread (see pipeline_hooks.hpp's clone() contract), so the counters
- * below are plain (non-atomic) -- each is only ever touched by the one thread that owns it.
- * on_run_end() folds every worker clone's counters into a cumulative total.
+ * One instance per worker thread (see pipeline_hooks.hpp's clone() contract), so documents_seen
+ * below is plain (non-atomic) -- only ever touched by the one thread that owns it. Segment
+ * ok/error counts are NOT tracked here: pipeline::record_segment_done() already folds
+ * on_semantic_check()'s own return value into doc_counters (see pipeline.cpp) for every segment,
+ * whether or not a hook is even installed, so on_run_end()'s own `counters` parameter already
+ * carries the true, authoritative totals (counters.total_segments_ok()/total_segments_error()) --
+ * keeping a second, hook-local copy here would just duplicate that bookkeeping.
  */
 class pacs8_cb : public fsp::pipeline_hooks_crtp<pacs8_cb>
 {
 public:
   std::size_t documents_seen = 0; // NOLINT(misc-non-private-member-variables-in-classes)
-  std::size_t segments_ok    = 0; // NOLINT(misc-non-private-member-variables-in-classes)
-  std::size_t segments_error = 0; // NOLINT(misc-non-private-member-variables-in-classes)
 
   void on_run_start(const fsp::doc_set_dscr& ds_dscr, const logger::Logger& log) override;
   void on_run_end(const fsp::doc_set_counter&           counters,

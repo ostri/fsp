@@ -260,28 +260,31 @@ function(add_fsp_target TARGET_NAME TYPE)
     endif()
 endfunction()
 
-# Copies both checked-in logger config files (config/log.debug.json,
-# config/log.release.json) into the build directory as config/log.<debug|release>.json
-# -- every fsp executable target lands directly in CMAKE_BINARY_DIR (no per-target
-# RUNTIME_OUTPUT_DIRECTORY is set), so one copy under CMAKE_BINARY_DIR/config/ is
-# reachable from any of them via their shared cwd at runtime.
-# logger::load_logger_config() resolves its config_path argument relative to the
-# process's cwd, and a program's main() picks debug vs. release by name (see
-# logger::build_type_name(), used in pacs8.cpp/pacs8-cb.cpp) rather than this
-# function choosing one at configure time, so both files must be present. Unlike the
-# old @PROGRAM_NAME@ substitution this used to do, app_name (used for the log file
-# name and spdlog's %n) is no longer baked into the file -- it is set in code from
-# argv[0] after loading the config, since one shared config covers every fsp program
-# (see pacs8.cpp's call site comment). configure_file(..., COPYONLY) also makes
-# CMake re-run (and thus re-copy) whenever either source file changes, even without
-# an explicit `cmake ..`. TARGET_NAME is unused now that the destination no longer
-# depends on it, but kept as a parameter so call sites (pacs8, pacs8-cb) don't need
-# to change if per-target output directories are introduced later.
+# Copies whichever ONE of the two checked-in logger config files (config/log.debug.json,
+# config/log.release.json) matches this preset's own CMAKE_BUILD_TYPE into the build directory,
+# as log.conf -- every fsp executable target lands directly in CMAKE_BINARY_DIR (no per-target
+# RUNTIME_OUTPUT_DIRECTORY is set), so one copy right there is reachable from any of them via
+# fsp::exe_dir() at runtime. Debug/Coverage (both -O0, no NDEBUG) get log.debug.json;
+# Release/Profile (both optimized, NDEBUG defined) get log.release.json -- the same split
+# COMMON_*_FLAGS below already draws between these four preset families. The choice is made
+# HERE, at configure/build time, deliberately -- NOT at run time by a program picking a name
+# out of two present files (the old scheme this replaces): a build's own log.conf must always
+# match the binary it was actually compiled with, and a single generic name means
+# load_program_logger_config() (pacs8.cpp/pacs8-cb.cpp) needs no build-type logic of its own,
+# just fsp::exe_dir() / "log.conf". app_name (used for the log file name and spdlog's %n) is not
+# baked into the file -- it is set in code from argv[0] after loading it, since one shared
+# config covers every fsp program (see pacs8.cpp's call site comment). configure_file(...,
+# COPYONLY) also makes CMake re-run (and thus re-copy) whenever the source file changes, even
+# without an explicit `cmake ..`. TARGET_NAME is unused now that the destination no longer
+# depends on it, but kept as a parameter so call sites (pacs8, pacs8-cb) don't need to change if
+# per-target output directories are introduced later.
 function(add_log_config TARGET_NAME)
-    configure_file(${PROJECT_SOURCE_DIR}/config/log.debug.json
-                   ${CMAKE_BINARY_DIR}/config/log.debug.json COPYONLY)
-    configure_file(${PROJECT_SOURCE_DIR}/config/log.release.json
-                   ${CMAKE_BINARY_DIR}/config/log.release.json COPYONLY)
+    if(CMAKE_BUILD_TYPE STREQUAL "Debug" OR CMAKE_BUILD_TYPE STREQUAL "Coverage")
+        set(log_config_src ${PROJECT_SOURCE_DIR}/config/log.debug.json)
+    else() # Release, Profile
+        set(log_config_src ${PROJECT_SOURCE_DIR}/config/log.release.json)
+    endif()
+    configure_file(${log_config_src} ${CMAKE_BINARY_DIR}/log.conf COPYONLY)
 endfunction()
 
 # WORKAROUND (remove once GCC 16.2 ships): on this GCC 16.1.1 -freflection branch,

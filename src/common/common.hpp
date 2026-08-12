@@ -52,11 +52,15 @@ namespace fsp
     std::vector<str_t> files;    // files to be parsed
     str_t              xsd_file; // path to the grammar file (can be empty)
     str_t              p_name;   // program name
+    str_t              bare_name;
   };
   inline param load_args(const int argc, const char** argv)
   {
     struct param arg;
-    arg.p_name = *argv;
+    arg.p_name    = *argv;
+    auto pos      = arg.p_name.find_last_of('/');
+    arg.bare_name = pos != std::string::npos ? arg.p_name.substr(pos + 1) : arg.p_name;
+
     std::vector<cstr_t> raw_args(argv + 1, argv + argc); // NOLINT (cppcoreguidelines-pro-bounds-pointer-arithmetic)
 
     for (const auto& file : raw_args)

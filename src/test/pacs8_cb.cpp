@@ -24,29 +24,25 @@ void pacs8_cb::on_run_end(const fsp::doc_set_counter&           counters,
                        worker_clones.size(),
                        elapsed_sec));
 
-  // IIFE (rather than three mutable accumulators) so total_docs/total_ok/total_err stay
-  // const-correct -- each is computed once, not mutated across the loop.
-  const auto sum_over_clones = [&](std::size_t pacs8_cb::* field) -> std::size_t
+  // documents_seen is this hook's own per-clone counter (see the class's own doc comment),
+  // summed here across every worker clone plus this original instance. Segment ok/error counts
+  // are NOT summed here: counters (pipeline's own doc_counters, already folding every
+  // on_semantic_check() verdict as it happens -- see pipeline::record_segment_done()) already
+  // carries the true, authoritative totals, so there's nothing left to sum from the clones.
+  std::size_t total_docs = documents_seen;
+  for (const auto* w : worker_clones)
   {
-    std::size_t total = this->*field;
-    for (const auto* w : worker_clones)
-    {
-      // Safe: every element of worker_clones was made by cloning THIS SAME pacs8_cb instance
-      // (see pipeline_hooks_crtp<pacs8_cb>::clone()), so it's always actually a pacs8_cb.
-      const auto* clone = static_cast<const pacs8_cb*>(w); // NOLINT(cppcoreguidelines-pro-type-static-cast-downcast)
-      total += clone->*field;
-    }
-    return total;
-  };
-  const std::size_t total_docs = sum_over_clones(&pacs8_cb::documents_seen);
-  const std::size_t total_ok   = sum_over_clones(&pacs8_cb::segments_ok);
-  const std::size_t total_err  = sum_over_clones(&pacs8_cb::segments_error);
+    // Safe: every element of worker_clones was made by cloning THIS SAME pacs8_cb instance
+    // (see pipeline_hooks_crtp<pacs8_cb>::clone()), so it's always actually a pacs8_cb.
+    const auto* clone = static_cast<const pacs8_cb*>(w); // NOLINT(cppcoreguidelines-pro-type-static-cast-downcast)
+    total_docs += clone->documents_seen;
+  }
   log.info(fmt::format("[pacs8_cb] {:12}: CUMULATIVE documents={} segments={} (ok={} error={}) total processing time={:.3f} sec",
                        "on_run_end",
                        total_docs,
-                       total_ok + total_err,
-                       total_ok,
-                       total_err,
+                       counters.total_segments(),
+                       counters.total_segments_ok(),
+                       counters.total_segments_error(),
                        elapsed_sec));
 }
 
@@ -59,16 +55,15 @@ void pacs8_cb::on_wrk_start(int worker_id, fsp::cstr_t thread_name, const logger
 void pacs8_cb::on_wrk_end(int worker_id, fsp::cstr_t thread_name, const logger::Logger& log)
 {
   const auto elapsed_sec = elapsed_worker_sec();
-  log.info(fmt::format(
-    "[pacs8_cb] {:12}: worker_id={} thread_name='{}' (documents_seen={} segments_seen={} ok={} error={}) thread runtime={:.3f} sec",
-    "on_wrk_end",
-    worker_id,
-    thread_name,
-    documents_seen,
-    segments_ok + segments_error,
-    segments_ok,
-    segments_error,
-    elapsed_sec));
+  // Per-worker segment ok/error counts aren't tracked here (see the class's own doc comment) --
+  // that granularity isn't exposed anywhere in pipeline_hooks; only the whole-run total is,
+  // via on_run_end()'s own counters parameter.
+  log.info(fmt::format("[pacs8_cb] {:12}: worker_id={} thread_name='{}' (documents_seen={}) thread runtime={:.3f} sec",
+                       "on_wrk_end",
+                       worker_id,
+                       thread_name,
+                       documents_seen,
+                       elapsed_sec));
 }
 
 void pacs8_cb::on_doc_open(std::size_t doc_ndx, const fsp::doc_dscr& dscr, const logger::Logger& log)
@@ -135,8 +130,11 @@ bool pacs8_cb::on_semantic_check([[maybe_unused]] const fsp::xml_segment& segmen
   // (pacs8_header or pacs8_txn) instead of the generic, name-indexed result_values. result is
   // passed by reference (not result.values()) because a failed validated_t<X> field appends its
   // error_info to result.errors() during materialization.
-  auto       seg = fsp::materialize_variant<^^fsp::work>(result.seg_type(), result);
-  const bool ok  = std::visit(
+  auto seg = fsp::materialize_variant<^^fsp::work>(result.seg_type(), result);
+  // The verdict returned here is folded into doc_counters by pipeline::record_segment_done()
+  // (the caller of this hook) -- see the class's own doc comment on why this hook doesn't also
+  // keep its own ok/error counters.
+  return std::visit(
     [&]<typename T>(const T& s) -> bool
     {
       if constexpr (std::is_same_v<T, fsp::work::pacs8_header>) return process_header(s, result, is_first, is_last, log);
@@ -144,9 +142,4 @@ bool pacs8_cb::on_semantic_check([[maybe_unused]] const fsp::xml_segment& segmen
       else static_assert(sizeof(T) == 0, "on_semantic_check: unhandled fsp::work schema type -- add a branch above");
     },
     seg);
-
-  if (ok) [[likely]]
-    ++segments_ok;
-  else ++segments_error;
-  return ok;
 }

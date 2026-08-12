@@ -496,7 +496,7 @@ int main(int argc, const char* argv[])
   auto cfg = fsp::importer_config{
     .targets        = fsp::proc_data_of<^^fsp::work>(),
     .num_of_workers = 16,
-    .log_config     = logger::load_logger_config("config/log.release.json"),
+    .log_config     = logger::load_logger_config("log.conf"),
     .program_name   = "my_importer",
   };
 
@@ -648,13 +648,15 @@ namespace
     return 1;
   }
 
-  // config/log.<debug|release>.json (copied next to the binary by add_log_config() in
-  // CMakeLists.txt) is shared by every fsp program -- app_name is overwritten here with this
-  // program's own name after loading it. Resolved against fsp::exe_dir() (the running binary's
-  // own directory), not the caller's current working directory -- see exe_path.hpp.
+  // log.conf (copied next to the binary by add_log_config() in CMakeLists.txt, which already
+  // picked the right one of config/log.debug.json / config/log.release.json for this build's own
+  // CMAKE_BUILD_TYPE at build time) is shared by every fsp program -- app_name is overwritten
+  // here with this program's own name after loading it. Resolved against fsp::exe_dir() (the
+  // running binary's own directory), not the caller's current working directory -- see
+  // exe_path.hpp.
   [[nodiscard]] logger::logger_config load_program_logger_config(fsp::cstr_t program_name)
   {
-    const auto config_path = fsp::exe_dir() / "config" / fmt::format("log.{}.json", logger::build_type_name());
+    const auto config_path = fsp::exe_dir() / "log.conf";
     auto       cfg         = logger::load_logger_config(config_path.string());
     cfg.app_name           = program_name;
     return cfg;

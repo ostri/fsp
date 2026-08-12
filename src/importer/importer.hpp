@@ -69,6 +69,15 @@ namespace fsp
     /// turned into an exception before log_ptr_ needs a value.
     inline std::unique_ptr<logger::Logger> make_main_logger(const logger::logger_config& cfg)
     {
+      // Names the CALLING (main) thread for the %* pattern field every log line prints --
+      // without this it stays at logger::log_thread_name's own built-in default, "unknown" (see
+      // logger.hpp). Every fsp program's own main() builds cfg.app_name from argv[0] before this
+      // runs (see pacs8.cpp/pacs8-cb.cpp's load_program_logger_config()), so this is the one
+      // place that needs to know it, rather than every fsp program repeating its own
+      // make_log_name() call. pipeline_worker threads name themselves the same way, off
+      // parent_log_name_ (see pipeline_worker.cpp) -- this is that same convention's root.
+      logger::Logger::make_log_name(cfg.app_name);
+
       auto log_ptr = logger::Logger::create(cfg);
       if (! log_ptr)
       {
