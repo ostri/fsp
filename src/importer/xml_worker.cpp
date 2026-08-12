@@ -524,14 +524,14 @@ namespace fsp
 
   void xml_worker::flush_ok_block()
   {
-    if (! ok_block_indices_.empty()) hooks_.on_block_store(ok_block_indices_, pool_, ds_dscr_, log_);
+    if (! ok_block_indices_.empty()) hooks_.on_block_store(ok_block_indices_, pool_, ds_dscr_);
     pool_.release_slots(ok_block_indices_);
     ok_block_indices_.clear();
   }
 
   void xml_worker::flush_nak_block()
   {
-    if (! nak_block_indices_.empty()) hooks_.on_failed_block_store(nak_block_indices_, nak_block_errors_, pool_, ds_dscr_, log_);
+    if (! nak_block_indices_.empty()) hooks_.on_failed_block_store(nak_block_indices_, nak_block_errors_, pool_, ds_dscr_);
     pool_.release_slots(nak_block_indices_);
     nak_block_indices_.clear();
     nak_block_errors_.clear();

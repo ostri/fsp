@@ -43,7 +43,7 @@ namespace fsp
       return;
     }
     pipeline_.record_doc_open(doc_ndx);
-    hooks_->on_doc_open(doc_ndx, pipeline_.ds_dscr()[doc_ndx], log_);
+    hooks_->on_doc_open(doc_ndx, pipeline_.ds_dscr()[doc_ndx]);
     if (auto res = cutter_->cut(doc_ndx); ! res)
     {
       // A malformed document is a per-document failure, not a fatal one: mark it invalid so
@@ -54,7 +54,7 @@ namespace fsp
     {
       pipeline_.record_doc_close(doc_ndx, cutter_->segments_found());
     }
-    hooks_->on_doc_close(doc_ndx, pipeline_.ds_dscr()[doc_ndx].status(), pipeline_.ds_dscr()[doc_ndx], log_);
+    hooks_->on_doc_close(doc_ndx, pipeline_.ds_dscr()[doc_ndx].status(), pipeline_.ds_dscr()[doc_ndx]);
     pipeline_.notify_cut_done();
   }
 
@@ -136,6 +136,6 @@ namespace fsp
       processor_->process_one(seg_ndx); // records the segment's outcome (and runs the hook) internally
     }
     processor_->flush_results();
-    hooks_->on_wrk_end(worker_id, thread_name, log_);
+    hooks_->on_wrk_end(worker_id, thread_name);
   }
 } // namespace fsp

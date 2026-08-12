@@ -3,24 +3,24 @@
 #include <fmt/format.h>
 #include <magic_enum.hpp>
 
-void pacs8_cb::on_run_start(const fsp::doc_set_dscr& ds_dscr, const logger::Logger& log)
+void pacs8_cb::on_run_safe_start(const fsp::doc_set_dscr& ds_dscr)
 {
-  fsp::pipeline_hooks::on_run_start(ds_dscr, log); // stamps run_start_ for elapsed_run_sec()
-  log.info(fmt::format("[pacs8_cb] {:12}: ds_dscr.size()={}", "on_run_start", ds_dscr.size()));
+  // No need to chain to a base body here (unlike the old on_run_start()) -- pipeline_hooks'
+  // own final on_run_start() already stamped run_start_/log_ before calling this override.
+  log().info(fmt::format("[pacs8_cb] {:12}: ds_dscr.size()={}", "on_run_start", ds_dscr.size()));
 }
 
-void pacs8_cb::on_run_end(const fsp::doc_set_counter&           counters,
-                          const fsp::doc_set_dscr&              ds_dscr,
-                          std::span<const fsp::pipeline_hooks*> worker_clones,
-                          const logger::Logger&                 log)
+void pacs8_cb::on_run_safe_end(const fsp::doc_set_counter&           counters,
+                               const fsp::doc_set_dscr&              ds_dscr,
+                               std::span<const fsp::pipeline_hooks*> worker_clones)
 {
   const auto elapsed_sec = elapsed_run_sec();
-  log.info(fmt::format("[pacs8_cb] {:12}: counters.total_docs()={} ds_dscr.size()={} worker_clones.size()={} elapsed={:.3f} sec",
-                       "on_run_end",
-                       counters.total_docs(),
-                       ds_dscr.size(),
-                       worker_clones.size(),
-                       elapsed_sec));
+  log().info(fmt::format("[pacs8_cb] {:12}: counters.total_docs()={} ds_dscr.size()={} worker_clones.size()={} elapsed={:.3f} sec",
+                         "on_run_end",
+                         counters.total_docs(),
+                         ds_dscr.size(),
+                         worker_clones.size(),
+                         elapsed_sec));
 
   // documents_seen is this hook's own per-clone counter (see the class's own doc comment),
   // summed here across every worker clone plus this original instance. Segment ok/error counts
@@ -35,89 +35,82 @@ void pacs8_cb::on_run_end(const fsp::doc_set_counter&           counters,
     const auto* clone = static_cast<const pacs8_cb*>(w); // NOLINT(cppcoreguidelines-pro-type-static-cast-downcast)
     total_docs += clone->documents_seen;
   }
-  log.info(fmt::format("[pacs8_cb] {:12}: CUMULATIVE documents={} segments={} (ok={} error={}) total processing time={:.3f} sec",
-                       "on_run_end",
-                       total_docs,
-                       counters.total_segments(),
-                       counters.total_segments_ok(),
-                       counters.total_segments_error(),
-                       elapsed_sec));
+  log().info(fmt::format("[pacs8_cb] {:12}: CUMULATIVE documents={} segments={} (ok={} error={}) total processing time={:.3f} sec",
+                         "on_run_end",
+                         total_docs,
+                         counters.total_segments(),
+                         counters.total_segments_ok(),
+                         counters.total_segments_error(),
+                         elapsed_sec));
 }
 
-void pacs8_cb::on_wrk_start(int worker_id, fsp::cstr_t thread_name, const logger::Logger& log)
+void pacs8_cb::on_wrk_safe_start(int worker_id, fsp::cstr_t thread_name)
 {
-  pipeline_hooks::on_wrk_start(worker_id, thread_name, log); // stamps worker_start_ for elapsed_worker_sec()
-  log.info(fmt::format("[pacs8_cb] {:12}: worker_id={} thread_name='{}'", "on_wrk_start", worker_id, thread_name));
+  // No need to chain to a base body here (unlike the old on_wrk_start()) -- pipeline_hooks'
+  // own final on_wrk_start() already stamped worker_start_/log_ before calling this override.
+  log().info(fmt::format("[pacs8_cb] {:12}: worker_id={} thread_name='{}'", "on_wrk_start", worker_id, thread_name));
 }
 
-void pacs8_cb::on_wrk_end(int worker_id, fsp::cstr_t thread_name, const logger::Logger& log)
+void pacs8_cb::on_wrk_safe_end(int worker_id, fsp::cstr_t thread_name)
 {
   const auto elapsed_sec = elapsed_worker_sec();
   // Per-worker segment ok/error counts aren't tracked here (see the class's own doc comment) --
   // that granularity isn't exposed anywhere in pipeline_hooks; only the whole-run total is,
   // via on_run_end()'s own counters parameter.
-  log.info(fmt::format("[pacs8_cb] {:12}: worker_id={} thread_name='{}' (documents_seen={}) thread runtime={:.3f} sec",
-                       "on_wrk_end",
-                       worker_id,
-                       thread_name,
-                       documents_seen,
-                       elapsed_sec));
+  log().info(fmt::format("[pacs8_cb] {:12}: worker_id={} thread_name='{}' (documents_seen={}) thread runtime={:.3f} sec",
+                         "on_wrk_end",
+                         worker_id,
+                         thread_name,
+                         documents_seen,
+                         elapsed_sec));
 }
 
-void pacs8_cb::on_doc_open(std::size_t doc_ndx, const fsp::doc_dscr& dscr, const logger::Logger& log)
+void pacs8_cb::on_doc_safe_open(std::size_t doc_ndx, const fsp::doc_dscr& dscr)
 {
   ++documents_seen;
-  log.info(fmt::format("[pacs8_cb] {:12}: doc_ndx={} path='{}'", "on_doc_open", doc_ndx, dscr.path()));
+  log().info(fmt::format("[pacs8_cb] {:12}: doc_ndx={} path='{}'", "on_doc_open", doc_ndx, dscr.path()));
 }
 
-void pacs8_cb::on_doc_close(std::size_t doc_ndx, fsp::doc_status status, const fsp::doc_dscr& dscr, const logger::Logger& log)
+void pacs8_cb::on_doc_safe_close(std::size_t doc_ndx, fsp::doc_status status, const fsp::doc_dscr& dscr)
 {
-  log.info(
+  log().info(
     fmt::format("[pacs8_cb] {:12}: doc_ndx={} status={} path='{}'", "on_doc_close", doc_ndx, magic_enum::enum_name(status), dscr.path()));
 }
 
 // The verdict returned by each on_type() overload below is folded into doc_counters by
 // pipeline::record_segment_done() (the caller of typed_semantic_check's own generic
-// on_semantic_check()) -- see the class's own doc comment on why this hook doesn't also keep its
-// own ok/error counters.
-bool pacs8_cb::on_type(const fsp::work::pacs8_hdr& hdr,
-                       fsp::segment_result&        result,
-                       bool                        is_first,
-                       bool                        is_last,
-                       const logger::Logger&       log) const
+// on_semantic_safe_check()) -- see the class's own doc comment on why this hook doesn't also
+// keep its own ok/error counters.
+bool pacs8_cb::on_type(const fsp::work::pacs8_hdr& hdr, fsp::segment_result& result, bool is_first, bool is_last) const
 {
   // Artificial rule for this demo: every ODD seg_id is a semantic error, every EVEN is ok.
   const bool ok = (result.seg_id() % 2 == 0);
-  log.debug(fmt::format("[pacs8_cb] {:12}: seg_id={} doc_ndx={} is_first={} is_last={} ok={} header: msg_id='{}' amount_sum={}",
-                        "on_type",
-                        result.seg_id(),
-                        result.doc_ndx(),
-                        is_first,
-                        is_last,
-                        ok,
-                        hdr.msg_id,
-                        hdr.amount_sum));
+  log().debug(fmt::format("[pacs8_cb] {:12}: seg_id={} doc_ndx={} is_first={} is_last={} ok={} header: msg_id='{}' amount_sum={}",
+                          "on_type",
+                          result.seg_id(),
+                          result.doc_ndx(),
+                          is_first,
+                          is_last,
+                          ok,
+                          hdr.msg_id,
+                          hdr.amount_sum));
   return ok;
 }
 
-bool pacs8_cb::on_type(const fsp::work::pacs8_txn& txn,
-                       fsp::segment_result&        result,
-                       bool                        is_first,
-                       bool                        is_last,
-                       const logger::Logger&       log) const
+bool pacs8_cb::on_type(const fsp::work::pacs8_txn& txn, fsp::segment_result& result, bool is_first, bool is_last) const
 {
   // Artificial rule for this demo: every ODD seg_id is a semantic error, every EVEN is ok.
   const bool       ok = (result.seg_id() % 2 == 0);
   const fsp::str_t iban_str =
     txn.debtor_iban ? txn.debtor_iban->value : fmt::format("<invalid: {}>", result.errors()[txn.debtor_iban.error()].to_string());
-  log.debug(fmt::format("[pacs8_cb] {:12}: seg_id={} doc_ndx={} is_first={} is_last={} ok={} txn: txn_id='{}' debtor_iban={}",
-                        "on_type",
-                        result.seg_id(),
-                        result.doc_ndx(),
-                        is_first,
-                        is_last,
-                        ok,
-                        txn.txn_id,
-                        iban_str));
+  log().debug(fmt::format("[pacs8_cb] {:12}: seg_id={} doc_ndx={} is_first={} is_last={} ok={} txn: txn_id='{}' debtor_iban={}",
+                          "on_type",
+                          result.seg_id(),
+                          result.doc_ndx(),
+                          is_first,
+                          is_last,
+                          ok,
+                          txn.txn_id,
+                          iban_str));
   return ok;
 }

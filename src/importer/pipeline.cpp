@@ -54,7 +54,7 @@ namespace fsp
     const auto doc_ndx         = static_cast<std::size_t>(result.doc_ndx());
     auto&      counters        = (*doc_counters_)[doc_ndx];
     const auto pos             = counters.begin_segment(result.seg_id());
-    const bool semantically_ok = hooks.on_semantic_check(segment, result, pos.is_first, pos.is_last, log_);
+    const bool semantically_ok = hooks.on_semantic_check(segment, result, pos.is_first, pos.is_last);
     if (counters.end_segment(semantically_ok)) log_doc_done(doc_ndx);
     return semantically_ok;
   }
@@ -250,7 +250,7 @@ namespace fsp
     {
       log_.info("No files to process.");
       hooks.on_run_start(ds_dscr_, log_);
-      hooks.on_run_end(doc_set_counter(0), ds_dscr_, {}, log_);
+      hooks.on_run_end(doc_set_counter(0), ds_dscr_, {});
       return doc_set_counter(0);
     }
 
@@ -280,7 +280,7 @@ namespace fsp
     std::vector<const pipeline_hooks*> worker_clones;
     worker_clones.reserve(worker_state->size());
     for (const auto& w : *worker_state) worker_clones.push_back(&w->hooks());
-    hooks.on_run_end(*doc_counters_, ds_dscr_, worker_clones, log_);
+    hooks.on_run_end(*doc_counters_, ds_dscr_, worker_clones);
 
     discard_invalid_doc_results();
     if (first_error_)
