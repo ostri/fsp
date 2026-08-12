@@ -14,7 +14,7 @@ namespace fsp::work
   });
   // clang-format on
 
-  class[[= "header=/x:Document/FIToFICstmrCdtTrf/x:GrpHdr"]] pacs8_header : public fsp::seg_schema
+  class[[= "header=/x:Document/FIToFICstmrCdtTrf/x:GrpHdr"]] pacs8_hdr : public fsp::seg_schema
   {
   public:
     // clang-format off

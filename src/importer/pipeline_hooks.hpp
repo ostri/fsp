@@ -202,15 +202,21 @@ namespace fsp
    * override it. Reverted to a plain, always-invoked virtual call.
    * @tparam Derived The developer's own concrete hook class (Curiously Recurring Template
    * Pattern) -- must be copy-constructible (clone() copies *this via Derived's own copy ctor).
+   * @note The constructor is protected, not private+friend Derived -- protected still blocks
+   * pipeline_hooks_crtp<X> from being instantiated as a standalone (non-CRTP) type, but (unlike
+   * friend Derived, which only grants access to Derived itself) also allows an intermediate
+   * mixin between pipeline_hooks_crtp and Derived, such as typed_semantic_check.hpp's own
+   * typed_semantic_check<Derived, Namespace>, whose own (implicitly generated) constructor needs
+   * to reach this one.
    */
   template <typename Derived>
   class pipeline_hooks_crtp : public pipeline_hooks
   {
-    pipeline_hooks_crtp() = default;
+  protected:
+    pipeline_hooks_crtp() = default; // NOLINT(bugprone-crtp-constructor-accessibility) -- see the class's own note above
   public:
     [[nodiscard]] std::unique_ptr<pipeline_hooks> clone() const override
     { return std::make_unique<Derived>(static_cast<const Derived&>(*this)); }
-    friend Derived;
   };
 
   /**

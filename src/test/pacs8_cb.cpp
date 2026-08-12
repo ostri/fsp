@@ -2,12 +2,10 @@
 #include "work.hpp"
 #include <fmt/format.h>
 #include <magic_enum.hpp>
-#include <type_traits>
-#include <variant>
 
 void pacs8_cb::on_run_start(const fsp::doc_set_dscr& ds_dscr, const logger::Logger& log)
 {
-  pipeline_hooks::on_run_start(ds_dscr, log); // stamps run_start_ for elapsed_run_sec()
+  fsp::pipeline_hooks::on_run_start(ds_dscr, log); // stamps run_start_ for elapsed_run_sec()
   log.info(fmt::format("[pacs8_cb] {:12}: ds_dscr.size()={}", "on_run_start", ds_dscr.size()));
 }
 
@@ -78,16 +76,20 @@ void pacs8_cb::on_doc_close(std::size_t doc_ndx, fsp::doc_status status, const f
     fmt::format("[pacs8_cb] {:12}: doc_ndx={} status={} path='{}'", "on_doc_close", doc_ndx, magic_enum::enum_name(status), dscr.path()));
 }
 
-bool pacs8_cb::process_header(const fsp::work::pacs8_header& hdr,
-                              const fsp::segment_result&     result,
-                              bool                           is_first,
-                              bool                           is_last,
-                              const logger::Logger&          log) const
+// The verdict returned by each on_type() overload below is folded into doc_counters by
+// pipeline::record_segment_done() (the caller of typed_semantic_check's own generic
+// on_semantic_check()) -- see the class's own doc comment on why this hook doesn't also keep its
+// own ok/error counters.
+bool pacs8_cb::on_type(const fsp::work::pacs8_hdr& hdr,
+                       fsp::segment_result&        result,
+                       bool                        is_first,
+                       bool                        is_last,
+                       const logger::Logger&       log) const
 {
   // Artificial rule for this demo: every ODD seg_id is a semantic error, every EVEN is ok.
   const bool ok = (result.seg_id() % 2 == 0);
   log.debug(fmt::format("[pacs8_cb] {:12}: seg_id={} doc_ndx={} is_first={} is_last={} ok={} header: msg_id='{}' amount_sum={}",
-                        "on_semantic_check",
+                        "on_type",
                         result.seg_id(),
                         result.doc_ndx(),
                         is_first,
@@ -98,18 +100,18 @@ bool pacs8_cb::process_header(const fsp::work::pacs8_header& hdr,
   return ok;
 }
 
-bool pacs8_cb::process_txn(const fsp::work::pacs8_txn& txn,
-                           const fsp::segment_result&  result,
-                           bool                        is_first,
-                           bool                        is_last,
-                           const logger::Logger&       log) const
+bool pacs8_cb::on_type(const fsp::work::pacs8_txn& txn,
+                       fsp::segment_result&        result,
+                       bool                        is_first,
+                       bool                        is_last,
+                       const logger::Logger&       log) const
 {
   // Artificial rule for this demo: every ODD seg_id is a semantic error, every EVEN is ok.
   const bool       ok = (result.seg_id() % 2 == 0);
   const fsp::str_t iban_str =
     txn.debtor_iban ? txn.debtor_iban->value : fmt::format("<invalid: {}>", result.errors()[txn.debtor_iban.error()].to_string());
   log.debug(fmt::format("[pacs8_cb] {:12}: seg_id={} doc_ndx={} is_first={} is_last={} ok={} txn: txn_id='{}' debtor_iban={}",
-                        "on_semantic_check",
+                        "on_type",
                         result.seg_id(),
                         result.doc_ndx(),
                         is_first,
@@ -118,28 +120,4 @@ bool pacs8_cb::process_txn(const fsp::work::pacs8_txn& txn,
                         txn.txn_id,
                         iban_str));
   return ok;
-}
-
-bool pacs8_cb::on_semantic_check([[maybe_unused]] const fsp::xml_segment& segment,
-                                 fsp::segment_result&                     result,
-                                 bool                                     is_first,
-                                 bool                                     is_last,
-                                 const logger::Logger&                    log)
-{
-  // materialize_variant() hands back the segment as the developer's own work.hpp schema type
-  // (pacs8_header or pacs8_txn) instead of the generic, name-indexed result_values. result is
-  // passed by reference (not result.values()) because a failed validated_t<X> field appends its
-  // error_info to result.errors() during materialization.
-  auto seg = fsp::materialize_variant<^^fsp::work>(result.seg_type(), result);
-  // The verdict returned here is folded into doc_counters by pipeline::record_segment_done()
-  // (the caller of this hook) -- see the class's own doc comment on why this hook doesn't also
-  // keep its own ok/error counters.
-  return std::visit(
-    [&]<typename T>(const T& s) -> bool
-    {
-      if constexpr (std::is_same_v<T, fsp::work::pacs8_header>) return process_header(s, result, is_first, is_last, log);
-      else if constexpr (std::is_same_v<T, fsp::work::pacs8_txn>) return process_txn(s, result, is_first, is_last, log);
-      else static_assert(sizeof(T) == 0, "on_semantic_check: unhandled fsp::work schema type -- add a branch above");
-    },
-    seg);
 }
