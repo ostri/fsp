@@ -76,7 +76,7 @@ namespace fsp
     // loc_res_ok_/loc_res_nak_ (the existing route into pipeline_.results()/errors()).
     void record_ok(std::size_t idx, xml_segment& seg, segment_result result);
     void record_nak(std::size_t idx, xml_segment& seg, segment_result result, error_info err);
-    // Calls hooks_.on_block_store()/on_failed_block_store() on whatever's accumulated in
+    // Calls hooks_.on_block_safe_store()/on_failed_block_safe_store() on whatever's accumulated in
     // ok_block_indices_/nak_block_indices_ (a no-op if empty), then releases those slots back to
     // pool_ via segment_pool::release_slots() and clears the accumulator(s) for reuse.
     void flush_ok_block();
@@ -137,7 +137,7 @@ namespace fsp
     segment_pool&                pool_; // segment pool
     vec_seg_result               loc_res_ok_;
     vec_seg_result               loc_res_nak_;
-    // Pool slot indices for on_block_store()/on_failed_block_store() -- pre-sized to
+    // Pool slot indices for on_block_safe_store()/on_failed_block_safe_store() -- pre-sized to
     // ok_block_flush_size_/nak_block_flush_size_ at construction so normal-case operation never
     // reallocates (see importer_config::ok_block_flush_size's own doc comment). A slot's index
     // stays in one of these two vectors -- "locked" against reuse -- from the moment
@@ -148,7 +148,7 @@ namespace fsp
     // Parallel to nak_block_indices_ (same length, same order): why each of those segments
     // failed semantically (on_semantic_check() returned false). No ok_block equivalent -- an ok
     // segment's own segment_result (via segment_pool::result_at()) already carries everything a
-    // on_block_store() hook needs.
+    // on_block_safe_store() hook needs.
     std::vector<error_info> nak_block_errors_;
     const std::size_t       ok_block_flush_size_;
     const std::size_t       nak_block_flush_size_;

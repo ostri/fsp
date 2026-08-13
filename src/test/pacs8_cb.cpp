@@ -3,16 +3,16 @@
 #include <fmt/format.h>
 #include <magic_enum.hpp>
 
-void pacs8_cb::on_run_safe_start(const fsp::doc_set_dscr& ds_dscr)
+void pacs8_cb::on_run_start(const fsp::doc_set_dscr& ds_dscr)
 {
   // No need to chain to a base body here (unlike the old on_run_start()) -- pipeline_hooks'
-  // own final on_run_start() already stamped run_start_/log_ before calling this override.
+  // own final on_run_safe_start() already stamped run_start_/log_ before calling this override.
   log().info(fmt::format("[pacs8_cb] {:12}: ds_dscr.size()={}", "on_run_start", ds_dscr.size()));
 }
 
-void pacs8_cb::on_run_safe_end(const fsp::doc_set_counter&           counters,
-                               const fsp::doc_set_dscr&              ds_dscr,
-                               std::span<const fsp::pipeline_hooks*> worker_clones)
+void pacs8_cb::on_run_end(const fsp::doc_set_counter&           counters,
+                          const fsp::doc_set_dscr&              ds_dscr,
+                          std::span<const fsp::pipeline_hooks*> worker_clones)
 {
   const auto elapsed_sec = elapsed_run_sec();
   log().info(fmt::format("[pacs8_cb] {:12}: counters.total_docs()={} ds_dscr.size()={} worker_clones.size()={} elapsed={:.3f} sec",
@@ -44,14 +44,14 @@ void pacs8_cb::on_run_safe_end(const fsp::doc_set_counter&           counters,
                          elapsed_sec));
 }
 
-void pacs8_cb::on_wrk_safe_start(int worker_id, fsp::cstr_t thread_name)
+void pacs8_cb::on_wrk_start(int worker_id, fsp::cstr_t thread_name)
 {
   // No need to chain to a base body here (unlike the old on_wrk_start()) -- pipeline_hooks'
-  // own final on_wrk_start() already stamped worker_start_/log_ before calling this override.
+  // own final on_wrk_safe_start() already stamped worker_start_/log_ before calling this override.
   log().info(fmt::format("[pacs8_cb] {:12}: worker_id={} thread_name='{}'", "on_wrk_start", worker_id, thread_name));
 }
 
-void pacs8_cb::on_wrk_safe_end(int worker_id, fsp::cstr_t thread_name)
+void pacs8_cb::on_wrk_end(int worker_id, fsp::cstr_t thread_name)
 {
   const auto elapsed_sec = elapsed_worker_sec();
   // Per-worker segment ok/error counts aren't tracked here (see the class's own doc comment) --
@@ -65,13 +65,13 @@ void pacs8_cb::on_wrk_safe_end(int worker_id, fsp::cstr_t thread_name)
                          elapsed_sec));
 }
 
-void pacs8_cb::on_doc_safe_open(std::size_t doc_ndx, const fsp::doc_dscr& dscr)
+void pacs8_cb::on_doc_open(std::size_t doc_ndx, const fsp::doc_dscr& dscr)
 {
   ++documents_seen;
   log().info(fmt::format("[pacs8_cb] {:12}: doc_ndx={} path='{}'", "on_doc_open", doc_ndx, dscr.path()));
 }
 
-void pacs8_cb::on_doc_safe_close(std::size_t doc_ndx, fsp::doc_status status, const fsp::doc_dscr& dscr)
+void pacs8_cb::on_doc_close(std::size_t doc_ndx, fsp::doc_status status, const fsp::doc_dscr& dscr)
 {
   log().info(
     fmt::format("[pacs8_cb] {:12}: doc_ndx={} status={} path='{}'", "on_doc_close", doc_ndx, magic_enum::enum_name(status), dscr.path()));
@@ -79,7 +79,7 @@ void pacs8_cb::on_doc_safe_close(std::size_t doc_ndx, fsp::doc_status status, co
 
 // The verdict returned by each on_type() overload below is folded into doc_counters by
 // pipeline::record_segment_done() (the caller of typed_semantic_check's own generic
-// on_semantic_safe_check()) -- see the class's own doc comment on why this hook doesn't also
+// on_semantic_check()) -- see the class's own doc comment on why this hook doesn't also
 // keep its own ok/error counters.
 bool pacs8_cb::on_type(const fsp::work::pacs8_hdr& hdr, fsp::segment_result& result, bool is_first, bool is_last) const
 {

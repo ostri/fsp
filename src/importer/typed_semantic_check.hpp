@@ -39,26 +39,26 @@ namespace fsp
    *   bool on_type(const YourNamespace::some_schema_class& s, segment_result& result,
    *                bool is_first, bool is_last);
    *
-   * -- with the exact same parameter list pipeline_hooks::on_semantic_safe_check() itself takes,
+   * -- with the exact same parameter list pipeline_hooks::on_semantic_check() itself takes,
    * minus the raw xml_segment (materialize_variant() already replaces it with s) and with the
    * segment's own materialized type as the first parameter instead -- and, same as every other
-   * "_safe" hook (see pipeline_hooks.hpp's own class comment), no logger::Logger parameter: call
-   * the protected log() accessor instead. on_semantic_safe_check() itself is implemented here,
+   * override point (see pipeline_hooks.hpp's own class comment), no logger::Logger parameter:
+   * call the protected log() accessor instead. on_semantic_check() itself is implemented here,
    * once, and marked final -- a derived class overriding it instead of declaring on_type()
    * overloads would silently lose this whole mechanism, so that path is closed off entirely
    * rather than left as a footgun.
    *
-   * @details on_semantic_safe_check()'s own static_assert requires Derived to declare an
+   * @details on_semantic_check()'s own static_assert requires Derived to declare an
    * on_type() overload for EVERY schema class Namespace declares, not just the ones a caller
    * happens to remember -- deliberately a compile-time error over a silent runtime fallback
    * (e.g. a warning logged the first time an unhandled type is seen): a missing or misspelled
-   * overload is a caller mistake that pipeline_hooks::on_semantic_safe_check()'s own default
+   * overload is a caller mistake that pipeline_hooks::on_semantic_check()'s own default
    * body would otherwise paper over by returning result.values().complete() unconditionally,
    * exactly like every OTHER schema class silently would if this mixin instead defaulted to "ok"
    * for a type with no overload. If a schema class genuinely has no business rule of its own,
    * its on_type() overload still needs to exist -- just with a body that returns true
    * unconditionally -- so that decision is visible in the derived class's own source instead of
-   * being inferred from an absence. The check itself lives in on_semantic_safe_check(), not
+   * being inferred from an absence. The check itself lives in on_semantic_check(), not
    * typed_semantic_check's own class body: a class template's member functions are only
    * instantiated on first use, well after Derived (e.g. pacs8_cb) is a complete type, whereas
    * the base class itself is instantiated while Derived is still being defined (CRTP's usual
@@ -74,7 +74,7 @@ namespace fsp
   class typed_semantic_check : public pipeline_hooks_crtp<Derived>
   {
   protected:
-    bool on_semantic_safe_check([[maybe_unused]] const xml_segment& segment, segment_result& result, bool is_first, bool is_last) final
+    bool on_semantic_check([[maybe_unused]] const xml_segment& segment, segment_result& result, bool is_first, bool is_last) final
     {
       // See the class's own doc comment for why this check lives here (first use, Derived
       // already complete) rather than directly in typed_semantic_check's own class body.

@@ -454,8 +454,8 @@ namespace fsp
    * the caller must already have idx (e.g. from pool_.try_pop_ready() or pool_.pop_segment_ndx()).
    * Unlike the old pool_.retrieve_segment()-based version, idx is NOT released back to pool_
    * here -- it stays "locked" (see segment_pool::segment_at()'s own doc comment) until
-   * flush_ok_block()/flush_nak_block() releases it, once a on_block_store()/on_failed_block_store()
-   * hook has had a chance to read it.
+   * flush_ok_block()/flush_nak_block() releases it, once a on_block_safe_store()/
+   * on_failed_block_safe_store() hook has had a chance to read it.
    * @param idx index of the segment in the pool
    */
   int xml_worker::process_one(std::size_t idx)
@@ -481,8 +481,8 @@ namespace fsp
     {
       const bool semantically_ok = pipeline_.record_segment_done(seg, *res, hooks_);
       // Both loc_res_ok_/loc_res_nak_ (the existing route into pipeline_.results()/errors(), see
-      // xml_worker::flush_results()) and pool_.result_at(idx) (for a later on_block_store()/
-      // on_failed_block_store() hook) need their own copy of *res -- hence the copy into the pool
+      // xml_worker::flush_results()) and pool_.result_at(idx) (for a later on_block_safe_store()/
+      // on_failed_block_safe_store() hook) need their own copy of *res -- hence the copy into the pool
       // before *res is moved into record_ok()/record_nak() below.
       pool_.result_at(idx) = *res;
       if (semantically_ok) record_ok(idx, seg, std::move(*res));
@@ -524,14 +524,14 @@ namespace fsp
 
   void xml_worker::flush_ok_block()
   {
-    if (! ok_block_indices_.empty()) hooks_.on_block_store(ok_block_indices_, pool_, ds_dscr_);
+    if (! ok_block_indices_.empty()) hooks_.on_block_safe_store(ok_block_indices_, pool_, ds_dscr_);
     pool_.release_slots(ok_block_indices_);
     ok_block_indices_.clear();
   }
 
   void xml_worker::flush_nak_block()
   {
-    if (! nak_block_indices_.empty()) hooks_.on_failed_block_store(nak_block_indices_, nak_block_errors_, pool_, ds_dscr_);
+    if (! nak_block_indices_.empty()) hooks_.on_failed_block_safe_store(nak_block_indices_, nak_block_errors_, pool_, ds_dscr_);
     pool_.release_slots(nak_block_indices_);
     nak_block_indices_.clear();
     nak_block_errors_.clear();

@@ -17,17 +17,17 @@
  * keeping a second, hook-local copy here would just duplicate that bookkeeping.
  *
  * Derives from fsp::typed_semantic_check<pacs8_cb, ^^fsp::work> instead of
- * fsp::pipeline_hooks_crtp<pacs8_cb> directly -- on_semantic_safe_check() itself (the
+ * fsp::pipeline_hooks_crtp<pacs8_cb> directly -- on_semantic_check() itself (the
  * materialize_variant()/std::visit()/if-constexpr plumbing) is implemented once, generically, by
  * that mixin; this class only declares one on_type() overload per fsp::work schema class (see
  * typed_semantic_check's own class comment for why BOTH are required, not just the ones with
  * real business logic).
  *
- * Overrides the "_safe" hooks (on_run_safe_start(), on_wrk_safe_start(), ...), not the public
- * on_run_start()/on_wrk_start()/... themselves -- those are final in pipeline_hooks, precisely
- * so log_/run_start_/worker_start_ can never end up unset by a derived class forgetting to chain
- * to the base body (see pipeline_hooks.hpp's own class comment). log() (inherited, protected)
- * replaces the old `const logger::Logger& log` parameter every hook used to take.
+ * Overrides the plain hooks (on_run_start(), on_wrk_start(), ...), not the "_safe" ones
+ * (on_run_safe_start()/on_wrk_safe_start()/... ) themselves -- those are final in pipeline_hooks,
+ * precisely so log_/run_start_/worker_start_ can never end up unset by a derived class forgetting
+ * to chain to the base body (see pipeline_hooks.hpp's own class comment). log() (inherited,
+ * protected) replaces the old `const logger::Logger& log` parameter every hook used to take.
  */
 class pacs8_cb : public fsp::typed_semantic_check<pacs8_cb, ^^fsp::work>
 {
@@ -36,18 +36,18 @@ public:
 
   /**
    * @brief One overload per fsp::work schema class -- typed_semantic_check's own
-   * on_semantic_safe_check() dispatches to whichever of these matches the segment just
+   * on_semantic_check() dispatches to whichever of these matches the segment just
    * materialized. Each returns its own semantic verdict (true = ok) for the segment it was given.
    */
   [[nodiscard]] bool on_type(const fsp::work::pacs8_hdr& hdr, fsp::segment_result& result, bool is_first, bool is_last) const;
   [[nodiscard]] bool on_type(const fsp::work::pacs8_txn& txn, fsp::segment_result& result, bool is_first, bool is_last) const;
 protected:
-  void on_run_safe_start(const fsp::doc_set_dscr& ds_dscr) override;
-  void on_run_safe_end(const fsp::doc_set_counter&           counters,
-                       const fsp::doc_set_dscr&              ds_dscr,
-                       std::span<const fsp::pipeline_hooks*> worker_clones) override;
-  void on_wrk_safe_start(int worker_id, fsp::cstr_t thread_name) override;
-  void on_wrk_safe_end(int worker_id, fsp::cstr_t thread_name) override;
-  void on_doc_safe_open(std::size_t doc_ndx, const fsp::doc_dscr& dscr) override;
-  void on_doc_safe_close(std::size_t doc_ndx, fsp::doc_status status, const fsp::doc_dscr& dscr) override;
+  void on_run_start(const fsp::doc_set_dscr& ds_dscr) override;
+  void on_run_end(const fsp::doc_set_counter&           counters,
+                  const fsp::doc_set_dscr&              ds_dscr,
+                  std::span<const fsp::pipeline_hooks*> worker_clones) override;
+  void on_wrk_start(int worker_id, fsp::cstr_t thread_name) override;
+  void on_wrk_end(int worker_id, fsp::cstr_t thread_name) override;
+  void on_doc_open(std::size_t doc_ndx, const fsp::doc_dscr& dscr) override;
+  void on_doc_close(std::size_t doc_ndx, fsp::doc_status status, const fsp::doc_dscr& dscr) override;
 };

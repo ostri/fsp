@@ -138,18 +138,19 @@ validate either way.
 
 #### `ok_block_flush_size` / `nak_block_flush_size`
 
-These only matter if you actually override `on_block_store()`/`on_failed_block_store()` in your own
-hooks (see [Batch storage hooks](#batch-storage-hooks) below) -- with the default, do-nothing
-hooks, they have no visible effect. Each worker thread accumulates the segments it processes
-locally, and only calls `on_block_store()` once `ok_block_flush_size` of them have piled up (or
-`on_failed_block_store()` once `nak_block_flush_size` failed ones have piled up), rather than once
-per segment. Whatever is left over when a thread finishes its work is flushed in one final call,
-even if it never reached the threshold. The two thresholds are separate, and `nak_block_flush_size`
-defaults much lower (128 vs. 1024), because a healthy run is expected to produce far fewer failed
-segments than successful ones -- without a separate, smaller threshold, failures could sit
-unflushed for a very long time. Raise these if your `on_block_store()` does something with a
-meaningful per-call cost (e.g. one round trip to a database) and you want fewer, larger calls;
-lower them if you want results to reach your storage sooner, at the cost of more, smaller calls.
+These only matter if you actually override `on_block_store()`/`on_failed_block_store()`
+in your own hooks (see [Batch storage hooks](#batch-storage-hooks) below) -- with the default,
+do-nothing hooks, they have no visible effect. Each worker thread accumulates the segments it
+processes locally, and only calls `on_block_store()` once `ok_block_flush_size` of them have
+piled up (or `on_failed_block_store()` once `nak_block_flush_size` failed ones have piled
+up), rather than once per segment. Whatever is left over when a thread finishes its work is
+flushed in one final call, even if it never reached the threshold. The two thresholds are
+separate, and `nak_block_flush_size` defaults much lower (128 vs. 1024), because a healthy run is
+expected to produce far fewer failed segments than successful ones -- without a separate, smaller
+threshold, failures could sit unflushed for a very long time. Raise these if your
+`on_block_store()` does something with a meaningful per-call cost (e.g. one round trip to a
+database) and you want fewer, larger calls; lower them if you want results to reach your storage
+sooner, at the cost of more, smaller calls.
 
 #### `cutter_ratio_num` / `cutter_ratio_den`
 
@@ -224,16 +225,22 @@ the whole run to finish.
 
 To use callbacks, derive your own class from `fsp::pipeline_hooks_crtp<YourClass>` (not from
 `pipeline_hooks` directly -- the CRTP base takes care of some bookkeeping for you) and override
-whichever methods you need. Every method has a safe do-nothing default, so you only override what
-you actually care about.
+whichever methods you need -- `on_run_start()`, `on_wrk_start()`, `on_doc_open()`,
+`on_semantic_check()`, and so on. Every one of these has a safe do-nothing default (or, for
+`on_semantic_check()`, a sensible default verdict), so you only override what you actually care
+about.
+
+**Logging:** call the protected `log()` accessor from inside any hook to get this run's logger --
+use it instead of `std::cout`/`fmt::print` so your messages land in the same log file/format as
+the importer's own.
 
 **Threading note:** the importer makes one independent copy of your hooks object per worker
 thread (via `clone()`, handled for you by `pipeline_hooks_crtp`). Because of this, plain (not
 atomic) member variables are safe to use inside `on_doc_open`/`on_doc_close`/`on_semantic_check`/
-`on_block_store`/`on_failed_block_store` -- each thread only ever touches its own copy. `on_run_start()`
-and `on_run_end()` are the two exceptions: they run on the main thread, on your *original* object,
-not a clone, and `on_run_end()` is handed every worker clone so you can add their counters
-together yourself.
+`on_block_store`/`on_failed_block_store` -- each thread only ever touches its own copy.
+`on_run_start()` and `on_run_end()` are the two exceptions: they run on the main thread, on your
+*original* object, not a clone, and `on_run_end()` is handed every worker clone so you can add
+their counters together yourself.
 
 | Method                    | Called                                                          | Typical use                                                     |
 | ------------------------- | --------------------------------------------------------------- | --------------------------------------------------------------- |
@@ -251,12 +258,10 @@ together yourself.
 Below is what each parameter of each method actually means -- useful once you go past the
 one-line summary above.
 
-- **`on_run_start(const doc_set_dscr& ds_dscr, const logger::Logger& log)`**
+- **`on_run_start(const doc_set_dscr& ds_dscr)`**
   - `ds_dscr` -- describes the whole set of documents this run was given (e.g. `ds_dscr.size()`
     for how many).
-  - `log` -- this run's logger; use it instead of `std::cout`/`fmt::print` so your messages land
-    in the same log file/format as the importer's own.
-- **`on_run_end(const doc_set_counter& counters, const doc_set_dscr& ds_dscr, std::span<const pipeline_hooks*> worker_clones, const logger::Logger& log)`**
+- **`on_run_end(const doc_set_counter& counters, const doc_set_dscr& ds_dscr, std::span<const pipeline_hooks*> worker_clones)`**
   - `counters` -- the same whole-run totals `exec()`'s own return value exposes (see
     [`fsp::importer::exec()`](#fspimporterexec) above).
   - `ds_dscr` -- same as `on_run_start()`'s.
@@ -265,7 +270,6 @@ one-line summary above.
     per-thread state (e.g. counters you accumulated in `on_semantic_check()`) all at once --
     `static_cast` each pointer back to your own hook type (it is always safe: every element was
     made by cloning your own object) and add up whatever fields you care about.
-  - `log` -- same as `on_run_start()`'s.
 - **`get_doc_id(std::size_t node_hint)`**
   - `node_hint` -- a document index modulo some block size meaningful to you (e.g. if you're
     generating ids with a Snowflake-style generator, this could be which "node" in that scheme
@@ -274,19 +278,17 @@ one-line summary above.
   - Returns -- your own opaque, 64-bit id for this document. Whatever you return is stored on the
     document and later handed back to `on_block_store()`/`on_failed_block_store()` (via
     `doc_set_dscr`), so you can tell which document a stored segment came from.
-- **`on_wrk_start(int worker_id, cstr_t thread_name, const logger::Logger& log)`** /
-  **`on_wrk_end(int worker_id, cstr_t thread_name, const logger::Logger& log)`**
+- **`on_wrk_start(int worker_id, cstr_t thread_name)`** /
+  **`on_wrk_end(int worker_id, cstr_t thread_name)`**
   - `worker_id` -- a small integer identifying this worker thread (0, 1, 2, ...).
   - `thread_name` -- this thread's own name, as it appears in log lines.
-  - `log` -- same as `on_run_start()`'s.
-- **`on_doc_open(std::size_t doc_ndx, const doc_dscr& dscr, const logger::Logger& log)`** /
-  **`on_doc_close(std::size_t doc_ndx, doc_status status, const doc_dscr& dscr, const logger::Logger& log)`**
+- **`on_doc_open(std::size_t doc_ndx, const doc_dscr& dscr)`** /
+  **`on_doc_close(std::size_t doc_ndx, doc_status status, const doc_dscr& dscr)`**
   - `doc_ndx` -- this document's index into the `xml_paths` vector you gave `exec()`.
   - `dscr` -- this one document's own description (e.g. `dscr.path()` for its file path).
-  - `status` (`on_doc_close()` only) -- `fsp::doc_status`, this document's outcome (e.g. whether
-    cutting/validation succeeded).
-  - `log` -- same as `on_run_start()`'s.
-- **`on_semantic_check(const xml_segment& segment, segment_result& result, bool is_first, bool is_last, const logger::Logger& log)`**
+  - `status` (`on_doc_close()` only) -- `fsp::doc_status`, this document's outcome (e.g.
+    whether cutting/validation succeeded).
+- **`on_semantic_check(const xml_segment& segment, segment_result& result, bool is_first, bool is_last)`**
   - `segment` -- the raw cut this segment came from (offset/length/namespace/attributes of its
     top-level tag) -- only useful if you need more than the extracted values themselves.
   - `result` -- the extracted values, as a generic, name-indexed `segment_result` (see
@@ -295,11 +297,10 @@ one-line summary above.
     field can append to `result.errors()` if that field's own validation fails.
   - `is_first` / `is_last` -- whether this is the first/last segment of its document (both `true`
     at once for a document with exactly one segment).
-  - `log` -- same as `on_run_start()`'s.
   - Returns -- this segment's semantic verdict: `true` if it's fine, `false` if something about
     its content is wrong by your own business rules.
-- **`on_block_store(std::span<const std::size_t> indices, segment_pool& pool, const doc_set_dscr& ds_dscr, const logger::Logger& log)`** /
-  **`on_failed_block_store(std::span<const std::size_t> indices, std::span<const error_info> errors, segment_pool& pool, const doc_set_dscr& ds_dscr, const logger::Logger& log)`**
+- **`on_block_store(std::span<const std::size_t> indices, segment_pool& pool, const doc_set_dscr& ds_dscr)`** /
+  **`on_failed_block_store(std::span<const std::size_t> indices, std::span<const error_info> errors, segment_pool& pool, const doc_set_dscr& ds_dscr)`**
   - `indices` -- pool slot indices belonging to this batch. Look each one up via
     `pool.segment_at(idx)`/`pool.result_at(idx)` -- these slots are guaranteed not to be reused by
     anyone else until your call returns. Can be empty (a harmless no-op call) for the final
@@ -311,18 +312,16 @@ one-line summary above.
   - `ds_dscr` -- the full document set; look up `ds_dscr[pool.segment_at(idx).doc_ndx()]` per
     index (a batch can mix segments from different documents) to resolve that document's own
     data, e.g. the id you returned from `get_doc_id()`.
-  - `log` -- same as `on_run_start()`'s.
 
-`on_semantic_check()` is the one you'll override most often. It receives a `segment_result`, which
-holds the raw, name-indexed extracted values. To get them back as your own schema type (the
+`on_semantic_check()` is the one you'll override most often. It receives a `segment_result`,
+which holds the raw, name-indexed extracted values. To get them back as your own schema type (the
 classes you wrote for `targets`), call `fsp::materialize_variant<^^YourNamespace>()`:
 
 ```cpp
 bool on_semantic_check(const fsp::xml_segment& segment,
-                 fsp::segment_result&    result,
-                 bool                    is_first,
-                 bool                    is_last,
-                 const logger::Logger&   log) override
+                       fsp::segment_result&    result,
+                       bool                    is_first,
+                       bool                    is_last) override
 {
   auto seg = fsp::materialize_variant<^^fsp::work>(result.seg_type(), result);
   return std::visit([&]<typename T>(const T& s) -> bool
@@ -340,10 +339,32 @@ bool on_semantic_check(const fsp::xml_segment& segment,
 }
 ```
 
-The return value of `on_semantic_check()` is that segment's semantic verdict: `true` means "this
-segment is fine", `false` means "something about its content is wrong, even though it parsed
-correctly". This is different from a segment that fails to parse at all (a syntax error) -- that
-kind of failure never reaches `on_semantic_check()` in the first place.
+The return value of `on_semantic_check()` is that segment's semantic verdict: `true` means
+"this segment is fine", `false` means "something about its content is wrong, even though it
+parsed correctly". This is different from a segment that fails to parse at all (a syntax error)
+-- that kind of failure never reaches `on_semantic_check()` in the first place.
+
+#### A shortcut for type-based dispatch: `typed_semantic_check`
+
+Writing the `materialize_variant()` + `std::visit()` + one `if constexpr` branch per schema class
+shown above is boilerplate every caller of `on_semantic_check()` ends up repeating. If all you
+actually need is "run a different function per schema class", derive from
+`fsp::typed_semantic_check<YourClass, ^^YourNamespace>` (declared in `typed_semantic_check.hpp`)
+instead of `fsp::pipeline_hooks_crtp<YourClass>` directly, and declare one `on_type()` overload
+per schema class in that namespace, with this exact parameter list:
+
+```cpp
+bool on_type(const fsp::work::pacs8_header& hdr, fsp::segment_result& result, bool is_first, bool is_last);
+bool on_type(const fsp::work::pacs8_txn&    txn, fsp::segment_result& result, bool is_first, bool is_last);
+```
+
+`typed_semantic_check` implements `on_semantic_check()` for you and dispatches to whichever
+`on_type()` overload matches the segment's materialized type. A `static_assert` enforces that you
+declare an `on_type()` overload for *every* schema class in the namespace, not just the ones you
+remember -- a missing or misspelled overload is a compile-time error rather than a
+silently-skipped segment type. If a schema class genuinely has no business rule of its own, its
+`on_type()` overload still needs to exist, just returning `true` unconditionally, so that decision
+is visible in your own source instead of inferred from an absence.
 
 #### What `fsp::materialize_variant()` does
 
@@ -363,8 +384,8 @@ Breaking this one line down:
   the namespace (the first class declared is `0`, the second is `1`, and so on). You never set
   this yourself -- it was already recorded when the segment was cut, and here you're just handing
   it back so the right class can be picked.
-- `result` is the same `segment_result&` your `on_semantic_check()` override received -- the raw
-  values `materialize_variant()` reads from and copies into the typed class.
+- `result` is the same `segment_result&` your `on_semantic_check()` override received -- the
+  raw values `materialize_variant()` reads from and copies into the typed class.
 - The return value, `seg`, is a `std::variant` that can hold any *one* of your schema classes --
   e.g. for the two classes in `work.hpp`'s example, it is a
   `std::variant<fsp::work::pacs8_header, fsp::work::pacs8_txn>`. Which one it actually holds
@@ -379,15 +400,15 @@ have to look values up by string name yourself.
 
 #### Batch storage hooks
 
-`on_block_store()`/`on_failed_block_store()` exist for one specific job: writing large numbers of
-results out to your own storage (a file, a database, a message queue) without doing it one
-segment at a time. Instead of being called per-segment, they are called once a batch has piled up
--- controlled by `importer_config::ok_block_flush_size` (default 1024) and `nak_block_flush_size`
-(default 128, since failed segments are usually much rarer) -- or once at the very end of a
-worker thread's run, with whatever is left over. You receive the pool slot indices for that
-batch and read the actual data back out via the `segment_pool&`/`doc_set_dscr&` parameters you're
-given. Most callers don't need these two hooks at all; ignore them unless you're streaming output
-to external storage while the import is still running.
+`on_block_store()`/`on_failed_block_store()` exist for one specific job: writing large
+numbers of results out to your own storage (a file, a database, a message queue) without doing it
+one segment at a time. Instead of being called per-segment, they are called once a batch has
+piled up -- controlled by `importer_config::ok_block_flush_size` (default 1024) and
+`nak_block_flush_size` (default 128, since failed segments are usually much rarer) -- or once at
+the very end of a worker thread's run, with whatever is left over. You receive the pool slot
+indices for that batch and read the actual data back out via the `segment_pool&`/`doc_set_dscr&`
+parameters you're given. Most callers don't need these two hooks at all; ignore them unless you're
+streaming output to external storage while the import is still running.
 
 ### calback example
 
@@ -426,18 +447,17 @@ public:
   std::size_t documents_seen = 0;
   std::size_t segments_ok    = 0;
   std::size_t segments_error = 0;
-
-  void on_doc_open(std::size_t doc_ndx, const fsp::doc_dscr& dscr, const logger::Logger& log) override
+protected:
+  void on_doc_open(std::size_t doc_ndx, const fsp::doc_dscr& dscr) override
   {
     ++documents_seen;
-    log.info(fmt::format("Started document {}: '{}'", doc_ndx, dscr.path()));
+    log().info(fmt::format("Started document {}: '{}'", doc_ndx, dscr.path()));
   }
 
   bool on_semantic_check(const fsp::xml_segment& segment,
-                   fsp::segment_result&    result,
-                   bool                    is_first,
-                   bool                    is_last,
-                   const logger::Logger&   log) override
+                         fsp::segment_result&    result,
+                         bool                    is_first,
+                         bool                    is_last) override
   {
     auto       seg = fsp::materialize_variant<^^fsp::work>(result.seg_type(), result);
     const bool ok  = std::visit([&]<typename T>(const T& s) -> bool
@@ -454,8 +474,7 @@ public:
 
   void on_run_end(const fsp::doc_set_counter&           counters,
                   const fsp::doc_set_dscr&              ds_dscr,
-                  std::span<const fsp::pipeline_hooks*> worker_clones,
-                  const logger::Logger&                 log) override
+                  std::span<const fsp::pipeline_hooks*> worker_clones) override
   {
     std::size_t total_ok = segments_ok, total_error = segments_error;
     for (const auto* clone : worker_clones)
@@ -464,7 +483,7 @@ public:
       total_ok    += c->segments_ok;
       total_error += c->segments_error;
     }
-    log.info(fmt::format("Run finished: {} ok, {} failed", total_ok, total_error));
+    log().info(fmt::format("Run finished: {} ok, {} failed", total_ok, total_error));
   }
 };
 ```
@@ -486,6 +505,7 @@ no callback needed. See `src/test/pacs8.cpp` for the full, buildable version thi
 
 ```cpp
 #include "importer.hpp"
+#include "exe_path.hpp"
 #include "work.hpp" // your own target classes, see "Getting your data out" above
 
 int main(int argc, const char* argv[])
@@ -493,10 +513,17 @@ int main(int argc, const char* argv[])
   std::vector<fsp::str_t> xml_paths = { /* ... your files ... */ };
   fsp::cstr_t              xsd_path = "schema.xsd"; // or "" to skip schema validation
 
+  // log.conf is copied next to the binary at build time (see add_log_config() in
+  // CMakeLists.txt, which already picked the right one of config/log.debug.json /
+  // config/log.release.json for this build's own CMAKE_BUILD_TYPE) -- resolved against
+  // fsp::exe_dir() (the running binary's own directory), not the current working directory.
+  auto log_cfg      = logger::load_logger_config((fsp::exe_dir() / "log.conf").string());
+  log_cfg.app_name  = "my_importer";
+
   auto cfg = fsp::importer_config{
     .targets        = fsp::proc_data_of<^^fsp::work>(),
     .num_of_workers = 16,
-    .log_config     = logger::load_logger_config("log.conf"),
+    .log_config     = log_cfg,
     .program_name   = "my_importer",
   };
 
@@ -561,8 +588,8 @@ failure (see `result`'s own parameter description in
 ### 2. The class members: what `on_semantic_check()` gets
 
 The four annotated members above (`txn_id`, `amount`, `currency`, `debtor_bic`) are exactly what
-ends up readable, fully typed, once you materialize a segment inside `on_semantic_check()` -- see
-step 3 below, where `s.txn_id`/`s.amount` are used directly, with no string-based lookups.
+ends up readable, fully typed, once you materialize a segment inside `on_semantic_check()` --
+see step 3 below, where `s.txn_id`/`s.amount` are used directly, with no string-based lookups.
 
 ### 3. The callback
 
@@ -577,15 +604,14 @@ class my_pacs8_hooks : public fsp::pipeline_hooks_crtp<my_pacs8_hooks>
 public:
   std::size_t segments_ok    = 0;
   std::size_t segments_error = 0;
-
-  void on_doc_open(std::size_t doc_ndx, const fsp::doc_dscr& dscr, const logger::Logger& log) override
-  { log.info(fmt::format("Started document {}: '{}'", doc_ndx, dscr.path())); }
+protected:
+  void on_doc_open(std::size_t doc_ndx, const fsp::doc_dscr& dscr) override
+  { log().info(fmt::format("Started document {}: '{}'", doc_ndx, dscr.path())); }
 
   bool on_semantic_check(const fsp::xml_segment& segment,
                          fsp::segment_result&    result,
                          bool                    is_first,
-                         bool                    is_last,
-                         const logger::Logger&   log) override
+                         bool                    is_last) override
   {
     // Turn the generic result back into our own fsp::work::pacs8_txn -- see "What
     // fsp::materialize_variant() does" above.
@@ -597,7 +623,7 @@ public:
         // Our own business rule: a transaction must carry a positive amount. amount_t stores its
         // value scaled by 10^amount_scale (see parsing_util.hpp), as a plain .value member.
         const bool valid = s.amount.value > 0;
-        if (! valid) log.warn(fmt::format("txn {} failed validation: amount={}", s.txn_id, s.amount));
+        if (! valid) log().warn(fmt::format("txn {} failed validation: amount={}", s.txn_id, s.amount));
         return valid;
       }
       else return true;
@@ -610,8 +636,7 @@ public:
 
   void on_run_end(const fsp::doc_set_counter&           counters,
                   const fsp::doc_set_dscr&              ds_dscr,
-                  std::span<const fsp::pipeline_hooks*> worker_clones,
-                  const logger::Logger&                 log) override
+                  std::span<const fsp::pipeline_hooks*> worker_clones) override
   {
     std::size_t total_ok = segments_ok, total_error = segments_error;
     for (const auto* clone : worker_clones)
@@ -620,7 +645,7 @@ public:
       total_ok    += c->segments_ok;
       total_error += c->segments_error;
     }
-    log.info(fmt::format("Run finished: {} ok, {} failed", total_ok, total_error));
+    log().info(fmt::format("Run finished: {} ok, {} failed", total_ok, total_error));
   }
 };
 ```
@@ -673,8 +698,8 @@ int main(int argc, const char* argv[])
     auto cfg = fsp::importer_config{
       .targets        = fsp::proc_data_of<^^fsp::work>(), // built from step 1's namespace
       .num_of_workers = 16,
-      .log_config     = load_program_logger_config(args.p_name),
-      .program_name   = args.p_name,
+      .log_config     = load_program_logger_config(args.bare_name),
+      .program_name   = args.bare_name,
     };
 
     my_pacs8_hooks hooks; // step 3's callback

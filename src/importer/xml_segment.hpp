@@ -47,9 +47,9 @@ namespace fsp
     /**
      * @brief Semantic verdict from pipeline_hooks::on_semantic_check() (true = semantically correct),
      * set by pipeline::record_segment_done() right after the hook call returns. Lets a
-     * on_block_store()/on_failed_block_store() hook, running later against a batch of pool indices,
-     * tell which of the two blocks this slot's segment was already sorted into without needing
-     * its own separate lookup -- see segment_pool::segment_at().
+     * on_block_safe_store()/on_failed_block_safe_store() hook, running later against a batch of pool
+     * indices, tell which of the two blocks this slot's segment was already sorted into without
+     * needing its own separate lookup -- see segment_pool::segment_at().
      */
     [[nodiscard]] bool valid() const noexcept;
     void               set_valid(bool valid) noexcept;

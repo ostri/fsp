@@ -54,7 +54,7 @@ namespace fsp
     const auto doc_ndx         = static_cast<std::size_t>(result.doc_ndx());
     auto&      counters        = (*doc_counters_)[doc_ndx];
     const auto pos             = counters.begin_segment(result.seg_id());
-    const bool semantically_ok = hooks.on_semantic_check(segment, result, pos.is_first, pos.is_last);
+    const bool semantically_ok = hooks.on_semantic_safe_check(segment, result, pos.is_first, pos.is_last);
     if (counters.end_segment(semantically_ok)) log_doc_done(doc_ndx);
     return semantically_ok;
   }
@@ -249,13 +249,13 @@ namespace fsp
     if (xml_paths.empty())
     {
       log_.info("No files to process.");
-      hooks.on_run_start(ds_dscr_, log_);
-      hooks.on_run_end(doc_set_counter(0), ds_dscr_, {});
+      hooks.on_run_safe_start(ds_dscr_, log_);
+      hooks.on_run_safe_end(doc_set_counter(0), ds_dscr_, {});
       return doc_set_counter(0);
     }
 
     if (auto added = add_documents(xml_paths, xsd_path, hooks); ! added) return std::unexpected(added.error());
-    hooks.on_run_start(ds_dscr_, log_);
+    hooks.on_run_safe_start(ds_dscr_, log_);
 
     const auto doc_count = xml_paths.size();
     const auto plan      = plan_run(doc_count);
@@ -274,13 +274,13 @@ namespace fsp
 
     run_workers(*worker_state);
 
-    // Always fires exactly once, paired with on_run_start() above, regardless of whether the
+    // Always fires exactly once, paired with on_run_safe_start() above, regardless of whether the
     // run goes on to succeed or hit a fatal error below -- so the developer always sees the
     // final counters/ds_dscr/worker clones for whatever actually happened.
     std::vector<const pipeline_hooks*> worker_clones;
     worker_clones.reserve(worker_state->size());
     for (const auto& w : *worker_state) worker_clones.push_back(&w->hooks());
-    hooks.on_run_end(*doc_counters_, ds_dscr_, worker_clones);
+    hooks.on_run_safe_end(*doc_counters_, ds_dscr_, worker_clones);
 
     discard_invalid_doc_results();
     if (first_error_)
