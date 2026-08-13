@@ -32,8 +32,6 @@
 class pacs8_cb : public fsp::typed_semantic_check<pacs8_cb, ^^fsp::work>
 {
 public:
-  std::size_t documents_seen = 0; // NOLINT(misc-non-private-member-variables-in-classes)
-
   /**
    * @brief One overload per fsp::work schema class -- typed_semantic_check's own
    * on_semantic_check() dispatches to whichever of these matches the segment just
@@ -50,4 +48,6 @@ protected:
   void on_wrk_end(int worker_id, fsp::cstr_t thread_name) override;
   void on_doc_open(std::size_t doc_ndx, const fsp::doc_dscr& dscr) override;
   void on_doc_close(std::size_t doc_ndx, fsp::doc_status status, const fsp::doc_dscr& dscr) override;
+private:
+  std::size_t documents_seen = 0;
 };
