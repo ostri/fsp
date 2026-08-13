@@ -178,7 +178,7 @@ expression, in a namespace of your own choosing:
 ```cpp
 namespace fsp::work
 {
-  class [[= "header=/x:Document/FIToFICstmrCdtTrf/x:GrpHdr"]] pacs8_header : public fsp::seg_schema
+  class [[= "/x:Document/FIToFICstmrCdtTrf/x:GrpHdr"]] pacs8_hdr : public fsp::seg_schema
   {
   public:
     [[= "x:GrpHdr/MsgId"]]           str_t     msg_id;
@@ -188,19 +188,48 @@ namespace fsp::work
 }
 ```
 
+`fsp::work` here is just this example's own choice of name -- yours can be called anything. It is
+the namespace where you define what a segment *is* (which schema classes exist, i.e. which kinds
+of segments the document gets cut into) and what values you want pulled out of each one (the
+annotated members below); `fsp::proc_data_of<^^fsp::work>()` (see the end of this section) reads
+that description and turns it into the `targets` value `importer_config` expects.
+
 The two levels of annotation answer two different questions:
 
-- **Class-level annotation** (`[[= "header=/x:Document/.../GrpHdr"]]` above the class) -- answers
+- **Class-level annotation** (`[[= "/x:Document/.../GrpHdr"]]` above the class) -- answers
   "how is the document cut into segments?" It marks an XPath as a segment boundary: every element
   in the document matching that path becomes one segment, and this class is the schema for that
   segment. Each class is responsible for exactly one kind of segment; a document with, say, one
-  header and a thousand transactions produces one `pacs8_header` segment and a thousand
-  `pacs8_txn` segments, cut out independently of each other.
+  header and a thousand transactions produces one `pacs8_hdr` segment and a thousand
+  `pacs8_txn` segments, cut out independently of each other. The segment's own name (e.g. for log
+  lines, see `on_doc_open()`'s log output) is simply the class's own C++ identifier -- `pacs8_hdr`,
+  `pacs8_txn` -- there is nothing else to name separately.
 - **Member-level annotation** (`[[= "x:GrpHdr/MsgId"]]` above a field) -- answers "which values
   do I want out of that segment?" It is an XPath relative to the segment's own root (not the whole
   document), and it is what actually gets extracted and handed back to you, inside a
   `fsp::segment_result&` (see [method purpose and parameter semantics](#method-purpose-and-parameter-semantics)
   below), when that segment is processed.
+
+Any `prefix:` you use inside these paths (e.g. the `x:` in `x:GrpHdr/MsgId`) is resolved against
+a prefix -> namespace URI table your own namespace must declare, named exactly `ns`:
+
+```cpp
+namespace fsp::work
+{
+  static constexpr auto ns = std::to_array<fsp::ns>({
+    {.prefix = "",  .uri = "urn:iso:std:iso:20022:tech:xsd:pacs.008.001.08"}, // default namespace
+    {.prefix = "x", .uri = "urn:iso:std:iso:20022:tech:xsd:pacs.008.001.08"}, // explicit prefix
+  });
+  // ... schema classes below
+}
+```
+
+An unprefixed path segment (e.g. `GrpHdr/NbOfTxs` above) resolves against whichever entry has
+`.prefix = ""` (the document's default namespace) -- it does NOT mean "any/no namespace". A path
+segment can freely mix prefixed and unprefixed steps (`x:GrpHdr/MsgId` vs. `GrpHdr/NbOfTxs` above
+both resolve to the same URI here, since `""` and `"x"` happen to share one). `proc_data_of()`
+(see below) looks this table up by name via reflection -- it is a compile-time error
+("namespace is missing a 'ns' member") if your namespace doesn't declare one.
 
 The importer reads this description at compile time (using C++26 reflection) and builds
 everything it needs from it -- there is no separate schema file or runtime registration step.
@@ -211,6 +240,42 @@ call:
 ```cpp
 cfg.targets = fsp::proc_data_of<^^fsp::work>();
 ```
+
+#### Attribute paths, cardinality prefixes, and `validated_t`
+
+A few details of the member-level annotations shown above are worth spelling out on their own:
+
+- **`@` marks an XML attribute, not a child element** -- e.g.
+  `[[= "GrpHdr/TtlIntrBkSttlmAmt/@Ccy"]]` reads the `Ccy` *attribute* of the `TtlIntrBkSttlmAmt`
+  element, not a child element named `Ccy`. It can carry a prefix too (`.../@x:Ccy`), resolved
+  against the same `ns` table as everything else. `@` is only meaningful as the last step of a
+  path -- it marks which XML node in the path carries the attribute, not a navigation step of its
+  own.
+- **`o_`/`m_` prefixes on the field's own C++ type set its cardinality** -- not a marker character
+  in the path string, but the field's declared type itself (see `parsing_util.hpp`):
+  - Plain (e.g. `str_t`, `amount_t`) -- exactly one occurrence is required; missing is a technical
+    failure.
+  - `o_`-prefixed (e.g. `o_str_t`, an alias for `std::optional<str_t>`) -- zero or one occurrence;
+    missing is fine, and the field materializes as `std::nullopt`. `currency` above is `o_str_t`
+    because not every real-world message repeats the currency on every amount.
+  - `m_`-prefixed (e.g. `m_str_t`, an alias for `std::array<str_t, max_values>`) -- one to
+    `max_values` occurrences, each independently extracted. `src/test/work.hpp`'s own
+    `pacs8_txn::instr_agent` is `m_str_t`, because a transaction can legitimately name more than
+    one instructing agent.
+- **`validated_t<X>`** (an alias for `std::expected<X, int>`, see `reflection.hpp`) wraps a field
+  type `X` that validates itself: `X` must provide
+  `static std::expected<X, error_info> parse(cstr_t)`, called automatically during extraction
+  instead of a plain string-to-value conversion. On success the field holds `X`; on failure it
+  holds an index into the owning `segment_result::errors()` (see that parameter's own description
+  in [method purpose and parameter semantics](#method-purpose-and-parameter-semantics) above) --
+  this is what lets a field validate itself (an IBAN's checksum, an amount's allowed range, ...)
+  entirely inside the schema class, with no extra code in your callback. Two examples from
+  `src/test/work.hpp`: `fsp::ach::iban_t` (`ach/utility.hpp`) validates that a string is a
+  well-formed IBAN (used as `validated_t<fsp::ach::iban_t>` for `debtor_iban`/`creditor_iban`);
+  `usr::bounded_amount_t<Min, Max>` (`src/test/user_types.hpp`) validates that an amount falls
+  within `[Min, Max]`, both given in whole currency units. `validated_t<X>` combines freely with
+  `o_`/`m_` cardinality too (`o_validated_t<X>`/`m_validated_t<X>`, also in `reflection.hpp`) --
+  an optional or repeated validated field would use those aliases instead of plain `validated_t<X>`.
 
 ## callback description
 
@@ -223,24 +288,24 @@ the whole run to finish.
 
 ### method purpose and parameter semantics
 
-To use callbacks, derive your own class from `fsp::pipeline_hooks_crtp<YourClass>` (not from
-`pipeline_hooks` directly -- the CRTP base takes care of some bookkeeping for you) and override
-whichever methods you need -- `on_run_start()`, `on_wrk_start()`, `on_doc_open()`,
-`on_semantic_check()`, and so on. Every one of these has a safe do-nothing default (or, for
-`on_semantic_check()`, a sensible default verdict), so you only override what you actually care
-about.
+To use callbacks, derive your own class from `fsp::typed_semantic_check<YourClass, ^^YourNamespace>`
+(not from `pipeline_hooks` directly -- this base takes care of some bookkeeping for you, see
+[A note on the class hierarchy](#a-note-on-the-class-hierarchy) below) and override whichever
+methods you need -- `on_run_start()`, `on_wrk_start()`, `on_doc_open()`, `on_type()`, and so on.
+Every one of these has a safe do-nothing default (or, for `on_type()`, a sensible default
+verdict), so you only override what you actually care about.
 
 **Logging:** call the protected `log()` accessor from inside any hook to get this run's logger --
 use it instead of `std::cout`/`fmt::print` so your messages land in the same log file/format as
 the importer's own.
 
 **Threading note:** the importer makes one independent copy of your hooks object per worker
-thread (via `clone()`, handled for you by `pipeline_hooks_crtp`). Because of this, plain (not
-atomic) member variables are safe to use inside `on_doc_open`/`on_doc_close`/`on_semantic_check`/
-`on_block_store`/`on_failed_block_store` -- each thread only ever touches its own copy.
-`on_run_start()` and `on_run_end()` are the two exceptions: they run on the main thread, on your
-*original* object, not a clone, and `on_run_end()` is handed every worker clone so you can add
-their counters together yourself.
+thread (via `clone()`, handled for you by `pipeline_hooks_crtp`, which `typed_semantic_check`
+derives from). Because of this, plain (not atomic) member variables are safe to use inside
+`on_doc_open`/`on_doc_close`/`on_type`/`on_block_store`/`on_failed_block_store` -- each thread
+only ever touches its own copy. `on_run_start()` and `on_run_end()` are the two exceptions: they
+run on the main thread, on your *original* object, not a clone, and `on_run_end()` is handed every
+worker clone so you can add their counters together yourself.
 
 | Method                    | Called                                                          | Typical use                                                     |
 | ------------------------- | --------------------------------------------------------------- | --------------------------------------------------------------- |
@@ -251,7 +316,7 @@ their counters together yourself.
 | `on_wrk_end()`            | once per worker thread, when it finishes                        | per-thread cleanup, e.g. close that connection                  |
 | `on_doc_open()`           | when a document starts being cut into segments                  | log which document is being processed                           |
 | `on_doc_close()`          | when a document is done being cut                               | log the outcome (`fsp::doc_status`)                             |
-| `on_semantic_check()`     | after a segment's fields have been extracted                    | your own semantic validation; return `true`/`false`             |
+| `on_type()`               | once per segment, after its fields have been extracted          | your own semantic validation; return `true`/`false`             |
 | `on_block_store()`        | periodically, for a batch of successfully validated segments    | write results out to your own storage                           |
 | `on_failed_block_store()` | periodically, for a batch of failed segments                    | write/log failures out to your own storage                      |
 
@@ -267,7 +332,7 @@ one-line summary above.
   - `ds_dscr` -- same as `on_run_start()`'s.
   - `worker_clones` -- one pointer per worker thread, each pointing at that thread's own hooks
     clone (see the CRTP base's `clone()`). This is your only chance to see every thread's
-    per-thread state (e.g. counters you accumulated in `on_semantic_check()`) all at once --
+    per-thread state (e.g. counters you accumulated in `on_type()`) all at once --
     `static_cast` each pointer back to your own hook type (it is always safe: every element was
     made by cloning your own object) and add up whatever fields you care about.
 - **`get_doc_id(std::size_t node_hint)`**
@@ -288,13 +353,17 @@ one-line summary above.
   - `dscr` -- this one document's own description (e.g. `dscr.path()` for its file path).
   - `status` (`on_doc_close()` only) -- `fsp::doc_status`, this document's outcome (e.g.
     whether cutting/validation succeeded).
-- **`on_semantic_check(const xml_segment& segment, segment_result& result, bool is_first, bool is_last)`**
-  - `segment` -- the raw cut this segment came from (offset/length/namespace/attributes of its
-    top-level tag) -- only useful if you need more than the extracted values themselves.
-  - `result` -- the extracted values, as a generic, name-indexed `segment_result` (see
-    [`fsp::materialize_variant()`](#what-fspmaterialize_variant-does) below for turning it into
-    your own schema type). Passed by non-const reference because materializing a `validated_t<X>`
-    field can append to `result.errors()` if that field's own validation fails.
+- **`on_type(const YourSchemaClass& s, segment_result& result, bool is_first, bool is_last)`**
+  -- one overload per schema class in your namespace (see
+  [Getting your data out](#getting-your-data-out) above); `typed_semantic_check` dispatches to
+  whichever overload matches the segment just extracted.
+  - `s` -- the segment's own fields, fully typed (e.g. `s.msg_id`, `s.amount_sum` for a
+    `pacs8_hdr`) -- exactly the members you annotated on that schema class, no string-based
+    lookups needed.
+  - `result` -- the same segment, as a generic, name-indexed `segment_result` -- only useful if
+    you need something `s` doesn't already give you fully typed (e.g. `result.seg_id()`). Passed
+    by non-const reference because extracting a `validated_t<X>` field can append to
+    `result.errors()` if that field's own validation fails.
   - `is_first` / `is_last` -- whether this is the first/last segment of its document (both `true`
     at once for a document with exactly one segment).
   - Returns -- this segment's semantic verdict: `true` if it's fine, `false` if something about
@@ -313,90 +382,38 @@ one-line summary above.
     index (a batch can mix segments from different documents) to resolve that document's own
     data, e.g. the id you returned from `get_doc_id()`.
 
-`on_semantic_check()` is the one you'll override most often. It receives a `segment_result`,
-which holds the raw, name-indexed extracted values. To get them back as your own schema type (the
-classes you wrote for `targets`), call `fsp::materialize_variant<^^YourNamespace>()`:
+`on_type()` is the one you'll override most often -- declare one overload per schema class in
+your namespace, with this exact parameter list:
 
 ```cpp
-bool on_semantic_check(const fsp::xml_segment& segment,
-                       fsp::segment_result&    result,
-                       bool                    is_first,
-                       bool                    is_last) override
+bool on_type(const fsp::work::pacs8_hdr& hdr, fsp::segment_result& result, bool is_first, bool is_last) override;
+bool on_type(const fsp::work::pacs8_txn& txn, fsp::segment_result& result, bool is_first, bool is_last) override;
+```
+
+```cpp
+bool on_type(const fsp::work::pacs8_hdr& hdr, fsp::segment_result& result, bool is_first, bool is_last) override
 {
-  auto seg = fsp::materialize_variant<^^fsp::work>(result.seg_type(), result);
-  return std::visit([&]<typename T>(const T& s) -> bool
-  {
-    if constexpr (std::is_same_v<T, fsp::work::pacs8_header>)
-    {
-      // s.msg_id, s.amount_sum, ... are now available, fully typed
-      return true; // or false, if this segment fails your own business rule
-    }
-    else if constexpr (std::is_same_v<T, fsp::work::pacs8_txn>)
-    {
-      return true;
-    }
-  }, seg);
+  // hdr.msg_id, hdr.amount_sum, ... are already fully typed -- no string-based lookups needed.
+  return true; // or false, if this segment fails your own business rule
+}
+
+bool on_type(const fsp::work::pacs8_txn& txn, fsp::segment_result& result, bool is_first, bool is_last) override
+{
+  return txn.amount.value > 0; // your own business rule
 }
 ```
 
-The return value of `on_semantic_check()` is that segment's semantic verdict: `true` means
-"this segment is fine", `false` means "something about its content is wrong, even though it
-parsed correctly". This is different from a segment that fails to parse at all (a syntax error)
--- that kind of failure never reaches `on_semantic_check()` in the first place.
+The return value is that segment's semantic verdict: `true` means "this segment is fine", `false`
+means "something about its content is wrong, even though it parsed correctly". This is different
+from a segment that fails to parse at all (a syntax error) -- that kind of failure never reaches
+`on_type()` in the first place.
 
-#### A shortcut for type-based dispatch: `typed_semantic_check`
-
-Writing the `materialize_variant()` + `std::visit()` + one `if constexpr` branch per schema class
-shown above is boilerplate every caller of `on_semantic_check()` ends up repeating. If all you
-actually need is "run a different function per schema class", derive from
-`fsp::typed_semantic_check<YourClass, ^^YourNamespace>` (declared in `typed_semantic_check.hpp`)
-instead of `fsp::pipeline_hooks_crtp<YourClass>` directly, and declare one `on_type()` overload
-per schema class in that namespace, with this exact parameter list:
-
-```cpp
-bool on_type(const fsp::work::pacs8_header& hdr, fsp::segment_result& result, bool is_first, bool is_last);
-bool on_type(const fsp::work::pacs8_txn&    txn, fsp::segment_result& result, bool is_first, bool is_last);
-```
-
-`typed_semantic_check` implements `on_semantic_check()` for you and dispatches to whichever
-`on_type()` overload matches the segment's materialized type. A `static_assert` enforces that you
-declare an `on_type()` overload for *every* schema class in the namespace, not just the ones you
-remember -- a missing or misspelled overload is a compile-time error rather than a
-silently-skipped segment type. If a schema class genuinely has no business rule of its own, its
-`on_type()` overload still needs to exist, just returning `true` unconditionally, so that decision
-is visible in your own source instead of inferred from an absence.
-
-#### What `fsp::materialize_variant()` does
-
-```cpp
-auto seg = fsp::materialize_variant<^^fsp::work>(result.seg_type(), result);
-```
-
-Breaking this one line down:
-
-- `fsp::work` is the namespace holding your schema classes -- the same one you passed to
-  `fsp::proc_data_of<^^fsp::work>()` when building `importer_config::targets` (see
-  [Getting your data out](#getting-your-data-out) above). `^^fsp::work` is C++26 reflection syntax
-  for "a compile-time handle to the `fsp::work` namespace itself", which is what
-  `materialize_variant()` needs to know which classes to consider.
-- `result.seg_type()` tells `materialize_variant()` which one of your schema classes this
-  particular segment is: an integer index, in the same declaration order your classes appear in
-  the namespace (the first class declared is `0`, the second is `1`, and so on). You never set
-  this yourself -- it was already recorded when the segment was cut, and here you're just handing
-  it back so the right class can be picked.
-- `result` is the same `segment_result&` your `on_semantic_check()` override received -- the
-  raw values `materialize_variant()` reads from and copies into the typed class.
-- The return value, `seg`, is a `std::variant` that can hold any *one* of your schema classes --
-  e.g. for the two classes in `work.hpp`'s example, it is a
-  `std::variant<fsp::work::pacs8_header, fsp::work::pacs8_txn>`. Which one it actually holds
-  depends on `result.seg_type()`; you don't know which at compile time, only at runtime, which is
-  exactly what `std::variant` plus `std::visit()` are for -- see the `if constexpr` branches in
-  the example above, one per possible schema class.
-
-In short: `materialize_variant()` is the one call that turns the generic, name-indexed
-`segment_result` you're handed into your own, fully-typed schema object (`pacs8_header` or
-`pacs8_txn`, with real fields like `.msg_id`/`.amount_sum` you can read directly), so you never
-have to look values up by string name yourself.
+A `static_assert` enforces that you declare an `on_type()` overload for *every* schema class in
+the namespace, not just the ones you remember -- a missing or misspelled overload is a
+compile-time error rather than a silently-skipped segment type. If a schema class genuinely has no
+business rule of its own, its `on_type()` overload still needs to exist, just returning `true`
+unconditionally, so that decision is visible in your own source instead of inferred from an
+absence.
 
 #### Batch storage hooks
 
@@ -413,8 +430,8 @@ streaming output to external storage while the import is still running.
 ### calback example
 
 Here is a complete, minimal callback class that counts documents and segments, and applies a
-simple validation rule. The callback below reads `s.amount`, so first, here is the `fsp::work`
-namespace (see [Getting your data out](#getting-your-data-out) above) it materializes segments
+simple validation rule. The callback below reads `txn.amount`, so first, here is the `fsp::work`
+namespace (see [Getting your data out](#getting-your-data-out) above) it dispatches segments
 against -- this is what defines that `pacs8_txn` even has an `amount` field to read:
 
 ```cpp
@@ -424,7 +441,7 @@ against -- this is what defines that `pacs8_txn` even has an `amount` field to r
 
 namespace fsp::work
 {
-  class [[= "transaction=/Document/x:CdtTrfTxInf"]] pacs8_txn : public fsp::seg_schema
+  class [[= "/Document/x:CdtTrfTxInf"]] pacs8_txn : public fsp::seg_schema
   {
   public:
     [[= "CdtTrfTxInf/PmtId/TxId"]]         str_t     txn_id;
@@ -438,38 +455,28 @@ Now the callback itself:
 ```cpp
 // my_hooks.hpp
 #pragma once
-#include "pipeline_hooks.hpp"
+#include "typed_semantic_check.hpp"
 #include "work.hpp"
 
-class my_hooks : public fsp::pipeline_hooks_crtp<my_hooks>
+class my_hooks : public fsp::typed_semantic_check<my_hooks, ^^fsp::work>
 {
 public:
   std::size_t documents_seen = 0;
   std::size_t segments_ok    = 0;
   std::size_t segments_error = 0;
+
+  bool on_type(const fsp::work::pacs8_txn& txn, fsp::segment_result& result, bool is_first, bool is_last)
+  {
+    const bool ok = txn.amount.value > 0; // your own business rule
+    if (ok) ++segments_ok;
+    else ++segments_error;
+    return ok;
+  }
 protected:
   void on_doc_open(std::size_t doc_ndx, const fsp::doc_dscr& dscr) override
   {
     ++documents_seen;
     log().info(fmt::format("Started document {}: '{}'", doc_ndx, dscr.path()));
-  }
-
-  bool on_semantic_check(const fsp::xml_segment& segment,
-                         fsp::segment_result&    result,
-                         bool                    is_first,
-                         bool                    is_last) override
-  {
-    auto       seg = fsp::materialize_variant<^^fsp::work>(result.seg_type(), result);
-    const bool ok  = std::visit([&]<typename T>(const T& s) -> bool
-    {
-      if constexpr (std::is_same_v<T, fsp::work::pacs8_txn>)
-        return s.amount > 0; // your own business rule
-      else return true;
-    }, seg);
-
-    if (ok) ++segments_ok;
-    else ++segments_error;
-    return ok;
   }
 
   void on_run_end(const fsp::doc_set_counter&           counters,
@@ -521,7 +528,7 @@ int main(int argc, const char* argv[])
   log_cfg.app_name  = "my_importer";
 
   auto cfg = fsp::importer_config{
-    .targets        = fsp::proc_data_of<^^fsp::work>(),
+    .targets        = fsp::proc_data_of<^^fsp::work>(), // built from work.hpp's fsp::work namespace -- see "Getting your data out" above
     .num_of_workers = 16,
     .log_config     = log_cfg,
     .program_name   = "my_importer",
@@ -540,6 +547,13 @@ int main(int argc, const char* argv[])
 }
 ```
 
+`cfg.targets` is the one field that actually ties this program to `work.hpp`: `fsp::proc_data_of<^^fsp::work>()`
+walks the `fsp::work` namespace at compile time (via C++26 reflection) and builds the full
+`proc_data` the importer needs to know how to cut/extract -- every other `importer_config` field
+is generic run configuration, unrelated to which XML elements you're after (see
+[Getting your data out](#getting-your-data-out) above for what goes into that namespace, and
+[`importer_config`](#importer_config) above for the rest of these fields).
+
 That's it: describe your target elements once (`work.hpp`), call `exec()`, check the result. Add
 a callback class only once you need to react to individual documents/segments while the run is
 still in progress.
@@ -551,7 +565,7 @@ this repository's own `pacs8`/`pacs8-cb` demo (`src/test/work.hpp`, `pacs8_cb.hp
 `pacs8-cb.cpp`), trimmed down to a single schema class for readability. It has all four pieces:
 
 1. the namespace that defines how the document is cut into segments,
-2. the class members that define what `on_semantic_check()` gets,
+2. the class members that define what `on_type()` gets,
 3. the callback itself, and
 4. the main program tying it all together, `#include`s included.
 
@@ -565,7 +579,7 @@ this repository's own `pacs8`/`pacs8-cb` demo (`src/test/work.hpp`, `pacs8_cb.hp
 namespace fsp::work
 {
   // Every element matching this XPath becomes one segment, processed as a pacs8_txn.
-  class [[= "transaction=/Document/x:FIToFICstmrCdtTrf/x:CdtTrfTxInf"]] pacs8_txn : public fsp::seg_schema
+  class [[= "/Document/x:FIToFICstmrCdtTrf/x:CdtTrfTxInf"]] pacs8_txn : public fsp::seg_schema
   {
   public:
     // clang-format off
@@ -580,59 +594,44 @@ namespace fsp::work
 
 (Simplified from the real `src/test/work.hpp`: `amount` there is a `validated_t<usr::bounded_amount_t<1,
 50000>>` -- a field type with its own built-in range check, applied automatically during
-materialization, before `on_semantic_check()` even runs, and reported through `result.errors()` on
-failure (see `result`'s own parameter description in
+extraction, before `on_type()` even runs, and reported through `result.errors()` on failure (see
+`result`'s own parameter description in
 [method purpose and parameter semantics](#method-purpose-and-parameter-semantics) above). Plain
 `amount_t` here keeps this example focused on the callback itself.)
 
-### 2. The class members: what `on_semantic_check()` gets
+### 2. The class members: what `on_type()` gets
 
 The four annotated members above (`txn_id`, `amount`, `currency`, `debtor_bic`) are exactly what
-ends up readable, fully typed, once you materialize a segment inside `on_semantic_check()` --
-see step 3 below, where `s.txn_id`/`s.amount` are used directly, with no string-based lookups.
+ends up readable, fully typed, in `on_type()`'s own `txn` parameter -- see step 3 below, where
+`txn.txn_id`/`txn.amount` are used directly, with no string-based lookups.
 
 ### 3. The callback
 
 ```cpp
 // my_pacs8_hooks.hpp
 #pragma once
-#include "pipeline_hooks.hpp"
+#include "typed_semantic_check.hpp"
 #include "work.hpp"
 
-class my_pacs8_hooks : public fsp::pipeline_hooks_crtp<my_pacs8_hooks>
+class my_pacs8_hooks : public fsp::typed_semantic_check<my_pacs8_hooks, ^^fsp::work>
 {
 public:
   std::size_t segments_ok    = 0;
   std::size_t segments_error = 0;
+
+  bool on_type(const fsp::work::pacs8_txn& txn, fsp::segment_result& result, bool is_first, bool is_last)
+  {
+    // Our own business rule: a transaction must carry a positive amount. amount_t stores its
+    // value scaled by 10^amount_scale (see parsing_util.hpp), as a plain .value member.
+    const bool valid = txn.amount.value > 0;
+    if (! valid) log().warn(fmt::format("txn {} failed validation: amount={}", txn.txn_id, txn.amount));
+    if (valid) ++segments_ok;
+    else ++segments_error;
+    return valid;
+  }
 protected:
   void on_doc_open(std::size_t doc_ndx, const fsp::doc_dscr& dscr) override
   { log().info(fmt::format("Started document {}: '{}'", doc_ndx, dscr.path())); }
-
-  bool on_semantic_check(const fsp::xml_segment& segment,
-                         fsp::segment_result&    result,
-                         bool                    is_first,
-                         bool                    is_last) override
-  {
-    // Turn the generic result back into our own fsp::work::pacs8_txn -- see "What
-    // fsp::materialize_variant() does" above.
-    auto       seg = fsp::materialize_variant<^^fsp::work>(result.seg_type(), result);
-    const bool ok  = std::visit([&]<typename T>(const T& s) -> bool
-    {
-      if constexpr (std::is_same_v<T, fsp::work::pacs8_txn>)
-      {
-        // Our own business rule: a transaction must carry a positive amount. amount_t stores its
-        // value scaled by 10^amount_scale (see parsing_util.hpp), as a plain .value member.
-        const bool valid = s.amount.value > 0;
-        if (! valid) log().warn(fmt::format("txn {} failed validation: amount={}", s.txn_id, s.amount));
-        return valid;
-      }
-      else return true;
-    }, seg);
-
-    if (ok) ++segments_ok;
-    else ++segments_error;
-    return ok;
-  }
 
   void on_run_end(const fsp::doc_set_counter&           counters,
                   const fsp::doc_set_dscr&              ds_dscr,
@@ -725,3 +724,31 @@ int main(int argc, const char* argv[])
 Compare this against the real, buildable version this is based on: `src/test/work.hpp` (the full
 schema, with a second class for the message header), `src/test/pacs8_cb.hpp`/`pacs8_cb.cpp` (the
 full callback, with every hook overridden), and `src/test/pacs8-cb.cpp` (the main program).
+
+## A note on the class hierarchy
+
+Everything above is written against `fsp::typed_semantic_check<YourClass, ^^YourNamespace>` --
+the base every example in this document actually derives from, and the one you should use too.
+It sits between two lower-level pieces you won't normally touch directly, but that are worth
+knowing about if you ever need to go past `on_type()`:
+
+- **`fsp::pipeline_hooks`** -- the actual base class every hook object is, underneath. Its
+  own extension point for "check this segment" is `on_semantic_check(const xml_segment& segment,
+segment_result& result, bool is_first, bool is_last)`: one single virtual call for *any* segment
+  type, given to you as the generic, name-indexed `segment_result` -- no per-schema-class dispatch
+  at all. `typed_semantic_check` implements `on_semantic_check()` once and turns it into the
+  `on_type()` overloads you actually write.
+- **`fsp::materialize_variant<^^YourNamespace>(result.seg_type(), result)`** -- the call
+  `typed_semantic_check`'s own `on_semantic_check()` makes internally to turn that generic
+  `segment_result` into a `std::variant` of your schema classes, then `std::visit()`s it straight
+  into the matching `on_type()` overload. `result.seg_type()` is the integer index (in
+  declaration order) of which schema class this segment is -- already recorded when the segment
+  was cut, not something you set yourself.
+
+You would only override `on_semantic_check()` directly (deriving from
+`fsp::pipeline_hooks_crtp<YourClass>` instead of `typed_semantic_check`) if per-schema-class
+dispatch genuinely doesn't fit what you need -- e.g. a single validation rule that reads generic,
+name-indexed values without caring which schema class they came from. For the overwhelming
+majority of callers, `on_type()` is simpler, is compile-time-checked for missing schema classes
+(see [method purpose and parameter semantics](#method-purpose-and-parameter-semantics) above), and
+is what every example in this document uses.

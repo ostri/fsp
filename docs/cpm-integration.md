@@ -80,14 +80,14 @@ full, working example this is adapted from:
 
 namespace my_ns::my_schema
 {
-  class [[= "header=/Document/GrpHdr"]] doc_header : public fsp::seg_schema
+  class [[= "/Document/GrpHdr"]] doc_header : public fsp::seg_schema
   {
   public:
     [[= "GrpHdr/MsgId"]]        str_t     msg_id;
     [[= "GrpHdr/NbOfTxs"]]      big_int_t txn_count;
   };
 
-  class [[= "transaction=/Document/CdtTrfTxInf"]] doc_txn : public fsp::seg_schema
+  class [[= "/Document/CdtTrfTxInf"]] doc_txn : public fsp::seg_schema
   {
   public:
     [[= "CdtTrfTxInf/PmtId/TxId"]] str_t    txn_id;

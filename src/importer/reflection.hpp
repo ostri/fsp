@@ -37,25 +37,6 @@ namespace fsp
   };
 
   /**
-   * @brief Parse a single "name=path" annotation string into a raw_attr. Used
-   * for class-level (target/segment) annotations, where the desired name
-   * (e.g. "header") legitimately differs from the C++ class identifier (e.g.
-   * pacs8_header). path is passed through as-is -- an embedded '@' in it is
-   * understood natively by xml_attr's own parsing (see xml_attr.hpp), nothing
-   * to do here. Class-level annotations have no cardinality of their own
-   * (is_opt/is_array default to false), unlike field_attr_of() below.
-   *
-   * @param s annotation payload, e.g. "header=/x:Document/.../GrpHdr"
-   * @return constexpr raw_attr with name/path filled in
-   */
-  consteval raw_attr parse_raw_attr(cstr_t s)
-  {
-    auto eq = s.find('=');
-    if (eq == cstr_t::npos) throw compile_error("annotation is missing '=' between name and path");
-    return raw_attr{.name = s.substr(0, eq), .path = s.substr(eq + 1)};
-  }
-
-  /**
    * @brief Read the first [[= "..."]] annotation attached to a reflected entity
    * (namespace, class or non-static data member) as its raw quoted text.
    *
@@ -66,7 +47,7 @@ namespace fsp
    * fails ("reflect_constant failed") for any annotation payload that carries a
    * pointer (which includes plain string-literal annotations, since they decay
    * to const char*). display_string_of() is the reliable path: it renders the
-   * annotation back as source text (e.g. [[=(const char*)"name=path"]]), and we
+   * annotation back as source text (e.g. [[=(const char*)"path"]]), and we
    * pull the quoted part out of that -- this works fine at compile time,
    * including inside static_assert, as long as the reflection range read by
    * `template for` is bound to a `static constexpr` variable.
@@ -75,7 +56,7 @@ namespace fsp
   consteval cstr_t annotation_text()
   {
     static constexpr auto anns = std::define_static_array(std::meta::annotations_of(Item));
-    static_assert(! anns.empty(), "reflected item is missing a [[= \"name=path\"]] annotation");
+    static_assert(! anns.empty(), "reflected item is missing a [[= \"path\"]] annotation");
     static constexpr auto disp_chars = std::define_static_array(std::meta::display_string_of(anns[0]));
     constexpr cstr_t      disp(disp_chars.data(), disp_chars.size());
     constexpr auto        first  = disp.find('"');
@@ -84,9 +65,18 @@ namespace fsp
     return disp.substr(first + 1, second - first - 1);
   }
 
+  /**
+   * @brief Read a class-level (target/segment) [[= "path"]] annotation into a raw_attr, taking
+   * the name from the class's own identifier (e.g. pacs8_txn) instead of requiring it spelled
+   * out again in the annotation string -- mirrors field_attr_of() below, which does the same for
+   * non-static data members. Class-level annotations have no cardinality of their own (is_opt/
+   * is_array default to false), unlike field_attr_of().
+   *
+   * @tparam Item reflection of the annotated class
+   */
   template <std::meta::info Item>
   consteval raw_attr attr_of()
-  { return parse_raw_attr(annotation_text<Item>()); }
+  { return raw_attr{.name = std::meta::identifier_of(Item), .path = annotation_text<Item>()}; }
 
   /** @brief True iff FieldType is a std::optional<X> -- an o_*-named schema field type. */
   template <typename>
@@ -224,8 +214,8 @@ namespace fsp
 
   /**
    * @brief Build the target (segment cut point) table for a namespace by
-   * collecting the [[= "name=path"]] annotation of every class declared in it
-   * that derives from Base, in declaration order.
+   * collecting the [[= "path"]] annotation of every class declared in it
+   * that derives from Base, in declaration order (see attr_of()).
    *
    * @tparam Namespace reflection of the namespace (e.g. ^^work)
    * @tparam Base      marker base class identifying segment-schema classes
