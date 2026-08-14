@@ -8,6 +8,13 @@ void pacs8_cb::on_run_start(const fsp::doc_set_dscr& ds_dscr)
   // No need to chain to a base body here (unlike the old on_run_start()) -- pipeline_hooks'
   // own final on_run_safe_start() already stamped run_start_/log_ before calling this override.
   log().info(fmt::format("[pacs8_cb] {:12}: ds_dscr.size()={}", "on_run_start", ds_dscr.size()));
+
+  // usr::bic_code_t::init() must run exactly once, on the main thread, strictly before any
+  // worker thread starts materializing pacs8_txn::debtor_bic/creditor_bic (validated_t<bic_code_t>,
+  // see work.hpp) -- on_run_start() is guaranteed to run first (see pipeline_hooks.hpp's own
+  // class comment), so this is the right place, not e.g. main() itself, which would need to know
+  // about a fsp::work implementation detail it otherwise has no reason to touch.
+  usr::bic_code_t::init(fsp::work::known_agent_bics, ';');
 }
 
 void pacs8_cb::on_run_end(const fsp::doc_set_counter&           counters,
@@ -120,7 +127,9 @@ bool pacs8_cb::on_type(const fsp::work::pacs8_txn& txn, fsp::segment_result& res
   const bool       ok = (result.seg_id() % 2 == 0);
   const fsp::str_t iban_str =
     txn.debtor_iban ? txn.debtor_iban->value : fmt::format("<invalid: {}>", result.errors()[txn.debtor_iban.error()].to_string());
-  log().debug(fmt::format("[pacs8_cb] {:12}: seg_id={} doc_ndx={} is_first={} is_last={} ok={} txn: txn_id='{}' debtor_iban={}",
+  const fsp::str_t bic_str =
+    txn.debtor_bic ? txn.debtor_bic->value : fmt::format("<invalid: {}>", result.errors()[txn.debtor_bic.error()].to_string());
+  log().debug(fmt::format("[pacs8_cb] {:12}: seg_id={} doc_ndx={} is_first={} is_last={} ok={} txn: txn_id='{}' debtor_iban={} debtor_bic={}",
                           "on_type",
                           result.seg_id(),
                           result.doc_ndx(),
@@ -128,6 +137,7 @@ bool pacs8_cb::on_type(const fsp::work::pacs8_txn& txn, fsp::segment_result& res
                           is_last,
                           ok,
                           txn.txn_id,
-                          iban_str));
+                          iban_str,
+                          bic_str));
   return ok;
 }

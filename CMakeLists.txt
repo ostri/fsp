@@ -539,6 +539,7 @@ if(BUILD_TESTING AND FSP_BUILD_TESTS)
         ${PROJECT_SOURCE_DIR}/src/test/test_cb_exporter.cpp
         ${PROJECT_SOURCE_DIR}/src/test/test_exporter.cpp
         ${PROJECT_SOURCE_DIR}/src/test/test_pipeline_stages.cpp
+        ${PROJECT_SOURCE_DIR}/src/test/test_value_set_t.cpp
         ${PROJECT_SOURCE_DIR}/src/common/xercesc_helpers/x_str.cpp
         ${PROJECT_SOURCE_DIR}/src/common/xercesc_helpers/xerces_mgr.cpp
         ${PROJECT_SOURCE_DIR}/src/common/mmap/mmap_file.cpp
