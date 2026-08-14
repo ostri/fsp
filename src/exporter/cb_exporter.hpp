@@ -13,7 +13,7 @@
  * cb_exporter method for its own state, since no two threads ever touch the same clone.
  *
  * Every method stays virtual (including the per-transaction prepare_transaction()): this is not
- * the same ultra-hot-path concern as pipeline_hooks::on_semantic_check(), and pipeline_hooks_crtp's own
+ * the same ultra-hot-path concern as pipeline_hooks::on_seg_sem_check(), and pipeline_hooks_crtp's own
  * doc comment already explains why a "detect override, skip the vtable call" optimization
  * doesn't even work under the Itanium ABI -- so no such attempt is made here either.
  */

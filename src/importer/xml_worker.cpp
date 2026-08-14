@@ -462,13 +462,16 @@ namespace fsp
   {
     xml_segment& seg = pool_.segment_at(idx);
 
-    // Bail out: the document was meanwhile validated as invalid -> skip the SAX extraction.
-    // Still goes through record_nak() below (as a failure) so idx is eventually released the
-    // same way every other slot is -- there is no separate release path here.
-    if (ds_dscr_[seg.doc_ndx()].status() == doc_status::validation_failed)
+    // Bail out: the document was meanwhile found invalid (syntax or validation) -> skip the SAX
+    // extraction. Still goes through record_nak() below (as a failure) so idx is eventually
+    // released the same way every other slot is -- there is no separate release path here.
+    // doc_dscr::failed() (not status().status(), which is ALSO three_state::unknown -- not
+    // three_state::invalid -- for a document nothing has reported on yet) is the correct
+    // "known bad" predicate here.
+    if (ds_dscr_[seg.doc_ndx()].failed())
     {
       if (log_debug_) log_.debug(fmt::format("Segment {} (doc {}): document invalid, skipped processing.", seg.id(), seg.doc_ndx()));
-      pipeline_.record_segment_failed(static_cast<std::size_t>(seg.doc_ndx()), seg.id());
+      pipeline_.record_segment_failed(static_cast<std::size_t>(seg.doc_ndx()), seg.id(), hooks_);
       record_nak(
         idx,
         seg,
@@ -486,13 +489,13 @@ namespace fsp
       // before *res is moved into record_ok()/record_nak() below.
       pool_.result_at(idx) = *res;
       if (semantically_ok) record_ok(idx, seg, std::move(*res));
-      else record_nak(idx, seg, std::move(*res), error_info::semantic("on_semantic_check", "segment failed semantic validation"));
+      else record_nak(idx, seg, std::move(*res), error_info::semantic("on_seg_sem_check", "segment failed semantic validation"));
     }
     else
     {
       // res holds an error_info here, not a segment_result -- *res would be UB (dereferencing a
       // disengaged std::expected). Record the failure with the id-only constructor instead.
-      pipeline_.record_segment_failed(static_cast<std::size_t>(seg.doc_ndx()), seg.id());
+      pipeline_.record_segment_failed(static_cast<std::size_t>(seg.doc_ndx()), seg.id(), hooks_);
       record_nak(idx, seg, segment_result{seg.id(), seg.subtree_type(), seg.doc_ndx()}, res.error());
     }
     return seg.doc_ndx();

@@ -18,18 +18,38 @@
 namespace fsp
 {
   /**
+   * @brief Minimal polymorphic base for a cb's own doc-level, opaque, cross-thread state (e.g.
+   * ct-in's "header says N transactions, sum X" vs. "actually saw M transactions, sum Y"
+   * aggregation) -- see pipeline_hooks::make_doc_data(). fsp only owns the slot's lifetime (one
+   * shared_ptr<cb_data_root> per document, in pipeline::doc_data_) -- the concrete type and ALL
+   * internal synchronization (atomics/mutex) inside it is entirely the cb's own responsibility.
+   * fsp itself never reads or writes anything through this base beyond the vtable/destructor.
+   */
+  struct cb_data_root
+  {
+    cb_data_root()                               = default;
+    virtual ~cb_data_root()                      = default;
+    cb_data_root(const cb_data_root&)            = default;
+    cb_data_root& operator=(const cb_data_root&) = default;
+    cb_data_root(cb_data_root&&)                 = default;
+    cb_data_root& operator=(cb_data_root&&)      = default;
+  };
+
+  /**
    * @brief Lifecycle/observability hooks a caller of process_files() can plug into, without
    * touching pipeline/pipeline_worker/xml_worker themselves.
    *
    * One clone (see clone()) is made per worker thread -- each clone is exclusively owned and
    * called by that one thread for the thread's whole lifetime, so on_doc_open/close and
-   * on_semantic_check never need any locking around a developer's own state. on_run_safe_start()/
+   * on_seg_sem_check never need any locking around a developer's own state. on_run_safe_start()/
    * on_run_safe_end() are the only two hooks called from the main thread, on the original instance
    * the caller passed in; on_run_safe_end() receives every worker clone so the developer can
    * aggregate their own per-thread state however they like (sum, max, top-N, ...) in one place.
    *
-   * All hook bodies default to a no-op (or, for on_semantic_check, a sensible default verdict)
-   * so a derived class only needs to override what it actually cares about.
+   * All hook bodies default to a no-op (or, for on_seg_sem_check/on_doc_sem_check/on_doc_close, a
+   * sensible default verdict) so a derived class only needs to override what it actually cares
+   * about -- make_doc_data() is the one exception, see its own doc comment for why it is pure
+   * virtual instead.
    *
    * EXPERIMENTAL (see pipeline_hooks.hpp's own git history/PR discussion before relying on this
    * shape long-term): every hook pipeline/pipeline_worker/xml_worker actually call is now the
@@ -98,6 +118,26 @@ namespace fsp
     [[nodiscard]] virtual std::uint64_t get_doc_id([[maybe_unused]] std::size_t node_hint) { return next_doc_id_++; }
 
     /**
+     * @brief Main thread, once per document, called from pipeline::add_documents() right after
+     * that document's doc_dscr is added to doc_set_dscr -- on the ORIGINAL hooks instance the
+     * caller passed to process_files() (not a per-worker clone), strictly before any worker
+     * thread starts. Returns a caller-owned, opaque, doc-level aggregate (e.g. ct-in's own
+     * "header says N transactions, sum X" vs. "actually saw M transactions, sum Y" accumulator) --
+     * fsp stores the returned shared_ptr (one per document, doc_ndx-indexed) and exposes it back
+     * to every worker thread via pipeline::doc_data(doc_ndx), but never itself reads or writes
+     * anything through it beyond the base cb_data_root's own vtable/destructor: ALL internal
+     * synchronization (atomics/mutex) inside whatever concrete type this returns is entirely the
+     * cb's own responsibility, same as on_doc_sem_check() reading it back later from any worker
+     * thread. Pure virtual, deliberately NOT defaulted to returning nullptr: a cb author must
+     * explicitly decide whether doc-level semantics matter to them (returning nullptr is a valid,
+     * explicit "no" -- on_doc_sem_check()'s default body never dereferences its doc_data
+     * parameter), rather than silently getting nullptr from forgetting to override this.
+     * @param doc_ndx the document's index -- stable for the whole run, same indexing as every
+     * other doc_ndx-keyed accessor (ds_dscr()[doc_ndx], pipeline::doc_data(doc_ndx), ...).
+     */
+    [[nodiscard]] virtual std::shared_ptr<cb_data_root> make_doc_data(std::size_t doc_ndx) const = 0;
+
+    /**
      * @brief The pipeline_worker thread itself, once at start and once at end of its lifetime.
      * Final -- stamps worker_start_ and log_ unconditionally, then dispatches to
      * on_wrk_start() (see on_run_safe_start()'s own doc comment).
@@ -110,11 +150,53 @@ namespace fsp
     }
     virtual void on_wrk_safe_end(int worker_id, cstr_t thread_name) final { on_wrk_end(worker_id, thread_name); }
 
-    /** @brief The cutter thread for this specific document (cutting just started/just finished). Final -- see on_run_safe_start()'s own
-     * doc comment. */
+    /** @brief The cutter thread for this specific document (cutting just started / cutting just finished, NOT the whole document's final
+     * verdict -- see on_doc_safe_close() below for that). Final -- see on_run_safe_start()'s own doc comment. */
     virtual void on_doc_safe_open(std::size_t doc_ndx, const doc_dscr& dscr) final { on_doc_open(doc_ndx, dscr); }
-    virtual void on_doc_safe_close(std::size_t doc_ndx, doc_status status, const doc_dscr& dscr) final
-    { on_doc_close(doc_ndx, status, dscr); }
+    /**
+     * @brief Fires right after doc_cutter::cut() returns for this document -- BEFORE P has
+     * necessarily processed any of its segments and before a separate V pass has necessarily run.
+     * Renamed from the old on_doc_close() (which this exact firing point used to be called,
+     * misleadingly): see on_doc_safe_sem_check()/on_doc_safe_close() below for the hooks that fire
+     * once more is actually known. Final -- see on_run_safe_start()'s own doc comment.
+     */
+    virtual void on_doc_safe_cutting_finished(std::size_t doc_ndx, const doc_dscr& dscr) final { on_doc_cutting_finished(doc_ndx, dscr); }
+
+    /**
+     * @brief Fires once every segment of doc_ndx has been processed (fsp-core's existing
+     * cut_finished && total>=expected_total condition, see doc_counters::maybe_seg_processing_complete()) --
+     * deliberately independent of whether syntax/validation are known yet (see doc_status_t's own
+     * class doc comment in doc_dscr.hpp). doc_data is whatever this SAME hooks instance's
+     * make_doc_data(doc_ndx) returned (never null unless the cb's own make_doc_data() returned
+     * null itself) -- a cb's override typically dynamic_casts it to its own concrete type to read
+     * whatever per-segment hooks (on_seg_sem_safe_check()) already accumulated into it. Returns
+     * the document's own doc-level semantic verdict (true = ok); the fsp-core worker that calls
+     * this immediately feeds the returned bool into doc_status_t::set_semantic() (see
+     * doc_dscr.hpp), which may also make that SAME call the one responsible for on_doc_safe_close()
+     * below (see doc_status_t::try_start_closing()). Called from whichever thread's
+     * record_doc_close()/end_segment() call happens to be the one that satisfies the completion
+     * condition -- exactly once per document. Final -- see on_run_safe_start()'s own doc comment.
+     */
+    virtual bool on_doc_safe_sem_check(std::size_t doc_ndx, cb_data_root* doc_data) final { return on_doc_sem_check(doc_ndx, doc_data); }
+
+    /**
+     * @brief Fires once syntax+validation+doc-level-semantics are ALL known for doc_ndx (the
+     * renamed old on_doc_close(), now firing at the point its name always implied instead of
+     * right after cutting -- see on_doc_safe_cutting_finished() above for that). verdict is the
+     * document's own live doc_status_t (see doc_dscr.hpp's own class doc comment) -- by the time
+     * this fires, verdict.is_finished() is guaranteed true, so verdict.status()/verdict.ok() give
+     * the final aggregate, and verdict.syntax_status()/valid_status()/semantic_status() give the
+     * individual partial verdicts if a cb needs to know WHICH fact specifically failed. err is
+     * fsp-core's own error_info for a syntax/validation failure (its default-constructed
+     * processor_error::success state means "no error" -- see error_info.hpp). Returns the FINAL
+     * verdict for this document (default: verdict.ok()) -- e.g. an importer deciding whether to
+     * move a document to a done-path or an err-path. Final -- see on_run_safe_start()'s own doc
+     * comment. Whichever of C/V/the on_doc_safe_sem_check() orchestrator won
+     * doc_status_t::try_start_closing() is the one, and only one, thread that ever calls this for
+     * a given document.
+     */
+    virtual bool on_doc_safe_close(std::size_t doc_ndx, const doc_status_t& verdict, const error_info& err, const doc_dscr& dscr) final
+    { return on_doc_close(doc_ndx, verdict, err, dscr); }
 
     /**
      * @brief A P-role thread just extracted values from one segment. is_first/is_last mark the
@@ -131,11 +213,11 @@ namespace fsp
      * pipeline_hooks_crtp's doc comment for why the earlier "detect override, skip the call"
      * idea was dropped).
      */
-    virtual bool on_semantic_safe_check(const xml_segment& segment, segment_result& result, bool is_first, bool is_last) final
-    { return on_semantic_check(segment, result, is_first, is_last); }
+    virtual bool on_seg_sem_safe_check(const xml_segment& segment, segment_result& result, bool is_first, bool is_last) final
+    { return on_seg_sem_check(segment, result, is_first, is_last); }
 
     /**
-     * @brief A P-role thread hands off a batch of semantically OK segments (on_semantic_check()
+     * @brief A P-role thread hands off a batch of semantically OK segments (on_seg_sem_check()
      * returned true) for external storage (file/db/message queue). Called from the one worker
      * thread that accumulated indices -- either once importer_config::ok_block_flush_size worth
      * of segments have piled up, or once, with whatever remains, when that thread's loop ends
@@ -157,7 +239,7 @@ namespace fsp
 
     /**
      * @brief Same as on_block_safe_store(), for the batch of semantically FAILED segments
-     * (on_semantic_check() returned false) -- see importer_config::nak_block_flush_size. errors holds
+     * (on_seg_sem_check() returned false) -- see importer_config::nak_block_flush_size. errors holds
      * one entry per index, same order, same length as indices (errors[i] describes why
      * indices[i] failed). Final -- see on_run_safe_start()'s own doc comment.
      */
@@ -176,7 +258,8 @@ namespace fsp
      */
     [[nodiscard]] const logger::Logger& log() const
     {
-      assert(log_ != nullptr && "pipeline_hooks::log() called before on_run_safe_start()/on_wrk_safe_start() -- see their own doc comments");
+      assert(log_ != nullptr &&
+             "pipeline_hooks::log() called before on_run_safe_start()/on_wrk_safe_start() -- see their own doc comments");
       return *log_;
     }
 
@@ -194,21 +277,34 @@ namespace fsp
     virtual void on_wrk_end([[maybe_unused]] int worker_id, [[maybe_unused]] cstr_t thread_name) { }
     /// @brief Override point for on_doc_safe_open() -- see the class's own doc comment. log() is valid inside this call.
     virtual void on_doc_open([[maybe_unused]] std::size_t doc_ndx, [[maybe_unused]] const doc_dscr& dscr) { }
-    /// @brief Override point for on_doc_safe_close() -- see the class's own doc comment. log() is valid inside this call.
-    virtual void on_doc_close([[maybe_unused]] std::size_t     doc_ndx,
-                              [[maybe_unused]] doc_status      status,
-                              [[maybe_unused]] const doc_dscr& dscr)
-    {
-    }
+    /// @brief Override point for on_doc_safe_cutting_finished() -- see the class's own doc comment. log() is valid inside this call.
+    virtual void on_doc_cutting_finished([[maybe_unused]] std::size_t doc_ndx, [[maybe_unused]] const doc_dscr& dscr) { }
     /**
-     * @brief Override point for on_semantic_safe_check() -- see the class's own doc comment. log() is
+     * @brief Override point for on_doc_safe_sem_check() -- see the class's own doc comment. log() is
+     * valid inside this call. Default: no doc-level semantic opinion, always ok.
+     */
+    virtual bool on_doc_sem_check([[maybe_unused]] std::size_t doc_ndx, [[maybe_unused]] cb_data_root* doc_data) { return true; }
+    /**
+     * @brief Override point for on_doc_safe_close() -- see the class's own doc comment. log() is
+     * valid inside this call. Default: the final verdict is exactly verdict.ok() (syntax AND
+     * validation AND semantic all passed) -- a derived class overrides this to act on the
+     * decision (e.g. move a document to a done-path/err-path) while keeping (or refining) that
+     * same default logic.
+     */
+    virtual bool on_doc_close([[maybe_unused]] std::size_t       doc_ndx,
+                              const doc_status_t&                verdict,
+                              [[maybe_unused]] const error_info& err,
+                              [[maybe_unused]] const doc_dscr&   dscr)
+    { return verdict.ok(); }
+    /**
+     * @brief Override point for on_seg_sem_safe_check() -- see the class's own doc comment. log() is
      * valid inside this call. Default mirrors technical completeness (result.values().complete()),
      * i.e. semantic == technical until a derived class adds real business logic.
      */
-    virtual bool on_semantic_check([[maybe_unused]] const xml_segment& segment,
-                                   segment_result&                     result,
-                                   [[maybe_unused]] bool               is_first,
-                                   [[maybe_unused]] bool               is_last)
+    virtual bool on_seg_sem_check([[maybe_unused]] const xml_segment& segment,
+                                  segment_result&                     result,
+                                  [[maybe_unused]] bool               is_first,
+                                  [[maybe_unused]] bool               is_last)
     { return result.values().complete(); }
     /// @brief Override point for on_block_safe_store() -- see the class's own doc comment. log() is valid inside this call.
     virtual void on_block_store([[maybe_unused]] std::span<const std::size_t> indices,
@@ -257,14 +353,14 @@ namespace fsp
    * correctly with zero extra code.
    *
    * @note An earlier version of this class also tried to detect, at construction time, whether
-   * Derived had overridden on_semantic_check (via comparing &Derived::on_semantic_check
-   * != &pipeline_hooks::on_semantic_check), caching the result in a bool so hot call sites
+   * Derived had overridden on_seg_sem_check (via comparing &Derived::on_seg_sem_check
+   * != &pipeline_hooks::on_seg_sem_check), caching the result in a bool so hot call sites
    * could skip the virtual call entirely when it hadn't been overridden. Verified by direct
    * testing that this does NOT work: pointer-to-virtual-member-function values are encoded as a
    * vtable slot index under the Itanium ABI (GCC/Clang on Linux), and overriding a virtual
    * function never changes its vtable slot -- so &Derived::f and &Base::f compare EQUAL
    * regardless of whether Derived actually overrides f. The comparison always reported "not
-   * overridden", silently skipping on_semantic_check for every hook, including ones that did
+   * overridden", silently skipping on_seg_sem_check for every hook, including ones that did
    * override it. Reverted to a plain, always-invoked virtual call.
    * @tparam Derived The developer's own concrete hook class (Curiously Recurring Template
    * Pattern) -- must be copy-constructible (clone() copies *this via Derived's own copy ctor).
@@ -287,10 +383,14 @@ namespace fsp
 
   /**
    * @brief The no-op hook set used when a caller doesn't supply their own -- keeps
-   * process_files() usable without hooks at all.
+   * process_files() usable without hooks at all. Doesn't care about doc-level semantics, so
+   * make_doc_data() explicitly opts out (returns nullptr) -- see make_doc_data()'s own doc
+   * comment on why every concrete hooks class must make that choice explicitly.
    */
   class no_op_hooks : public pipeline_hooks_crtp<no_op_hooks>
   {
+  public:
+    [[nodiscard]] std::shared_ptr<cb_data_root> make_doc_data(std::size_t /*doc_ndx*/) const override { return nullptr; }
   };
 
   /**

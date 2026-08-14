@@ -35,8 +35,10 @@ namespace fsp
 
   void pipeline_worker::do_cut(std::size_t doc_ndx)
   {
-    // Requirement: a document already known to be invalid is never cut at all.
-    if (pipeline_.ds_dscr()[doc_ndx].status() == doc_status::validation_failed)
+    // Requirement: a document already known to be invalid is never cut at all. doc_dscr::failed()
+    // (not status().status(), which is ALSO three_state::unknown -- not three_state::invalid --
+    // for a document nothing has reported on yet) is the correct "known bad" predicate here.
+    if (pipeline_.ds_dscr()[doc_ndx].failed())
     {
       if (log_info_) log_.info(fmt::format("Doc {}: already invalid -- cut skipped.", doc_ndx));
       pipeline_.notify_cut_done();
@@ -44,17 +46,19 @@ namespace fsp
     }
     pipeline_.record_doc_open(doc_ndx);
     hooks_->on_doc_safe_open(doc_ndx, pipeline_.ds_dscr()[doc_ndx]);
-    if (auto res = cutter_->cut(doc_ndx); ! res)
-    {
-      // A malformed document is a per-document failure, not a fatal one: mark it invalid so
-      // any already-cut segments of this document get discarded by P, then keep going.
-      pipeline_.report_validation_result(doc_ndx, doc_status::validation_failed, res.error());
-    }
-    else
-    {
-      pipeline_.record_doc_close(doc_ndx, cutter_->segments_found());
-    }
-    hooks_->on_doc_safe_close(doc_ndx, pipeline_.ds_dscr()[doc_ndx].status(), pipeline_.ds_dscr()[doc_ndx]);
+    auto res = cutter_->cut(doc_ndx);
+    // A malformed document is a per-document failure, not a fatal one: mark it invalid so any
+    // already-cut segments of this document get discarded by P, then keep going. May itself
+    // dispatch hooks.on_doc_safe_close() right here, if this call wins doc_status_t::try_start_closing().
+    pipeline_.report_syntax_result(doc_ndx, res.has_value(), *hooks_, res.has_value() ? error_info{} : res.error());
+    // Still record_doc_close() with whatever segments WERE cut before a failure (Handler's own
+    // counter_ isn't reset on a mid-cut failure, see doc_cutter.hpp) -- those segments are already
+    // pushed to the pool and will be discarded by xml_worker::process_one() (doc_dscr::failed() now
+    // true), but the "all segments processed" completion (on_doc_sem_check(), and via it possibly
+    // on_doc_close()) still needs cut_finished_ to become true for THIS document, or that hook
+    // would never fire for a syntactically-invalid document.
+    pipeline_.record_doc_close(doc_ndx, cutter_->segments_found(), *hooks_);
+    hooks_->on_doc_safe_cutting_finished(doc_ndx, pipeline_.ds_dscr()[doc_ndx]);
     pipeline_.notify_cut_done();
   }
 
@@ -67,11 +71,17 @@ namespace fsp
       pipeline_.report_fatal_error(res.error());
       return;
     }
-    if (*res) pipeline_.report_validation_result(doc_ndx, doc_status::validation_ok);
+    if (*res) { pipeline_.report_validation_result(doc_ndx, true, *hooks_); }
     else
-      pipeline_.report_validation_result(doc_ndx,
-                                         doc_status::validation_failed,
-                                         error_info{processor_error::xsd_validation_failed, validator_->last_error_message(), "", 0});
+    {
+      // Both Handler::error()/fatalError() and validation_error_handler::error()/fatalError()
+      // throw the SAME xercesc::SAXParseException type -- last_error_source() (set by WHICH
+      // callback actually fired) is what distinguishes a schema violation from a well-formedness
+      // one here, see point 15/16 of the design discussion this implements.
+      const auto err_code = validator_->last_error_source() == sax_error_source::well_formed ? processor_error::parse_failed
+                                                                                             : processor_error::xsd_validation_failed;
+      pipeline_.report_validation_result(doc_ndx, false, *hooks_, error_info{err_code, validator_->last_error_message(), "", 0});
+    }
   }
 
   void pipeline_worker::operator()(const std::stop_token& st, int worker_id)

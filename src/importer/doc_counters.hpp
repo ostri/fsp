@@ -31,7 +31,13 @@ namespace fsp
     // Called once by the cutter thread when it finishes cutting this document, reporting how
     // many segments it found in total. Returns true if this call is the one that completes the
     // document (i.e. every one of its segments had already been processed by the time cutting
-    // finished) -- see end_segment() for the symmetric, more common case.
+    // finished) -- see end_segment() for the symmetric, more common case. This is the ORIGINAL,
+    // single-stage "all segments processed" completion condition (cut_finished && total >=
+    // expected_total) -- independent of syntax/validation/semantic verdicts, which now live
+    // entirely in doc_dscr's own doc_status_t (see doc_dscr.hpp). Whichever call wins is
+    // responsible for invoking hooks.on_doc_sem_check() and feeding its bool result into
+    // doc_status_t::set_semantic() -- doc_counters itself has no opinion on syntax/validation/
+    // semantics, only on "have all segments been accounted for".
     bool record_doc_close(std::size_t total_segments) noexcept;
 
     // Called by whichever P-role thread is about to process one segment of this document,
@@ -59,11 +65,18 @@ namespace fsp
     [[nodiscard]] std::size_t error() const noexcept;
     [[nodiscard]] std::size_t total() const noexcept; // ok() + error(), never stored separately
     [[nodiscard]] bool        cut_finished() const noexcept;
-    // Reports the outcome of a SEPARATE V pass -- sticky: once reported failed, stays failed
-    // regardless of call order/multiplicity. Defaults to "not failed" when V never runs
-    // separately for this document.
-    void               record_validation_result(bool passed) noexcept;
-    [[nodiscard]] bool validation_failed() const noexcept;
+
+    // Segment-processing completion: the ORIGINAL, single, lock-free CAS latch (cut_finished &&
+    // total>=expected_total) -- whichever of record_doc_close()/end_segment() satisfies this
+    // condition wins the CAS on last_seg_logged_ and is the one that must go on to call
+    // hooks.on_doc_sem_check() and feed its bool result into doc_dscr's own
+    // doc_status_t::set_semantic() (see doc_dscr.hpp) -- deliberately independent of
+    // syntax/validation, which now live entirely in doc_status_t and are reported via
+    // doc_dscr::set_syntax_result()/set_validation_result() instead. This is the ONLY completion
+    // condition doc_counters itself is responsible for; the "who calls hooks.on_doc_close()"
+    // decision is doc_status_t::try_start_closing()'s job alone (see doc_dscr.hpp's own class doc
+    // comment on why that single mutex-protected latch replaced this class's former second stage).
+    [[nodiscard]] bool maybe_seg_processing_complete() noexcept;
 
     [[nodiscard]] std::chrono::milliseconds processing_doc() const noexcept;  // doc open -> doc close
     [[nodiscard]] std::chrono::milliseconds processing_segs() const noexcept; // first segment -> last segment
@@ -78,27 +91,22 @@ namespace fsp
     [[nodiscard]] str_t dump(int offs = 0) const;
   private:
     using clock = std::chrono::steady_clock;
-    // Shared completion check used by both record_doc_close() and end_segment(), since either
-    // one can be the call that satisfies the last remaining condition -- whichever happens later
-    // wins the CAS on last_seg_logged_ and is the one that reports completion.
-    bool maybe_complete() noexcept;
 
     std::atomic<std::size_t> ok_{0};
     std::atomic<std::size_t> error_{0};
-    std::atomic<std::size_t> expected_total_{0};        // set once, by record_doc_close()
-    std::atomic<bool>        cut_finished_{false};      // set once, by record_doc_close()
-    std::atomic<bool>        first_seg_logged_{false};  // guards first_seg_ against a double write
-    std::atomic<bool>        last_seg_logged_{false};   // guards last_seg_ / completion against firing twice
-    std::atomic<bool>        validation_failed_{false}; // set by record_validation_result(false)
-    clock::time_point        doc_open_;
-    clock::time_point        doc_close_;
-    clock::time_point        first_seg_;
-    clock::time_point        last_seg_;
+    std::atomic<std::size_t> expected_total_{0};       // set once, by record_doc_close()
+    std::atomic<bool>        cut_finished_{false};     // set once, by record_doc_close()
+    std::atomic<bool>        first_seg_logged_{false}; // guards first_seg_ against a double write
+    std::atomic<bool> last_seg_logged_{false}; // guards last_seg_ / completion against firing twice -- see maybe_seg_processing_complete()
+    clock::time_point doc_open_;
+    clock::time_point doc_close_;
+    clock::time_point first_seg_;
+    clock::time_point last_seg_;
   };
 
   inline void doc_counters::record_doc_open() noexcept { doc_open_ = clock::now(); }
 
-  inline bool doc_counters::maybe_complete() noexcept
+  inline bool doc_counters::maybe_seg_processing_complete() noexcept
   {
     if (! cut_finished_.load(std::memory_order_acquire)) return false;
     if (total() < expected_total_.load(std::memory_order_acquire)) return false;
@@ -111,7 +119,7 @@ namespace fsp
     doc_close_ = clock::now();
     expected_total_.store(total_segments, std::memory_order_relaxed);
     cut_finished_.store(true, std::memory_order_release);
-    bool completed = maybe_complete();
+    const bool completed = maybe_seg_processing_complete();
     if (completed) last_seg_ = clock::now();
     return completed;
   }
@@ -133,7 +141,7 @@ namespace fsp
     if (semantically_ok) ok_.fetch_add(1, std::memory_order_relaxed);
     else error_.fetch_add(1, std::memory_order_relaxed);
 
-    bool completed = maybe_complete();
+    const bool completed = maybe_seg_processing_complete();
     if (completed) last_seg_ = clock::now();
     return completed;
   }
@@ -142,12 +150,6 @@ namespace fsp
   inline std::size_t doc_counters::error() const noexcept { return error_.load(std::memory_order_relaxed); }
   inline std::size_t doc_counters::total() const noexcept { return ok() + error(); }
   inline bool        doc_counters::cut_finished() const noexcept { return cut_finished_.load(std::memory_order_acquire); }
-
-  inline void doc_counters::record_validation_result(bool passed) noexcept
-  {
-    if (! passed) validation_failed_.store(true, std::memory_order_release);
-  }
-  inline bool doc_counters::validation_failed() const noexcept { return validation_failed_.load(std::memory_order_acquire); }
 
   // doc_close_/last_seg_ are only ever written inside record_doc_close()/the completion branch
   // of end_segment() -- for a document that never completes (e.g. cutting fails partway

@@ -2,6 +2,7 @@
 
 #include "error_info.hpp"
 #include "doc_set_dscr.hpp"
+#include "handler.hpp" // IWYU pragma: keep -- sax_error_source, shared with Handler (see its own doc comment)
 #include <logger/logger.hpp>
 #include "xpath_helpers.hpp"
 #include <xercesc/sax2/SAX2XMLReader.hpp>
@@ -25,24 +26,39 @@ namespace fsp
     void error(const xercesc::SAXParseException& e) override
     {
       record(e);
-      throw e; // NOLINT(hicpp-exception-baseclass) -- caught by type in doc_validator::validate()
+      last_error_source_ = sax_error_source::validity; // schema/validity constraint violation
+      throw e;                                         // NOLINT(hicpp-exception-baseclass) -- caught by type in doc_validator::validate()
     }
     void fatalError(const xercesc::SAXParseException& e) override
     {
       record(e);
-      throw e; // NOLINT(hicpp-exception-baseclass)
+      last_error_source_ = sax_error_source::well_formed; // well-formedness violation
+      throw e;                                            // NOLINT(hicpp-exception-baseclass)
     }
     void resetErrors() override
     {
       has_error_ = false;
       message_.clear();
+      last_error_source_ = sax_error_source::none;
     }
-    [[nodiscard]] bool               has_error() const noexcept { return has_error_; }
-    [[nodiscard]] const str_t&       message() const noexcept { return message_; }
+    [[nodiscard]] bool         has_error() const noexcept { return has_error_; }
+    [[nodiscard]] const str_t& message() const noexcept { return message_; }
+    // Which of error()/fatalError() most recently reported a problem -- read by
+    // doc_validator::validate() from its catch block, after the fact (see Handler's own
+    // identical sax_error_source, shared type -- point 15/16 of the design discussion this
+    // implements).
+    [[nodiscard]] sax_error_source last_error_source() const noexcept { return last_error_source_; }
+    // Called by doc_validator::validate() when parser_->parse() throws xercesc::XMLException
+    // directly (a lower-level parse failure that never reaches error()/fatalError() at all, so
+    // last_error_source_ would otherwise stay 'none') -- always well-formedness, not a validity
+    // constraint: a document xercesc can't even parse can't have gotten far enough to be judged
+    // against the schema.
+    void set_well_formed_error() noexcept { last_error_source_ = sax_error_source::well_formed; }
   private:
-    void        record(const xercesc::SAXParseException& e);
-    bool        has_error_ = false;
-    str_t       message_;
+    void             record(const xercesc::SAXParseException& e);
+    bool             has_error_ = false;
+    str_t            message_;
+    sax_error_source last_error_source_ = sax_error_source::none;
   };
 
   // Narrow "V toolkit": owns one grammar pool + one SGXMLScanner-based reader, bound to a
@@ -59,8 +75,12 @@ namespace fsp
     // Validates ONE document. Returns true/false (valid/invalid) on success, or an error_info
     // for infrastructure failures (e.g. the XSD itself could not be loaded/compiled) -- that
     // case is fatal for the whole run, distinct from an ordinary "this document is invalid".
-    std::expected<bool, error_info>  validate(std::size_t doc_ndx);
-    [[nodiscard]] const str_t&       last_error_message() const noexcept { return err_handler_.message(); }
+    std::expected<bool, error_info> validate(std::size_t doc_ndx);
+    [[nodiscard]] const str_t&      last_error_message() const noexcept { return err_handler_.message(); }
+    // Which of error()/fatalError() the underlying validation_error_handler last saw -- see
+    // sax_error_source's own doc comment (point 15/16 of the design discussion this implements).
+    // Only meaningful right after a validate() call that returned false.
+    [[nodiscard]] sax_error_source last_error_source() const noexcept { return err_handler_.last_error_source(); }
   private:
     void_result ensure_grammar_loaded();
   private:

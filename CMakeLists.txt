@@ -538,21 +538,31 @@ if(BUILD_TESTING AND FSP_BUILD_TESTS)
         ${PROJECT_SOURCE_DIR}/src/test/test_exporter_state.cpp
         ${PROJECT_SOURCE_DIR}/src/test/test_cb_exporter.cpp
         ${PROJECT_SOURCE_DIR}/src/test/test_exporter.cpp
+        ${PROJECT_SOURCE_DIR}/src/test/test_pipeline_stages.cpp
         ${PROJECT_SOURCE_DIR}/src/common/xercesc_helpers/x_str.cpp
         ${PROJECT_SOURCE_DIR}/src/common/xercesc_helpers/xerces_mgr.cpp
         ${PROJECT_SOURCE_DIR}/src/common/mmap/mmap_file.cpp
-        ${PROJECT_SOURCE_DIR}/src/importer/error_info.cpp
         ${PROJECT_SOURCE_DIR}/src/exporter/exporter_error.cpp
         ${PROJECT_SOURCE_DIR}/src/exporter/exporter_state.cpp
     )
+    set(FSP_TARGET_${b_target}_INCLUDES
+        ${PROJECT_SOURCE_DIR}/src/test
+    )
     set(FSP_TARGET_${b_target}_LIBS
         Catch2::Catch2WithMain
+        fsp_lib
         fmt::fmt
         logger::logger
         magic_enum::magic_enum
         XercesC::XercesC
     )
     add_fsp_target(${b_target} EXECUTABLE ${${b_target}_SOURCES})
+    # test_pipeline_stages.cpp instantiates fsp::proc_data_of<^^fsp::work>() (see the same note on
+    # pacs8.cpp/pacs8-cb.cpp/t_refl.cpp above disable_ubsan_for_reflection()).
+    disable_ubsan_for_reflection(${PROJECT_SOURCE_DIR}/src/test/test_pipeline_stages.cpp)
+    # FSP_TEST_SOURCE_DIR: absolute path to the repo root, so test_pipeline_stages.cpp can locate
+    # xsd/pacs.008.xsd regardless of which directory ctest/the raw binary is invoked from.
+    target_compile_definitions(${b_target} PRIVATE FSP_TEST_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
     # Catch2's INTERNAL_CATCH_UNIQUE_NAME expands to __COUNTER__, flagged by
     # -Wpedantic as a C2y extension on Clang (silent on GCC); a third-party
     # macro this project doesn't control, so it is silenced rather than

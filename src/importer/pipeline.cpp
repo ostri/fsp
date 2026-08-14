@@ -44,9 +44,11 @@ namespace fsp
   void pipeline::release_cutter_slot() noexcept { threads_cutting_.fetch_sub(1, std::memory_order_acq_rel); }
   void pipeline::record_doc_open(std::size_t doc_ndx) { (*doc_counters_)[doc_ndx].record_doc_open(); }
 
-  void pipeline::record_doc_close(std::size_t doc_ndx, std::size_t segment_count)
+  void pipeline::record_doc_close(std::size_t doc_ndx, std::size_t segment_count, pipeline_hooks& hooks)
   {
-    if ((*doc_counters_)[doc_ndx].record_doc_close(segment_count)) log_doc_done(doc_ndx);
+    const bool completed = (*doc_counters_)[doc_ndx].record_doc_close(segment_count);
+    if (completed) log_doc_done(doc_ndx);
+    if (completed) maybe_finish_seg_processing(doc_ndx, hooks);
   }
 
   bool pipeline::record_segment_done(const xml_segment& segment, segment_result& result, pipeline_hooks& hooks)
@@ -54,31 +56,68 @@ namespace fsp
     const auto doc_ndx         = static_cast<std::size_t>(result.doc_ndx());
     auto&      counters        = (*doc_counters_)[doc_ndx];
     const auto pos             = counters.begin_segment(result.seg_id());
-    const bool semantically_ok = hooks.on_semantic_safe_check(segment, result, pos.is_first, pos.is_last);
-    if (counters.end_segment(semantically_ok)) log_doc_done(doc_ndx);
+    const bool semantically_ok = hooks.on_seg_sem_safe_check(segment, result, pos.is_first, pos.is_last);
+    const bool completed       = counters.end_segment(semantically_ok);
+    if (completed) log_doc_done(doc_ndx);
+    if (completed) maybe_finish_seg_processing(doc_ndx, hooks);
     return semantically_ok;
   }
 
-  void pipeline::record_segment_failed(std::size_t doc_ndx, std::size_t seg_id)
+  void pipeline::record_segment_failed(std::size_t doc_ndx, std::size_t seg_id, pipeline_hooks& hooks)
   {
     auto& counters = (*doc_counters_)[doc_ndx];
     (void)counters.begin_segment(seg_id); // bookkeeping only (first_seg_ timing) -- no hook, no meaningful values
-    if (counters.end_segment(false)) log_doc_done(doc_ndx);
+    const bool completed = counters.end_segment(false);
+    if (completed) log_doc_done(doc_ndx);
+    if (completed) maybe_finish_seg_processing(doc_ndx, hooks);
   }
 
-  // Called once a document is complete -- whichever of record_doc_close()/record_segment_done()/
-  // record_segment_failed() turns out to be the one that satisfies the last remaining condition
-  // (see doc_counters::maybe_complete()) is the one whose call returns true and triggers this.
+  // Called once a document's segment processing is complete -- whichever of record_doc_close()/
+  // record_segment_done()/record_segment_failed() turns out to be the one that satisfies the
+  // last remaining condition (see doc_counters::maybe_seg_processing_complete()) is the one whose
+  // call returns true and triggers this.
   void pipeline::log_doc_done(std::size_t doc_ndx)
   {
     const auto& c = (*doc_counters_)[doc_ndx];
     log_.debug(fmt::format("Doc {}: cut+process finished ({} segments, {} ms).", doc_ndx, c.total(), c.total_latency().count()));
   }
 
-  void pipeline::report_validation_result(std::size_t doc_ndx, doc_status result, error_info err)
+  // Only ever called once doc_counters::maybe_seg_processing_complete() has just been won by the
+  // caller (record_doc_close()/record_segment_done()/record_segment_failed(), see their own doc
+  // comments in pipeline.hpp) -- runs the doc-level semantic check exactly once and folds its
+  // verdict into doc_status_t, independent of whether syntax/validation are known yet.
+  void pipeline::maybe_finish_seg_processing(std::size_t doc_ndx, pipeline_hooks& hooks)
   {
-    ds_dscr_[doc_ndx].set_validation_result(result, std::move(err));
-    (*doc_counters_)[doc_ndx].record_validation_result(result != doc_status::validation_failed);
+    const bool semantic_ok = hooks.on_doc_safe_sem_check(doc_ndx, doc_data(doc_ndx));
+    if (ds_dscr_[doc_ndx].set_semantic_result(semantic_ok)) finish_doc_close(doc_ndx, hooks);
+  }
+
+  void pipeline::finish_doc_close(std::size_t doc_ndx, pipeline_hooks& hooks)
+  {
+    const auto& dscr    = ds_dscr_[doc_ndx];
+    const auto& verdict = dscr.status();
+    const bool  ok      = hooks.on_doc_safe_close(doc_ndx, verdict, dscr.error(), dscr);
+    log_.debug(fmt::format("Doc {}: on_doc_close verdict={} (syntax={} validation={} semantic={}).",
+                           doc_ndx,
+                           ok,
+                           static_cast<int>(verdict.syntax_status()),
+                           static_cast<int>(verdict.valid_status()),
+                           static_cast<int>(verdict.semantic_status())));
+  }
+
+  void pipeline::report_syntax_result(std::size_t doc_ndx, bool ok, pipeline_hooks& hooks, error_info err)
+  {
+    // C is the sole authority for both syntax AND validation whenever nothing else will ever
+    // report validation for this run -- either cut_with_validation_ folded V into C's own SAX
+    // pass, or no XSD grammar was supplied at all (!run_validation_ && !cut_with_validation_, see
+    // pipeline.hpp's own doc comment on these two flags).
+    const bool folded_validation = cut_with_validation_ || ! run_validation_;
+    if (ds_dscr_[doc_ndx].set_syntax_result(ok, folded_validation, std::move(err))) finish_doc_close(doc_ndx, hooks);
+  }
+
+  void pipeline::report_validation_result(std::size_t doc_ndx, bool ok, pipeline_hooks& hooks, error_info err)
+  {
+    if (ds_dscr_[doc_ndx].set_validation_result(ok, std::move(err))) finish_doc_close(doc_ndx, hooks);
   }
 
   void pipeline::report_fatal_error(error_info err)
@@ -91,15 +130,17 @@ namespace fsp
   {
     std::vector<std::size_t> out;
     for (std::size_t i = 0; i < ds_dscr_.size(); ++i)
-      if (ds_dscr_[i].status() == doc_status::validation_failed) out.push_back(i);
+      if (ds_dscr_[i].failed()) out.push_back(i);
     return out;
   }
 
   void_result pipeline::add_documents(const std::vector<str_t>& xml_paths, cstr_t xsd_path, pipeline_hooks& hooks)
   {
+    doc_data_.reserve(xml_paths.size());
     for (std::size_t doc_ndx = 0; doc_ndx < xml_paths.size(); ++doc_ndx)
     {
-      const auto& file = xml_paths[doc_ndx]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- doc_ndx < xml_paths.size() by the loop condition
+      const auto& file = xml_paths[doc_ndx]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- doc_ndx <
+                                             // xml_paths.size() by the loop condition
       try
       {
         // Built here, not via doc_set_dscr::add_document(cstr_t), so out_doc_id() can be filled
@@ -109,6 +150,10 @@ namespace fsp
         doc.set_out_doc_id(hooks.get_doc_id(doc_ndx % doc_id_node_hint_modulo));
         if (! ds_dscr_.add_document(std::move(doc)))
           return std::unexpected(error_info{processor_error::file_open_failed, fmt::format("Failed to add document: '{}'", file), file, 0});
+        // make_doc_data() is called on THIS SAME hooks instance (the original the caller passed
+        // to process_files(), not a clone), once per document, right after that document's
+        // doc_dscr was added -- see pipeline_hooks::make_doc_data()'s own doc comment.
+        doc_data_.push_back(hooks.make_doc_data(doc_ndx));
       }
       catch (const std::exception& e)
       {
@@ -167,7 +212,7 @@ namespace fsp
     const auto num_processors   = std::max<std::size_t>(1, (max_concurrent_cutters_ * cfg_.cutter_ratio_den) / cutter_ratio_num);
 
     const auto num_parallel = std::min(requested_threads, max_concurrent_cutters_ + num_processors);
-    return {.run_validation = run_validation, .num_parallel = num_parallel};
+    return {.run_validation = run_validation, .cut_with_validation = cut_with_validation, .num_parallel = num_parallel};
   }
 
   void pipeline::seed_queues(std::size_t doc_count, bool run_validation)
@@ -217,8 +262,8 @@ namespace fsp
     // Discard any result/error whose document ended up invalid.
     auto belongs_to_invalid_doc = [this](const segment_result& r)
     {
-      return r.doc_ndx() >= 0 && static_cast<std::size_t>(r.doc_ndx()) < ds_dscr_.size() &&
-             ds_dscr_[static_cast<std::size_t>(r.doc_ndx())].status() == doc_status::validation_failed;
+      if (r.doc_ndx() < 0 || static_cast<std::size_t>(r.doc_ndx()) >= ds_dscr_.size()) return false;
+      return ds_dscr_[static_cast<std::size_t>(r.doc_ndx())].failed();
     };
     std::erase_if(results_, belongs_to_invalid_doc);
     std::erase_if(errors_, belongs_to_invalid_doc);
@@ -259,6 +304,8 @@ namespace fsp
 
     const auto doc_count = xml_paths.size();
     const auto plan      = plan_run(doc_count);
+    cut_with_validation_ = plan.cut_with_validation; // read (never rewritten) by every worker thread from here on
+    run_validation_      = plan.run_validation;      // ditto -- see pipeline.hpp's own doc comment on these two flags
 
     docs_remaining_to_cut_.store(doc_count, std::memory_order_relaxed);
     doc_counters_.emplace(doc_count);

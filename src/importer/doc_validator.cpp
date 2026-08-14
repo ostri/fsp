@@ -38,8 +38,8 @@ namespace fsp
       loader->setFeature(xercesc::XMLUni::fgXercesDynamic, false);
       // NOLINTEND(hicpp-no-array-decay)
 
-      const str_t       xsd_path{ds_dscr_.xsd_file()};
-      auto*             grammar = loader->loadGrammar(xsd_path.c_str(), xercesc::Grammar::SchemaGrammarType, true);
+      const str_t xsd_path{ds_dscr_.xsd_file()};
+      auto*       grammar = loader->loadGrammar(xsd_path.c_str(), xercesc::Grammar::SchemaGrammarType, true);
       if (grammar == nullptr)
         return std::unexpected(
           error_info{processor_error::internal_error, fmt::format("Failed to load XSD grammar: '{}'", xsd_path), "", 0});
@@ -91,8 +91,11 @@ namespace fsp
     catch (const xercesc::XMLException& e)
     {
       // A parse-level exception (not just a validation error reported via the ErrorHandler)
-      // still means the document is not valid against the schema -- not an infra failure.
+      // still means the document is not valid against the schema -- not an infra failure. Never
+      // routed through error()/fatalError(), so last_error_source() would otherwise still read
+      // 'none' here -- always well-formedness (see set_well_formed_error()'s own doc comment).
       if (log_debug_) log_.debug(fmt::format("Doc {}: validation parse exception: {}", doc_ndx, x_str(e.getMessage()).to_string()));
+      err_handler_.set_well_formed_error();
       valid = false;
     }
     auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count();

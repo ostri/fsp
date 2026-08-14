@@ -25,7 +25,7 @@ void pacs8_cb::on_run_end(const fsp::doc_set_counter&           counters,
   // documents_seen is this hook's own per-clone counter (see the class's own doc comment),
   // summed here across every worker clone plus this original instance. Segment ok/error counts
   // are NOT summed here: counters (pipeline's own doc_counters, already folding every
-  // on_semantic_check() verdict as it happens -- see pipeline::record_segment_done()) already
+  // on_seg_sem_check() verdict as it happens -- see pipeline::record_segment_done()) already
   // carries the true, authoritative totals, so there's nothing left to sum from the clones.
   std::size_t total_docs = documents_seen;
   for (const auto* w : worker_clones)
@@ -38,9 +38,9 @@ void pacs8_cb::on_run_end(const fsp::doc_set_counter&           counters,
   log().info(fmt::format("[pacs8_cb] {:12}: CUMULATIVE documents={} segments={} (ok={} error={}) total processing time={:.3f} sec",
                          "on_run_end",
                          total_docs,
-                         counters.total_segments(),
-                         counters.total_segments_ok(),
-                         counters.total_segments_error(),
+                         counters.total_segments(ds_dscr),
+                         counters.total_segments_ok(ds_dscr),
+                         counters.total_segments_error(ds_dscr),
                          elapsed_sec));
 }
 
@@ -71,15 +71,32 @@ void pacs8_cb::on_doc_open(std::size_t doc_ndx, const fsp::doc_dscr& dscr)
   log().info(fmt::format("[pacs8_cb] {:12}: doc_ndx={} path='{}'", "on_doc_open", doc_ndx, dscr.path()));
 }
 
-void pacs8_cb::on_doc_close(std::size_t doc_ndx, fsp::doc_status status, const fsp::doc_dscr& dscr)
+void pacs8_cb::on_doc_cutting_finished(std::size_t doc_ndx, const fsp::doc_dscr& dscr)
+{ log().info(fmt::format("[pacs8_cb] {:12}: doc_ndx={} path='{}'", "on_doc_cutting_finished", doc_ndx, dscr.path())); }
+
+bool pacs8_cb::on_doc_close(std::size_t doc_ndx, const fsp::doc_status_t& verdict, const fsp::error_info& err, const fsp::doc_dscr& dscr)
 {
-  log().info(
-    fmt::format("[pacs8_cb] {:12}: doc_ndx={} status={} path='{}'", "on_doc_close", doc_ndx, magic_enum::enum_name(status), dscr.path()));
+  log().info(fmt::format("[pacs8_cb] {:12}: doc_ndx={} syntax={} validation={} semantic={} err='{}' path='{}'",
+                         "on_doc_close",
+                         doc_ndx,
+                         static_cast<int>(verdict.syntax_status()),
+                         static_cast<int>(verdict.valid_status()),
+                         static_cast<int>(verdict.semantic_status()),
+                         err.message(),
+                         dscr.path()));
+  return verdict.ok();
+}
+
+std::shared_ptr<fsp::cb_data_root> pacs8_cb::make_doc_data(std::size_t /*doc_ndx*/) const
+{
+  // This demo has no doc-level semantic aggregation of its own (see the class's own doc
+  // comment) -- an explicit "no" is still required (make_doc_data() is PURE virtual).
+  return nullptr;
 }
 
 // The verdict returned by each on_type() overload below is folded into doc_counters by
 // pipeline::record_segment_done() (the caller of typed_semantic_check's own generic
-// on_semantic_check()) -- see the class's own doc comment on why this hook doesn't also
+// on_seg_sem_check()) -- see the class's own doc comment on why this hook doesn't also
 // keep its own ok/error counters.
 bool pacs8_cb::on_type(const fsp::work::pacs8_hdr& hdr, fsp::segment_result& result, bool is_first, bool is_last) const
 {

@@ -129,9 +129,13 @@ namespace fsp
     catch (const xercesc::SAXParseException& e)
     {
       // Handler::error()/fatalError() already logged the details and threw to short-circuit
-      // cutting the rest of an already-invalid document (see Handler::set_validating()).
-      return std::unexpected(error_info{
-        processor_error::xsd_validation_failed, x_str(e.getMessage()).to_string(), "", static_cast<std::size_t>(e.getLineNumber())});
+      // cutting the rest of an already-invalid document (see Handler::set_validating()). Both
+      // callbacks throw this SAME exception type, so the exception itself can't tell schema
+      // (error()) apart from well-formedness (fatalError()) -- read Handler's own
+      // last_error_source() instead (point 15/16 of the design discussion this implements).
+      const auto err_code = handler_->last_error_source() == sax_error_source::validity ? processor_error::xsd_validation_failed
+                                                                                        : processor_error::parse_failed;
+      return std::unexpected(error_info{err_code, x_str(e.getMessage()).to_string(), "", static_cast<std::size_t>(e.getLineNumber())});
     }
     catch (const xercesc::XMLException& e)
     {

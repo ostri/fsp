@@ -55,8 +55,9 @@ int main(int argc, const char* argv[])
       fmt::print("Processing failed: '{}'\n", res.error().to_string());
       return 2;
     }
+    const auto& ds_dscr = p->ds_dscr();
     assert(args.files.size() == res->total_docs());
-    assert(p->get_results().size() + p->get_errors().size() == res->total_segments());
+    assert(p->get_results().size() + p->get_errors().size() == res->total_segments(ds_dscr));
 
     fmt::print("\n=== Document Statistics ===\n"
                "{:<33}{:>10}\n"
@@ -71,19 +72,19 @@ int main(int argc, const char* argv[])
                "  Total documents:",
                res->total_docs(),
                "  Total segments processed:",
-               res->total_segments(),
+               res->total_segments(ds_dscr),
                "    ok:",
-               res->total_segments_ok(),
+               res->total_segments_ok(ds_dscr),
                "    error:",
-               res->total_segments_error(),
+               res->total_segments_error(ds_dscr),
                "  Syntactically correct docs:",
-               res->syntactically_correct_docs(),
+               res->syntactically_correct_docs(ds_dscr),
                "  Syntactically incorrect docs:",
-               res->syntactically_incorrect_docs(),
+               res->syntactically_incorrect_docs(ds_dscr),
                "  Semantically correct docs:",
-               res->semantically_correct_docs(),
+               res->semantically_correct_docs(ds_dscr),
                "  Semantically incorrect docs:",
-               res->semantically_incorrect_docs());
+               res->semantically_incorrect_docs(ds_dscr));
   }
   catch (const std::exception& e)
   {

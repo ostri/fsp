@@ -26,6 +26,11 @@ namespace fsp
     [[nodiscard]] const vec_seg_result&    get_results() const;
     [[nodiscard]] const vec_seg_result&    get_errors() const;
     [[nodiscard]] std::vector<std::size_t> failed_document_indices() const;
+    // The SAME doc_set_dscr this run cut/validated -- needed by a caller that wants to call
+    // doc_set_counter's own totals methods (total_segments()/syntactically_correct_docs()/...),
+    // which now take a doc_set_dscr since doc_status_t (see doc_dscr.hpp) lives there, not inside
+    // doc_counters (see doc_set_counter.hpp).
+    [[nodiscard]] const doc_set_dscr& ds_dscr() const noexcept;
 
     /**
      * @brief The only way to run an import: builds an importer on the heap and runs
@@ -102,6 +107,7 @@ namespace fsp
   inline const vec_seg_result&    importer::get_results() const { return impl_.get_results(); }
   inline const vec_seg_result&    importer::get_errors() const { return impl_.get_errors(); }
   inline std::vector<std::size_t> importer::failed_document_indices() const { return impl_.failed_document_indices(); }
+  inline const doc_set_dscr&      importer::ds_dscr() const noexcept { return impl_.ds_dscr(); }
 
   inline std::pair<std::unique_ptr<importer>, result<doc_set_counter>> importer::exec(const importer_config&    cfg,
                                                                                       const std::vector<str_t>& xml_paths,

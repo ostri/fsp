@@ -146,7 +146,7 @@ namespace fsp
     std::vector<std::size_t> ok_block_indices_;
     std::vector<std::size_t> nak_block_indices_;
     // Parallel to nak_block_indices_ (same length, same order): why each of those segments
-    // failed semantically (on_semantic_check() returned false). No ok_block equivalent -- an ok
+    // failed semantically (on_seg_sem_check() returned false). No ok_block equivalent -- an ok
     // segment's own segment_result (via segment_pool::result_at()) already carries everything a
     // on_block_safe_store() hook needs.
     std::vector<error_info> nak_block_errors_;

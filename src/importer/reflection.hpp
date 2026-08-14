@@ -356,10 +356,11 @@ namespace fsp
       errors.push_back(std::move(pars.error()));
       return FieldType{std::unexpect, static_cast<int>(errors.size() - 1)};
     }
-    else static_assert(
-      sizeof(FieldType) == 0,
-      "materialize: unsupported field type (only str_t, big_int_t, int_t, small_int_t, ts_t, date_t, amount_t, validated_t<X> and "
-      "std::optional<> of those so far)");
+    else
+      static_assert(
+        sizeof(FieldType) == 0,
+        "materialize: unsupported field type (only str_t, big_int_t, int_t, small_int_t, ts_t, date_t, amount_t, validated_t<X> and "
+        "std::optional<> of those so far)");
   }
 
   /**
@@ -391,7 +392,7 @@ namespace fsp
   template <typename T>
   T materialize(segment_result& seg)
   {
-    const result_values&  values  = seg.values();
+    const result_values&  values = seg.values();
     T                     out{};
     static constexpr auto ctx     = std::meta::access_context::unchecked();
     static constexpr auto members = std::define_static_array(std::meta::nonstatic_data_members_of(^^T, ctx));
@@ -469,7 +470,7 @@ namespace fsp
   /**
    * @brief Materializes one segment's values directly into the developer's own schema class,
    * wrapped in the union of every schema class Namespace declares -- what a caller's
-   * on_semantic_check() would naturally want instead of the generic, name-indexed result_values.
+   * on_seg_sem_check() would naturally want instead of the generic, name-indexed result_values.
    * @details seg_type must be the same declaration-order index proc_data_of<Namespace>()
    * assigned to the segment's own schema class (i.e. segment_result::seg_type()).
    * @tparam Namespace reflection of the namespace holding the schema classes
