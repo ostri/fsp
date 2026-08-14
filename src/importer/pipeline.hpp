@@ -157,12 +157,15 @@ namespace fsp
     // This run's own cut_with_validation/run_validation effective values (see plan_run()) -- both
     // set once, on the main thread, before any worker starts; read (never written) by every
     // worker thread afterwards, so no synchronization is needed (same happens-before argument as
-    // doc_dscr::out_doc_id_). report_syntax_result() needs cut_with_validation_ || !run_validation_
-    // to apply doc_dscr::set_syntax_result()'s correct folded-vs-separate-V rule (point 14 of the
-    // design discussion this implements) -- when NEITHER C-folded validation NOR a separate V
-    // pass will ever run at all (no XSD grammar supplied, see plan_run()), nothing else would
-    // ever call set_validation_result() for this run, so C must be the sole authority for BOTH
-    // facts here too, exactly as in the folded case, or doc_status_t would never finish.
+    // doc_dscr::out_doc_id_). report_syntax_result() needs cut_with_validation_ to apply
+    // doc_dscr::set_syntax_result()'s correct folded-vs-separate-V rule (point 14 of the design
+    // discussion this implements) -- C is the sole authority for BOTH syntax and validation only
+    // when cut_with_validation_ genuinely folded V into its own SAX pass. When NEITHER
+    // cut_with_validation_ NOR run_validation_ is true (no XSD grammar supplied at all, see
+    // plan_run()), C still only ever reports syntax -- process_files() pre-seeds every document's
+    // doc_status_t::valid_ to three_state::valid on the MAIN thread instead (round 6 of the design
+    // discussion: a worker role must never claim a verdict it didn't actually produce, even a
+    // convenient one).
     bool cut_with_validation_ = false;
     bool run_validation_      = false;
     // Doc-level, cb-opaque aggregate slot, one per document, doc_ndx-indexed in lockstep with

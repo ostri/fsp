@@ -107,12 +107,13 @@ namespace fsp
 
   void pipeline::report_syntax_result(std::size_t doc_ndx, bool ok, pipeline_hooks& hooks, error_info err)
   {
-    // C is the sole authority for both syntax AND validation whenever nothing else will ever
-    // report validation for this run -- either cut_with_validation_ folded V into C's own SAX
-    // pass, or no XSD grammar was supplied at all (!run_validation_ && !cut_with_validation_, see
-    // pipeline.hpp's own doc comment on these two flags).
-    const bool folded_validation = cut_with_validation_ || ! run_validation_;
-    if (ds_dscr_[doc_ndx].set_syntax_result(ok, folded_validation, std::move(err))) finish_doc_close(doc_ndx, hooks);
+    // C is the sole authority for both syntax AND validation ONLY when cut_with_validation_
+    // folded V into its own SAX pass -- C never claims a validation verdict it didn't actually
+    // perform. The "no XSD grammar supplied at all" case (!run_validation_ && !cut_with_validation_)
+    // is handled differently: process_files() pre-seeds every document's valid_ to
+    // three_state::valid on the MAIN thread, before any worker starts (see its own doc comment) --
+    // C here still only ever reports syntax, never validation, even in that case.
+    if (ds_dscr_[doc_ndx].set_syntax_result(ok, cut_with_validation_, std::move(err))) finish_doc_close(doc_ndx, hooks);
   }
 
   void pipeline::report_validation_result(std::size_t doc_ndx, bool ok, pipeline_hooks& hooks, error_info err)
@@ -306,6 +307,18 @@ namespace fsp
     const auto plan      = plan_run(doc_count);
     cut_with_validation_ = plan.cut_with_validation; // read (never rewritten) by every worker thread from here on
     run_validation_      = plan.run_validation;      // ditto -- see pipeline.hpp's own doc comment on these two flags
+
+    // No XSD grammar was supplied at all (has_grammar()==false, distinct from cut_with_validation
+    // folding V into C's own pass) -- neither C nor a separate V will EVER report a validation
+    // verdict for any document this run, so nothing would ever call doc_status_t::set_valid() and
+    // is_finished()/on_doc_close() would hang forever. Pre-seed every document's valid_ to
+    // three_state::valid right here, on the MAIN thread, strictly before seed_queues()/
+    // start_workers() below -- mirrors the run-wide validation_done_ pre-seed this design used
+    // before doc_status_t existed: a run-wide fact known before any worker starts is decided here,
+    // not faked by a worker role (C) that never actually validated anything (round 6 of the design
+    // discussion this implements -- rejected letting C itself call set_valid() in this case).
+    if (! run_validation_ && ! cut_with_validation_)
+      for (std::size_t i = 0; i < doc_count; ++i) (void)ds_dscr_[i].status().set_valid(true);
 
     docs_remaining_to_cut_.store(doc_count, std::memory_order_relaxed);
     doc_counters_.emplace(doc_count);
