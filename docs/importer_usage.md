@@ -241,41 +241,157 @@ call:
 cfg.targets = fsp::proc_data_of<^^fsp::work>();
 ```
 
-#### Attribute paths, cardinality prefixes, and `validated_t`
+#### Attribute paths and field types
 
-A few details of the member-level annotations shown above are worth spelling out on their own:
+**`@` marks an XML attribute, not a child element** -- e.g.
+`[[= "GrpHdr/TtlIntrBkSttlmAmt/@Ccy"]]` reads the `Ccy` *attribute* of the `TtlIntrBkSttlmAmt`
+element, not a child element named `Ccy`. It can carry a prefix too (`.../@x:Ccy`), resolved
+against the same `ns` table as everything else. `@` is only meaningful as the last step of a path
+-- it marks which XML node in the path carries the attribute, not a navigation step of its own.
 
-- **`@` marks an XML attribute, not a child element** -- e.g.
-  `[[= "GrpHdr/TtlIntrBkSttlmAmt/@Ccy"]]` reads the `Ccy` *attribute* of the `TtlIntrBkSttlmAmt`
-  element, not a child element named `Ccy`. It can carry a prefix too (`.../@x:Ccy`), resolved
-  against the same `ns` table as everything else. `@` is only meaningful as the last step of a
-  path -- it marks which XML node in the path carries the attribute, not a navigation step of its
-  own.
-- **`o_`/`m_` prefixes on the field's own C++ type set its cardinality** -- not a marker character
-  in the path string, but the field's declared type itself (see `parsing_util.hpp`):
-  - Plain (e.g. `str_t`, `amount_t`) -- exactly one occurrence is required; missing is a technical
-    failure.
-  - `o_`-prefixed (e.g. `o_str_t`, an alias for `std::optional<str_t>`) -- zero or one occurrence;
-    missing is fine, and the field materializes as `std::nullopt`. `currency` above is `o_str_t`
-    because not every real-world message repeats the currency on every amount.
-  - `m_`-prefixed (e.g. `m_str_t`, an alias for `std::array<str_t, max_values>`) -- one to
-    `max_values` occurrences, each independently extracted. `src/test/work.hpp`'s own
-    `pacs8_txn::instr_agent` is `m_str_t`, because a transaction can legitimately name more than
-    one instructing agent.
-- **`validated_t<X>`** (an alias for `std::expected<X, int>`, see `reflection.hpp`) wraps a field
-  type `X` that validates itself: `X` must provide
-  `static std::expected<X, error_info> parse(cstr_t)`, called automatically during extraction
-  instead of a plain string-to-value conversion. On success the field holds `X`; on failure it
-  holds an index into the owning `segment_result::errors()` (see that parameter's own description
-  in [method purpose and parameter semantics](#method-purpose-and-parameter-semantics) above) --
-  this is what lets a field validate itself (an IBAN's checksum, an amount's allowed range, ...)
-  entirely inside the schema class, with no extra code in your callback. Two examples from
-  `src/test/work.hpp`: `fsp::ach::iban_t` (`ach/utility.hpp`) validates that a string is a
-  well-formed IBAN (used as `validated_t<fsp::ach::iban_t>` for `debtor_iban`/`creditor_iban`);
-  `usr::bounded_amount_t<Min, Max>` (`src/test/user_types.hpp`) validates that an amount falls
-  within `[Min, Max]`, both given in whole currency units. `validated_t<X>` combines freely with
-  `o_`/`m_` cardinality too (`o_validated_t<X>`/`m_validated_t<X>`, also in `reflection.hpp`) --
-  an optional or repeated validated field would use those aliases instead of plain `validated_t<X>`.
+The field's own declared C++ type (not a marker character in the path string) is what tells the
+importer both *what scalar kind* of value to parse the extracted text as, and *how many* of them
+to expect. The rest of this section goes through each type family in turn.
+
+##### Scalar base types
+
+These are the seven C++ types `convert_scalar()` (see `reflection.hpp`) knows how to parse XML
+text into -- every other type family below (`o_`, `m_`, `validated_t<X>`) is built out of one of
+these seven, or out of your own `validated_t<X>` payload type. Declare a field with one of these
+directly when exactly one occurrence is required and no extra validation is needed -- a missing
+occurrence is then a technical (not semantic) failure.
+
+| Type          | Declare a field as...     | Parsed from                                                        |
+| ------------- | ------------------------- | ------------------------------------------------------------------ |
+| `str_t`       | `str_t msg_id;`           | copied through as-is (`std::string`)                               |
+| `big_int_t`   | `big_int_t no_of_txn;`    | an integer, via `std::from_chars` (`std::uint64_t`)                |
+| `int_t`       | `int_t some_field;`       | an integer, via `std::from_chars` (`std::int32_t`)                 |
+| `small_int_t` | `small_int_t some_field;` | an integer, via `std::from_chars` (`std::int16_t`)                 |
+| `date_t`      | `date_t value_date;`      | an ISO 20022 `ISODate` (`YYYY-MM-DD`), via `parse_iso_date()`      |
+| `ts_t`        | `ts_t msg_ts;`            | an ISO 20022 `ISODateTime`, via `parse_iso_datetime()`             |
+| `amount_t`    | `amount_t amount_sum;`    | an ISO 20022 decimal amount, via `parse_iso_amount()` -- see below |
+
+**`amount_t`** deserves its own note: it is a thin wrapper (`struct amount_t { big_int_t value; }`),
+deliberately a distinct C++ type from `big_int_t` rather than a plain alias, so `convert_scalar()`
+can tell the two apart and parse `amount_t` as a *decimal* (e.g. `"123.45"`) instead of a plain
+integer. Internally it stores the value scaled by `10^amount_scale` (`amount_scale = 5`, e.g.
+`"123.45"` becomes the raw integer `12345000`) -- read it back as money via its own
+`fmt::formatter` (e.g. `fmt::format("{}", hdr.amount_sum)` prints `"123.45000"`), not by reading
+`.value` directly.
+
+##### `o_` prefix -- optional (0 or 1 occurrences)
+
+One `o_`-prefixed alias per scalar base type above, each an alias for `std::optional<T>`:
+`o_str_t`, `o_big_int_t`, `o_int_t`, `o_small_int_t`, `o_date_t`, `o_ts_t`, `o_amount_t` (all
+declared in `parsing_util.hpp`). Use one of these when the XML element/attribute may legitimately
+be absent -- a missing occurrence is fine, and the field materializes as `std::nullopt`, not a
+failure:
+
+```cpp
+[[= "GrpHdr/TtlIntrBkSttlmAmt/@Ccy"]] o_str_t currency; // not every message repeats the currency
+```
+
+##### `m_` prefix -- repeated, fixed capacity (0 to `max_values` occurrences)
+
+One `m_`-prefixed alias per scalar base type above, each an alias for `std::array<T, max_values>`
+(`max_values = 10`, see `parsing_util.hpp`): `m_str_t`, `m_big_int_t`, `m_int_t`, `m_small_int_t`,
+`m_date_t`, `m_ts_t`, `m_amount_t`. Use one of these when the same path can legitimately match
+more than once within a segment; each occurrence is extracted independently, in order, into
+successive array slots -- slots beyond the number actually found keep their default-constructed
+value, and occurrences beyond `max_values` are silently dropped (fixed capacity trades unbounded
+growth for a predictable, allocation-free field):
+
+```cpp
+[[= "CdtTrfTxInf/InstgAgt/FinInstnId/BICFI"]] m_str_t instr_agent; // a transaction can name more than one instructing agent
+```
+
+A plain `std::vector<T>` field (no `m_` alias -- just write `std::vector<T>` yourself) works the
+same way but grows without the `max_values` cap, at the cost of a heap allocation; prefer `m_*`
+unless you specifically expect to exceed `max_values` occurrences.
+
+##### `validated_t<X>` -- a field that validates itself
+
+`validated_t<X>` (an alias for `std::expected<X, int>`, see `reflection.hpp`) wraps a field type
+`X` that validates itself: `X` must provide `static std::expected<X, error_info> parse(cstr_t)`,
+called automatically during extraction instead of a plain string-to-value conversion. On success
+the field holds `X`; on failure it holds an index into the owning `segment_result::errors()` (see
+that parameter's own description in
+[method purpose and parameter semantics](#method-purpose-and-parameter-semantics) above) -- this
+is what lets a field validate itself (an IBAN's checksum, an amount's allowed range, a BIC against
+a reference table, ...) entirely inside the schema class, with no extra code in your callback:
+
+```cpp
+[[= "CdtTrfTxInf/DbtrAcct/Id/IBAN"]] validated_t<fsp::ach::iban_t> debtor_iban;
+```
+
+Three examples of a `validated_t<X>` payload type, all from this repository:
+
+- **`fsp::ach::iban_t`** (`ach/utility.hpp`) -- validates that a string is a well-formed IBAN
+  (checksum included). Stateless: every `parse()` call is independent, nothing to load ahead of
+  time.
+- **`usr::bounded_amount_t<Min, Max>`** (`src/test/user_types.hpp`) -- validates that an
+  `amount_t` falls within `[Min, Max]` (given in whole currency units, e.g.
+  `bounded_amount_t<1, 50000>`). `Min`/`Max` are compile-time template parameters -- the allowed
+  range is fixed in the schema declaration itself, nothing to load at runtime either.
+- **`fsp::value_set_t<Tag>`** (`value_set_t.hpp`) -- validates that a string is a member of a
+  fixed set of allowed values, loaded once at runtime rather than known at compile time (e.g. a
+  reference table of valid BIC codes, too large/data-driven to spell out as template parameters).
+  See [Membership validation with `value_set_t`](#membership-validation-with-value_set_t) below for
+  how to set one up.
+
+`validated_t<X>` combines freely with the `o_`/`m_` cardinality prefixes too --
+**`o_validated_t<X>`**/**`m_validated_t<X>`** (both in `reflection.hpp`) are the optional/repeated
+counterparts of plain `validated_t<X>`, same relationship as `o_str_t`/`m_str_t` are to `str_t`:
+
+```cpp
+[[= "SomePath/OptionalValidatedField"]] o_validated_t<fsp::ach::iban_t> maybe_iban;
+[[= "SomePath/RepeatedValidatedField"]] m_validated_t<fsp::ach::iban_t> several_ibans;
+```
+
+##### Membership validation with `value_set_t`
+
+`fsp::value_set_t<Tag>` (`value_set_t.hpp`) is a `validated_t<X>` payload type for the common case
+of "must be one of these values", where the set of allowed values is data (a reference table),
+not something you'd want to hand-write as a C++ literal or spell out per-value in template
+parameters. One `value_set_t<Tag>` instantiation covers both cardinalities of that problem:
+
+- **A single fixed value** (e.g. a scheme code that must always read exactly `"SEPA"`) --
+  `init()` with a one-element set.
+- **Membership in a reference table** (e.g. a BIC code that must appear in a table of known
+  agents) -- `init()` with the whole table.
+
+`Tag` is never constructed or referenced by value -- it exists purely so two independent sets
+(e.g. BIC codes and currency codes) don't collide on the same underlying storage; declare an empty
+tag struct and a named alias next to it:
+
+```cpp
+// user_types.hpp
+struct bic_codes_tag {};
+using bic_code_t = fsp::value_set_t<bic_codes_tag>;
+```
+
+```cpp
+// work.hpp
+[[= "CdtTrfTxInf/DbtrAgt/FinInstnId/BICFI"]] validated_t<usr::bic_code_t> debtor_bic;
+```
+
+Before any segment is processed, populate the set from your own delimiter-separated buffer, via
+`bic_code_t::init(packed_values, delimiter)` -- typically from your own `pipeline_hooks::on_run_start()`
+override (guaranteed to run on the main thread, strictly before any worker thread starts, see
+[method purpose and parameter semantics](#method-purpose-and-parameter-semantics) above):
+
+```cpp
+void my_hooks::on_run_start(const fsp::doc_set_dscr& ds_dscr)
+{
+  usr::bic_code_t::init("HAABSI22;BAKOSI2X;KSPKSI22", ';'); // one call, before any parse()
+}
+```
+
+`init()` does NOT copy `packed_values` -- it stores `string_view`s into your own buffer, so that
+buffer must stay alive and unmodified for as long as any `parse()` call for this `Tag` can still
+happen, i.e. for the whole run. Every `parse()` call after `init()` -- there can be millions, one
+per matching field across every worker thread -- is then just an O(1) hash-set lookup, never
+touching your raw data again.
 
 ## callback description
 
