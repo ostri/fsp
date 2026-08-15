@@ -376,14 +376,17 @@ using bic_code_t = fsp::value_set_t<bic_codes_tag>;
 ```
 
 Before any segment is processed, populate the set from your own delimiter-separated buffer, via
-`bic_code_t::init(packed_values, delimiter)` -- typically from your own `pipeline_hooks::on_run_start()`
-override (guaranteed to run on the main thread, strictly before any worker thread starts, see
-[method purpose and parameter semantics](#method-purpose-and-parameter-semantics) above):
+`bic_code_t::init(packed_values, delimiter)` -- typically from your own `pipeline_hooks::on_run_init()`
+or `on_run_start()` override (both guaranteed to run on the main thread, strictly before any worker
+thread starts, see [method purpose and parameter semantics](#method-purpose-and-parameter-semantics)
+above). Prefer `on_run_init()` if the setup can fail (e.g. it reads a database) -- returning an
+error from it stops the run before `on_run_start()`/any document is ever cut:
 
 ```cpp
-void my_hooks::on_run_start(const fsp::doc_set_dscr& ds_dscr)
+fsp::void_result my_hooks::on_run_start(const fsp::doc_set_dscr& ds_dscr)
 {
   usr::bic_code_t::init("HAABSI22;BAKOSI2X;KSPKSI22", ';'); // one call, before any parse()
+  return {};
 }
 ```
 
@@ -425,7 +428,8 @@ worker clone so you can add their counters together yourself.
 
 | Method                    | Called                                                          | Typical use                                                     |
 | ------------------------- | --------------------------------------------------------------- | --------------------------------------------------------------- |
-| `on_run_start()`          | once, before anything is processed                              | start a stopwatch, log the run's document count                 |
+| `on_run_init()`           | once, before `on_run_start()`, can fail                         | fallible one-time setup a package-level cb owns (e.g. read a database into `run_data()`); an error here skips `on_run_start()` and stops the run entirely |
+| `on_run_start()`          | once, before anything is processed (after `on_run_init()` succeeds) | start a stopwatch, log the run's document count                 |
 | `on_run_end()`            | once, after every worker thread has finished                    | sum up counters from all worker clones, log a summary           |
 | `get_doc_id()`            | once per document, on the main thread, before processing starts | assign your own external id to a document (e.g. a database key) |
 | `on_wrk_start()`          | once per worker thread, when it starts                          | per-thread setup, e.g. open a database connection               |

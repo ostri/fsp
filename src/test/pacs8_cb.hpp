@@ -45,7 +45,7 @@ public:
   [[nodiscard]] bool on_type(const fsp::work::pacs8_hdr& hdr, fsp::segment_result& result, bool is_first, bool is_last) const;
   [[nodiscard]] bool on_type(const fsp::work::pacs8_txn& txn, fsp::segment_result& result, bool is_first, bool is_last) const;
 protected:
-  void               on_run_start(const fsp::doc_set_dscr& ds_dscr) override;
+  [[nodiscard]] fsp::void_result on_run_start(const fsp::doc_set_dscr& ds_dscr) override;
   void               on_run_end(const fsp::doc_set_counter&           counters,
                                 const fsp::doc_set_dscr&              ds_dscr,
                                 std::span<const fsp::pipeline_hooks*> worker_clones) override;

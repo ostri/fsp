@@ -3,7 +3,7 @@
 #include <fmt/format.h>
 #include <magic_enum.hpp>
 
-void pacs8_cb::on_run_start(const fsp::doc_set_dscr& ds_dscr)
+fsp::void_result pacs8_cb::on_run_start(const fsp::doc_set_dscr& ds_dscr)
 {
   // No need to chain to a base body here (unlike the old on_run_start()) -- pipeline_hooks'
   // own final on_run_safe_start() already stamped run_start_/log_ before calling this override.
@@ -15,6 +15,7 @@ void pacs8_cb::on_run_start(const fsp::doc_set_dscr& ds_dscr)
   // class comment), so this is the right place, not e.g. main() itself, which would need to know
   // about a fsp::work implementation detail it otherwise has no reason to touch.
   usr::bic_code_t::init(fsp::work::known_agent_bics, ';');
+  return {};
 }
 
 void pacs8_cb::on_run_end(const fsp::doc_set_counter&           counters,

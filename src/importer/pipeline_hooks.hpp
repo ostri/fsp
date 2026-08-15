@@ -4,6 +4,7 @@
 #include "doc_set_counter.hpp"
 #include "doc_set_dscr.hpp"
 #include "error_info.hpp"
+#include "xpath_helpers.hpp" // result<T> = std::expected<T, error_info> - see on_run_init()/on_run_start()'s own doc comments
 #include <logger/logger.hpp>
 #include "result_values.hpp"
 #include "run_doc_data.hpp"
@@ -72,16 +73,21 @@ namespace fsp
 
     /**
      * @brief Main thread, once, before any document is cut/processed. Final -- stamps run_start_/
-     * log_ and binds pipeline_ (see its own doc comment) unconditionally, then dispatches to
-     * on_run_start() (see the class's own doc comment on why a derived class overrides that one
-     * instead of this one).
+     * log_ and binds pipeline_ (see its own doc comment) unconditionally, then dispatches first to
+     * on_run_init() (see its own doc comment on why this fires BEFORE on_run_start(), not folded
+     * into it), then -- only if that succeeded -- to on_run_start() (see the class's own doc
+     * comment on why a derived class overrides these two instead of this one). Either returning an
+     * error stops process_files() before any document is cut/any worker thread starts (see
+     * pipeline.cpp) -- on_run_init() failing skips on_run_start() entirely, exactly as if
+     * process_files() itself had failed to even start.
      */
-    virtual void on_run_safe_start(pipeline& pl, const doc_set_dscr& ds_dscr, const logger::Logger& log) final
+    [[nodiscard]] virtual void_result on_run_safe_start(pipeline& pl, const doc_set_dscr& ds_dscr, const logger::Logger& log) final
     {
       pipeline_  = &pl;
       run_start_ = std::chrono::steady_clock::now();
       log_       = &log;
-      on_run_start(ds_dscr);
+      if (auto initialized = on_run_init(); ! initialized) return initialized;
+      return on_run_start(ds_dscr);
     }
     /**
      * @brief Main thread, once, after every worker thread has finished. worker_clones holds one
@@ -275,8 +281,22 @@ namespace fsp
       return *log_;
     }
 
+    /**
+     * @brief First override point on_run_safe_start() dispatches to, BEFORE on_run_start() below --
+     * log() is valid inside this call, run_data()/doc_data(doc_ndx) (see pipeline_hooks_crtp) are
+     * ALSO already valid (run_data_ is constructed by pipeline::process_files() before
+     * on_run_safe_start() even begins -- see pipeline.cpp). Meant for one-time, fallible setup a
+     * package-level cb needs before ANY subclass's own on_run_start() runs and before any document
+     * is cut (e.g. ach_cb reading dic_agents into run_data() to build a BIC value set every
+     * document's own segments will be validated against -- see ach's own ach_hook::on_run_init()).
+     * Kept separate from on_run_start() (not folded into it) so a package-level intermediate class
+     * (ach_cb) can own this fallible step once, in one place, while a concrete leaf class
+     * (ct_in_cb) still gets its own, unrelated on_run_start() override free of that concern -- both
+     * fire, in order, from the same on_run_safe_start() dispatch. Default: no-op, success.
+     */
+    [[nodiscard]] virtual void_result on_run_init() { return {}; }
     /// @brief Override point for on_run_safe_start() -- see the class's own doc comment. log() is valid inside this call.
-    virtual void on_run_start([[maybe_unused]] const doc_set_dscr& ds_dscr) { }
+    [[nodiscard]] virtual void_result on_run_start([[maybe_unused]] const doc_set_dscr& ds_dscr) { return {}; }
     /// @brief Override point for on_run_safe_end() -- see the class's own doc comment. log() is valid inside this call.
     virtual void on_run_end([[maybe_unused]] const doc_set_counter&           counters,
                             [[maybe_unused]] const doc_set_dscr&              ds_dscr,

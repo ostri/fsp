@@ -357,7 +357,11 @@ namespace fsp
     if (xml_paths.empty())
     {
       log_.info("No files to process.");
-      hooks.on_run_safe_start(*this, ds_dscr_, log_);
+      if (auto started = hooks.on_run_safe_start(*this, ds_dscr_, log_); ! started)
+      {
+        run_data_.reset();
+        return std::unexpected(started.error());
+      }
       run_data_->timing().end();
       hooks.on_run_safe_end(doc_set_counter(0), ds_dscr_, {});
       run_data_.reset();
@@ -369,7 +373,11 @@ namespace fsp
       run_data_.reset();
       return std::unexpected(added.error());
     }
-    hooks.on_run_safe_start(*this, ds_dscr_, log_);
+    if (auto started = hooks.on_run_safe_start(*this, ds_dscr_, log_); ! started)
+    {
+      run_data_.reset();
+      return std::unexpected(started.error());
+    }
 
     const auto doc_count = xml_paths.size();
     const auto plan      = plan_run(doc_count);

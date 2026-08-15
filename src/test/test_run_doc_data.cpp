@@ -205,7 +205,7 @@ namespace
     {
     }
   protected:
-    void on_run_start(const fsp::doc_set_dscr& /*ds_dscr*/) override
+    [[nodiscard]] fsp::void_result on_run_start(const fsp::doc_set_dscr& /*ds_dscr*/) override
     {
       auto guard = fsp::lock(run_data());
       // factory_tag is checked here, not after the run -- run_data_ itself is destroyed right
@@ -216,6 +216,7 @@ namespace
       observed_->run_start_seen            = true;
       observed_->run_data_factory_tag_seen = guard->factory_tag;
       observed_->hook_call_order.push_back("on_run_start");
+      return {};
     }
     void on_run_end(const fsp::doc_set_counter& /*counters*/,
                     const fsp::doc_set_dscr& /*ds_dscr*/,
