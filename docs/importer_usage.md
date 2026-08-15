@@ -543,6 +543,113 @@ indices for that batch and read the actual data back out via the `segment_pool&`
 parameters you're given. Most callers don't need these two hooks at all; ignore them unless you're
 streaming output to external storage while the import is still running.
 
+### Run-level and document-level shared data
+
+Besides your own plain member variables (safe per-thread, see the threading note above),
+`typed_semantic_check`/`pipeline_hooks_crtp` give you two more places to keep state, each with a
+lifetime the importer manages for you instead of you wiring it up by hand:
+
+- **`run_data()`** -- one instance for the whole run, constructed right before `on_run_start()`
+  and torn down right after `on_run_end()` returns. Unlike your own member variables, this is the
+  **same object** on every worker clone -- exactly what you need for state that must be visible
+  and updatable from any thread while the run is still going (e.g. a running total you don't want
+  to wait until `on_run_end()`'s `worker_clones` sweep to compute).
+- **`doc_data(doc_ndx)`** -- one instance per document, constructed before that document starts
+  being cut and released back to an internal pool once you've had your last look at it (right
+  after `on_doc_finish()` returns, see below). Also the same object across every thread that
+  touches that document. Unlike a run-level instance, doc-level instances are **recycled**: once
+  one document is done with its instance, the next document to start reuses the very same object
+  (after `reset()` clears it) instead of the importer allocating a fresh one -- this matters when
+  many documents are processed back to back, since it avoids an allocation/deallocation pair per
+  document.
+
+Both start out as the plain `fsp::run_data_root`/`fsp::doc_data_root` base classes, which give you
+nothing but timing (see below). To add your own fields, derive your own struct from one of these
+and name it as a template argument:
+
+```cpp
+struct my_run_data : fsp::run_data_root
+{
+  std::atomic<std::size_t> total_amount{0};
+};
+
+struct my_doc_data : fsp::doc_data_root
+{
+  std::size_t declared_count = 0;
+  std::size_t actual_count   = 0;
+  // Called by the importer right before a recycled instance is handed to the NEXT document --
+  // clear your own fields here, then chain to the base so its timing is reset too.
+  void reset() override
+  {
+    declared_count = 0;
+    actual_count   = 0;
+    fsp::doc_data_root::reset();
+  }
+};
+
+class my_hooks : public fsp::typed_semantic_check<my_hooks, ^^fsp::work, fsp::seg_schema, my_run_data, my_doc_data>
+{
+  // run_data() now returns my_run_data&, doc_data(doc_ndx) returns my_doc_data&.
+};
+```
+
+If a document type needs nothing beyond what an intermediate, package-level hook class already
+added, it simply doesn't repeat the `RunData`/`DocData` template arguments -- ordinary C++ default
+template arguments mean it automatically gets what the level above it already defined.
+
+**Timing:** both base classes track when they started/stopped via a small `timing()` accessor:
+
+```cpp
+double secs = doc_data(doc_ndx).timing().duration().count(); // seconds since start(), or since
+                                                              // end() if the timer has been stopped
+```
+
+`run_data()`'s timer stops right before `on_run_end()` runs; `doc_data(doc_ndx)`'s stops right
+before `on_doc_finish()` runs (see the method table above) -- so `duration()` is always already
+frozen and safe to read from inside either of those two hooks.
+
+**Locking:** neither `run_data()` nor `doc_data(doc_ndx)` locks anything for you -- reading/
+writing through them is exactly as fast as touching a plain reference. Most of the time that's
+fine: your own plain member variables are already thread-confined (see the threading note above),
+and a lot of doc-level state is only ever touched by whichever single thread happens to be
+processing that document at a given point. Wrap the access in `fsp::lock()` only when you know
+multiple threads genuinely can touch the SAME instance at the same time -- e.g. several worker
+threads aggregating into the same `run_data()` from `on_type()`, or two independent hooks
+(`on_doc_close()` and the segment-processing path) racing to read/update the same `doc_data()`:
+
+```cpp
+// Example 1: run-level -- every worker thread's on_type() adds to the same running total.
+bool on_type(const fsp::work::pacs8_txn& txn, fsp::segment_result& result, bool is_first, bool is_last) override
+{
+  {
+    auto guard = fsp::lock(run_data());
+    guard->total_amount += txn.amount.value;
+  } // unlocked here, at the end of the block
+  return true;
+}
+
+// Example 2: doc-level -- on_type() accumulates the actual transaction count, on_doc_sem_check()
+// compares it against the header's declared count -- both could, in principle, be reached from
+// different threads for the same document.
+bool on_type(const fsp::work::pacs8_txn& txn, fsp::segment_result& result, bool is_first, bool is_last) override
+{
+  auto guard = fsp::lock(doc_data(result.doc_ndx()));
+  guard->actual_count += 1;
+  return true;
+}
+
+bool on_doc_sem_check(std::size_t doc_ndx) override
+{
+  auto guard = fsp::lock(doc_data(doc_ndx));
+  return guard->actual_count == guard->declared_count;
+}
+```
+
+`fsp::lock(x)` returns an RAII guard (`fsp::locked_root<T>`): it locks `x`'s own mutex when
+constructed and unlocks it automatically when the guard goes out of scope, so there's no
+`lock()`/`unlock()` pair to remember or get wrong. Access the locked data through the guard with
+`->`/`*`, same as a smart pointer.
+
 ### calback example
 
 Here is a complete, minimal callback class that counts documents and segments, and applies a

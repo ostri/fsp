@@ -539,6 +539,7 @@ if(BUILD_TESTING AND FSP_BUILD_TESTS)
         ${PROJECT_SOURCE_DIR}/src/test/test_cb_exporter.cpp
         ${PROJECT_SOURCE_DIR}/src/test/test_exporter.cpp
         ${PROJECT_SOURCE_DIR}/src/test/test_pipeline_stages.cpp
+        ${PROJECT_SOURCE_DIR}/src/test/test_run_doc_data.cpp
         ${PROJECT_SOURCE_DIR}/src/test/test_value_set_t.cpp
         ${PROJECT_SOURCE_DIR}/src/common/xercesc_helpers/x_str.cpp
         ${PROJECT_SOURCE_DIR}/src/common/xercesc_helpers/xerces_mgr.cpp
@@ -558,9 +559,10 @@ if(BUILD_TESTING AND FSP_BUILD_TESTS)
         XercesC::XercesC
     )
     add_fsp_target(${b_target} EXECUTABLE ${${b_target}_SOURCES})
-    # test_pipeline_stages.cpp instantiates fsp::proc_data_of<^^fsp::work>() (see the same note on
-    # pacs8.cpp/pacs8-cb.cpp/t_refl.cpp above disable_ubsan_for_reflection()).
+    # test_pipeline_stages.cpp/test_run_doc_data.cpp instantiate fsp::proc_data_of<^^fsp::work>()
+    # (see the same note on pacs8.cpp/pacs8-cb.cpp/t_refl.cpp above disable_ubsan_for_reflection()).
     disable_ubsan_for_reflection(${PROJECT_SOURCE_DIR}/src/test/test_pipeline_stages.cpp)
+    disable_ubsan_for_reflection(${PROJECT_SOURCE_DIR}/src/test/test_run_doc_data.cpp)
     # FSP_TEST_SOURCE_DIR: absolute path to the repo root, so test_pipeline_stages.cpp can locate
     # xsd/pacs.008.xsd regardless of which directory ctest/the raw binary is invoked from.
     target_compile_definitions(${b_target} PRIVATE FSP_TEST_SOURCE_DIR="${PROJECT_SOURCE_DIR}")

@@ -13,6 +13,7 @@
 #include "xpath_helpers.hpp"
 #include "xml_segment.hpp"
 #include <atomic>
+#include <cassert>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -81,14 +82,45 @@ namespace fsp
     [[nodiscard]] vec_seg_result&        errors() noexcept { return errors_; }
     [[nodiscard]] std::mutex&            results_mutex() noexcept { return results_mutex_; }
     [[nodiscard]] std::mutex&            errors_mutex() noexcept { return errors_mutex_; }
-    // The cb-opaque, doc-level aggregate returned by pipeline_hooks::make_doc_data() for this
-    // document (see pipeline_hooks.hpp's own doc comment) -- never null unless the cb's own
-    // make_doc_data() itself returned null. Built once, on the main thread, in add_documents().
-    [[nodiscard]] cb_data_root* doc_data(std::size_t doc_ndx) noexcept
+    // This run's single run-level shared-data instance (see run_doc_data.hpp) -- constructed via
+    // hooks.make_run_data_struct() right before hooks.on_run_safe_start() in process_files(),
+    // destroyed right after hooks.on_run_safe_end() returns. The SAME instance for every worker
+    // clone (see pipeline_hooks::run_data_impl()'s own doc comment).
+    [[nodiscard]] run_data_root& run_data() noexcept
     {
-      return doc_data_[doc_ndx]
-        .get(); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- doc_ndx always caller-bounded
+      assert(run_data_ != nullptr && "pipeline::run_data() called outside process_files()'s on_run_safe_start()/on_run_safe_end() window");
+      return *run_data_;
     }
+    // doc_ndx's own doc-level shared-data instance (see run_doc_data.hpp) -- assigned (possibly
+    // recycled from a previously-finished document, see doc_data_root::reset()) right before
+    // pipeline_worker::do_cut() unconditionally (see its own doc comment on why this happens even
+    // for a document whose cut is skipped), released back to the recycling pool once BOTH
+    // independent consumers are done with it -- see mark_doc_data_reader_done()'s own doc comment
+    // on why one release call isn't enough. Never null in between.
+    [[nodiscard]] doc_data_root& doc_data(std::size_t doc_ndx) noexcept
+    {
+      auto* p =
+        doc_data_active_[doc_ndx]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- doc_ndx always caller-bounded
+      assert(p != nullptr && "pipeline::doc_data(doc_ndx) called before assign_doc_data(doc_ndx) or after both readers finished with it");
+      return *p;
+    }
+    // Assigns doc_ndx a doc-level shared-data instance -- a recycled one from the free-list if
+    // available, else a freshly hooks.make_doc_data_struct()-ed one (pool grows by one). Called
+    // once, on whichever thread calls pipeline_worker::do_cut(doc_ndx), unconditionally (see
+    // do_cut()'s own doc comment), before either of doc_data()'s two independent readers
+    // (maybe_finish_seg_processing()/finish_doc_close(), see doc_status_t's own "any single fact
+    // can short-circuit the other two" doc comment in doc_dscr.hpp -- these two can complete in
+    // EITHER order, so neither alone is a safe point to recycle from).
+    void assign_doc_data(std::size_t doc_ndx, pipeline_hooks& hooks);
+    // Marks one of doc_ndx's two independent doc_data() readers as done -- maybe_finish_seg_
+    // processing() and finish_doc_close() each call this once, themselves (NOT
+    // hooks.on_doc_safe_finish() -- this function dispatches that itself, see below). Only the
+    // SECOND call (for a given doc_ndx) actually fires hooks.on_doc_safe_finish(doc_ndx) and
+    // returns the slot to the free-list -- see doc_status_t's own doc comment in doc_dscr.hpp for
+    // why a single fact (e.g. validation failing) can make finish_doc_close() run before segment
+    // processing has even finished, so firing on_doc_safe_finish()/recycling on just one of these
+    // two signals would race the other one still reading/writing doc_data(doc_ndx).
+    void mark_doc_data_reader_done(std::size_t doc_ndx, pipeline_hooks& hooks);
   private:
     // Logs the "Doc N: cut+process finished" line -- called once a document's segment processing
     // is complete, whichever of record_doc_close()/record_segment_done() turns out to be the one
@@ -168,10 +200,24 @@ namespace fsp
     // convenient one).
     bool cut_with_validation_ = false;
     bool run_validation_      = false;
-    // Doc-level, cb-opaque aggregate slot, one per document, doc_ndx-indexed in lockstep with
-    // ds_dscr_ -- built once in add_documents() (see pipeline_hooks::make_doc_data()'s own doc
-    // comment), read (never reassigned) by every worker thread afterwards.
-    std::vector<std::shared_ptr<cb_data_root>> doc_data_;
+    // This run's single run-level shared-data instance -- constructed in process_files() right
+    // before hooks.on_run_safe_start(), destroyed right after hooks.on_run_safe_end() returns.
+    // See run_data()'s own doc comment.
+    std::unique_ptr<run_data_root> run_data_;
+    // Doc-level shared-data recycling pool (see run_data_/doc_data()'s own doc comments):
+    // doc_data_storage_ OWNS every instance ever created (grows on demand, never shrinks -- see
+    // assign_doc_data()); doc_data_free_ holds previously-released instances available for reuse;
+    // doc_data_active_ is the doc_ndx -> currently-assigned-instance map; doc_data_pending_
+    // readers_ is doc_ndx's own countdown of independent readers not yet done with it (see
+    // mark_doc_data_reader_done()'s own doc comment on why 2, not 1) -- all sized to doc_count in
+    // add_documents(). All four are protected by doc_data_pool_mutex_, since assign_doc_data()/
+    // mark_doc_data_reader_done() can run concurrently on different documents from different
+    // worker threads.
+    std::mutex                                  doc_data_pool_mutex_;
+    std::vector<std::unique_ptr<doc_data_root>> doc_data_storage_;
+    std::vector<doc_data_root*>                 doc_data_free_;
+    std::vector<doc_data_root*>                 doc_data_active_;
+    std::vector<int>                            doc_data_pending_readers_;
     // NOLINTEND(cppcoreguidelines-avoid-const-or-ref-data-members)
   };
 } // namespace fsp

@@ -31,8 +31,8 @@
  * protected) replaces the old `const logger::Logger& log` parameter every hook used to take.
  *
  * Doesn't care about doc-level semantics (no NbOfTxs/TtlIntrBkSttlmAmt-vs-actual aggregation
- * demo here) -- make_doc_data() explicitly opts out (returns nullptr), same as no_op_hooks, since
- * it's PURE virtual and every concrete hooks class must decide (see its own doc comment).
+ * demo here) -- uses the default run_data_root/doc_data_root (timing only), so it doesn't name
+ * either of typed_semantic_check's RunData/DocData template arguments.
  */
 class pacs8_cb : public fsp::typed_semantic_check<pacs8_cb, ^^fsp::work>
 {
@@ -44,7 +44,6 @@ public:
    */
   [[nodiscard]] bool on_type(const fsp::work::pacs8_hdr& hdr, fsp::segment_result& result, bool is_first, bool is_last) const;
   [[nodiscard]] bool on_type(const fsp::work::pacs8_txn& txn, fsp::segment_result& result, bool is_first, bool is_last) const;
-  [[nodiscard]] std::shared_ptr<fsp::cb_data_root> make_doc_data(std::size_t doc_ndx) const override;
 protected:
   void               on_run_start(const fsp::doc_set_dscr& ds_dscr) override;
   void               on_run_end(const fsp::doc_set_counter&           counters,

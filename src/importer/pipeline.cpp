@@ -88,8 +88,13 @@ namespace fsp
   // verdict into doc_status_t, independent of whether syntax/validation are known yet.
   void pipeline::maybe_finish_seg_processing(std::size_t doc_ndx, pipeline_hooks& hooks)
   {
-    const bool semantic_ok = hooks.on_doc_safe_sem_check(doc_ndx, doc_data(doc_ndx));
+    const bool semantic_ok = hooks.on_doc_safe_sem_check(doc_ndx);
     if (ds_dscr_[doc_ndx].set_semantic_result(semantic_ok)) finish_doc_close(doc_ndx, hooks);
+    // doc_data(doc_ndx) is done being read from THIS side (on_doc_safe_sem_check() above already
+    // returned) -- see mark_doc_data_reader_done()'s own doc comment on why finish_doc_close()
+    // (called just above, possibly, or independently by report_syntax_result()/
+    // report_validation_result()) is the OTHER reader that must also finish before recycling.
+    mark_doc_data_reader_done(doc_ndx, hooks);
   }
 
   void pipeline::finish_doc_close(std::size_t doc_ndx, pipeline_hooks& hooks)
@@ -103,6 +108,57 @@ namespace fsp
                            static_cast<int>(verdict.syntax_status()),
                            static_cast<int>(verdict.valid_status()),
                            static_cast<int>(verdict.semantic_status())));
+    // doc_data(doc_ndx) is done being read from THIS side too -- see mark_doc_data_reader_done()'s
+    // own doc comment. on_doc_safe_finish() itself is dispatched from THERE, not here, once BOTH
+    // readers are confirmed done -- see doc_status_t's own doc comment in doc_dscr.hpp on why a
+    // single fact (e.g. validation failing) can get finish_doc_close() here well before segment
+    // processing (and thus maybe_finish_seg_processing()) has even run.
+    mark_doc_data_reader_done(doc_ndx, hooks);
+  }
+
+  void pipeline::assign_doc_data(std::size_t doc_ndx, pipeline_hooks& hooks)
+  {
+    const std::scoped_lock lock(doc_data_pool_mutex_);
+    doc_data_root*         slot = nullptr;
+    if (! doc_data_free_.empty())
+    {
+      slot = doc_data_free_.back();
+      doc_data_free_.pop_back();
+      slot->reset();
+    }
+    else
+    {
+      doc_data_storage_.push_back(hooks.make_doc_data_struct());
+      slot = doc_data_storage_.back().get();
+    }
+    doc_data_active_[doc_ndx] = // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- doc_ndx always caller-bounded
+      slot;
+    doc_data_pending_readers_[doc_ndx] = // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+      2;                                 // maybe_finish_seg_processing() and finish_doc_close() -- see mark_doc_data_reader_done()
+    slot->timing().start();
+  }
+
+  void pipeline::mark_doc_data_reader_done(std::size_t doc_ndx, pipeline_hooks& hooks)
+  {
+    // Dispatches on_doc_safe_finish() (stopping doc_data(doc_ndx).timing() and calling
+    // on_doc_finish()) OUTSIDE doc_data_pool_mutex_ -- a cb's own on_doc_finish() override may
+    // itself take a while (or even, in principle, re-enter pipeline via another hook), and
+    // nothing about the pool's own bookkeeping needs to stay locked while it runs. Both branches
+    // below still read doc_data(doc_ndx) (via hooks.on_doc_safe_finish()) BEFORE the slot is
+    // touched again -- fine, since it isn't returned to the free-list until after this call.
+    bool last_reader = false;
+    {
+      const std::scoped_lock lock(doc_data_pool_mutex_);
+      auto& remaining = doc_data_pending_readers_[doc_ndx]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+      assert(remaining > 0 && "pipeline::mark_doc_data_reader_done(doc_ndx) called more than twice for the same document");
+      last_reader = (--remaining == 0);
+    }
+    if (! last_reader) return;
+    hooks.on_doc_safe_finish(doc_ndx);
+    const std::scoped_lock lock(doc_data_pool_mutex_);
+    auto&                  slot = doc_data_active_[doc_ndx]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    doc_data_free_.push_back(slot);
+    slot = nullptr;
   }
 
   void pipeline::report_syntax_result(std::size_t doc_ndx, bool ok, pipeline_hooks& hooks, error_info err)
@@ -137,7 +193,12 @@ namespace fsp
 
   void_result pipeline::add_documents(const std::vector<str_t>& xml_paths, cstr_t xsd_path, pipeline_hooks& hooks)
   {
-    doc_data_.reserve(xml_paths.size());
+    // doc_data_active_/doc_data_pending_readers_ are sized (not reserved) here so
+    // assign_doc_data() can index them directly -- every slot starts nullptr/0 (not yet assigned,
+    // see doc_data()'s own precondition assert), filled in lazily by assign_doc_data() right
+    // before each document is actually cut, not here.
+    doc_data_active_.assign(xml_paths.size(), nullptr);
+    doc_data_pending_readers_.assign(xml_paths.size(), 0);
     for (std::size_t doc_ndx = 0; doc_ndx < xml_paths.size(); ++doc_ndx)
     {
       const auto& file = xml_paths[doc_ndx]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- doc_ndx <
@@ -151,10 +212,6 @@ namespace fsp
         doc.set_out_doc_id(hooks.get_doc_id(doc_ndx % doc_id_node_hint_modulo));
         if (! ds_dscr_.add_document(std::move(doc)))
           return std::unexpected(error_info{processor_error::file_open_failed, fmt::format("Failed to add document: '{}'", file), file, 0});
-        // make_doc_data() is called on THIS SAME hooks instance (the original the caller passed
-        // to process_files(), not a clone), once per document, right after that document's
-        // doc_dscr was added -- see pipeline_hooks::make_doc_data()'s own doc comment.
-        doc_data_.push_back(hooks.make_doc_data(doc_ndx));
       }
       catch (const std::exception& e)
       {
@@ -292,16 +349,27 @@ namespace fsp
 
   result<doc_set_counter> pipeline::process_files(const std::vector<str_t>& xml_paths, cstr_t xsd_path, pipeline_hooks& hooks)
   {
+    // run_data_ is constructed here, before on_run_safe_start() in EITHER branch below, and
+    // destroyed when process_files() returns (run_data_.reset() at every return point) -- see
+    // run_data()'s own doc comment in pipeline.hpp.
+    run_data_ = hooks.make_run_data_struct();
+    run_data_->timing().start();
     if (xml_paths.empty())
     {
       log_.info("No files to process.");
-      hooks.on_run_safe_start(ds_dscr_, log_);
+      hooks.on_run_safe_start(*this, ds_dscr_, log_);
+      run_data_->timing().end();
       hooks.on_run_safe_end(doc_set_counter(0), ds_dscr_, {});
+      run_data_.reset();
       return doc_set_counter(0);
     }
 
-    if (auto added = add_documents(xml_paths, xsd_path, hooks); ! added) return std::unexpected(added.error());
-    hooks.on_run_safe_start(ds_dscr_, log_);
+    if (auto added = add_documents(xml_paths, xsd_path, hooks); ! added)
+    {
+      run_data_.reset();
+      return std::unexpected(added.error());
+    }
+    hooks.on_run_safe_start(*this, ds_dscr_, log_);
 
     const auto doc_count = xml_paths.size();
     const auto plan      = plan_run(doc_count);
@@ -330,17 +398,24 @@ namespace fsp
                           max_concurrent_cutters_));
 
     auto worker_state = start_workers(plan.num_parallel, hooks);
-    if (! worker_state) return std::unexpected(worker_state.error());
+    if (! worker_state)
+    {
+      run_data_.reset();
+      return std::unexpected(worker_state.error());
+    }
 
     run_workers(*worker_state);
 
     // Always fires exactly once, paired with on_run_safe_start() above, regardless of whether the
     // run goes on to succeed or hit a fatal error below -- so the developer always sees the
-    // final counters/ds_dscr/worker clones for whatever actually happened.
+    // final counters/ds_dscr/worker clones for whatever actually happened. run_data_'s timing is
+    // stopped right before, so duration() is already frozen and readable inside on_run_end().
     std::vector<const pipeline_hooks*> worker_clones;
     worker_clones.reserve(worker_state->size());
     for (const auto& w : *worker_state) worker_clones.push_back(&w->hooks());
+    run_data_->timing().end();
     hooks.on_run_safe_end(*doc_counters_, ds_dscr_, worker_clones);
+    run_data_.reset();
 
     discard_invalid_doc_results();
     if (first_error_)

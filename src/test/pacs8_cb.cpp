@@ -94,13 +94,6 @@ bool pacs8_cb::on_doc_close(std::size_t doc_ndx, const fsp::doc_status_t& verdic
   return verdict.ok();
 }
 
-std::shared_ptr<fsp::cb_data_root> pacs8_cb::make_doc_data(std::size_t /*doc_ndx*/) const
-{
-  // This demo has no doc-level semantic aggregation of its own (see the class's own doc
-  // comment) -- an explicit "no" is still required (make_doc_data() is PURE virtual).
-  return nullptr;
-}
-
 // The verdict returned by each on_type() overload below is folded into doc_counters by
 // pipeline::record_segment_done() (the caller of typed_semantic_check's own generic
 // on_seg_sem_check()) -- see the class's own doc comment on why this hook doesn't also
@@ -129,15 +122,16 @@ bool pacs8_cb::on_type(const fsp::work::pacs8_txn& txn, fsp::segment_result& res
     txn.debtor_iban ? txn.debtor_iban->value : fmt::format("<invalid: {}>", result.errors()[txn.debtor_iban.error()].to_string());
   const fsp::str_t bic_str =
     txn.debtor_bic ? txn.debtor_bic->value : fmt::format("<invalid: {}>", result.errors()[txn.debtor_bic.error()].to_string());
-  log().debug(fmt::format("[pacs8_cb] {:12}: seg_id={} doc_ndx={} is_first={} is_last={} ok={} txn: txn_id='{}' debtor_iban={} debtor_bic={}",
-                          "on_type",
-                          result.seg_id(),
-                          result.doc_ndx(),
-                          is_first,
-                          is_last,
-                          ok,
-                          txn.txn_id,
-                          iban_str,
-                          bic_str));
+  log().debug(
+    fmt::format("[pacs8_cb] {:12}: seg_id={} doc_ndx={} is_first={} is_last={} ok={} txn: txn_id='{}' debtor_iban={} debtor_bic={}",
+                "on_type",
+                result.seg_id(),
+                result.doc_ndx(),
+                is_first,
+                is_last,
+                ok,
+                txn.txn_id,
+                iban_str,
+                bic_str));
   return ok;
 }

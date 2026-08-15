@@ -69,9 +69,18 @@ namespace fsp
    * @tparam Namespace reflection of the namespace holding the schema classes (see
    * materialize_variant()'s own tparam of the same name)
    * @tparam Base      marker base class identifying segment-schema classes
+   * @tparam RunData   forwarded straight through to pipeline_hooks_crtp -- see its own tparam
+   * doc comment for the "ach_cb<Derived>/ct_in_cb" worked example of a package building its own
+   * run-level shared-data hierarchy on top of this.
+   * @tparam DocData   forwarded straight through to pipeline_hooks_crtp -- same role as RunData,
+   * for doc-level shared data.
    */
-  template <typename Derived, std::meta::info Namespace, typename Base = seg_schema>
-  class typed_semantic_check : public pipeline_hooks_crtp<Derived>
+  template <typename Derived,
+            std::meta::info Namespace,
+            typename Base    = seg_schema,
+            typename RunData = run_data_root,
+            typename DocData = doc_data_root>
+  class typed_semantic_check : public pipeline_hooks_crtp<Derived, RunData, DocData>
   {
   protected:
     bool on_seg_sem_check([[maybe_unused]] const xml_segment& segment, segment_result& result, bool is_first, bool is_last) final

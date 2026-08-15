@@ -171,14 +171,22 @@ namespace
     bool                      doc_sem_check_verdict = true; // what on_doc_sem_check() should return
   };
 
-  // A tiny doc-level cb_data_root, used only to prove make_doc_data()/pipeline::doc_data() wiring
-  // reaches on_doc_sem_check() -- content itself isn't exercised by these tests beyond existing.
-  struct test_doc_data : fsp::cb_data_root
+  // A tiny doc-level doc_data_root, used only to prove the DocData template argument/
+  // pipeline::doc_data() wiring reaches on_doc_sem_check() -- content itself isn't exercised by
+  // these tests beyond existing. reset() clears touched so a recycled instance starts fresh for
+  // the next document that reuses it (see fsp::doc_data_root::reset()'s own doc comment).
+  struct test_doc_data : fsp::doc_data_root
   {
     std::atomic<int> touched{0};
+    void             reset() override
+    {
+      touched.store(0, std::memory_order_relaxed);
+      fsp::doc_data_root::reset();
+    }
   };
 
-  class stage_test_hooks : public fsp::typed_semantic_check<stage_test_hooks, ^^fsp::work>
+  class stage_test_hooks
+  : public fsp::typed_semantic_check<stage_test_hooks, ^^fsp::work, fsp::seg_schema, fsp::run_data_root, test_doc_data>
   {
   public:
     explicit stage_test_hooks(std::shared_ptr<shared_state> state)
@@ -201,10 +209,8 @@ namespace
       on_any_segment();
       return true;
     }
-    [[nodiscard]] std::shared_ptr<fsp::cb_data_root> make_doc_data(std::size_t /*doc_ndx*/) const override
-    { return std::make_shared<test_doc_data>(); }
   protected:
-    bool on_doc_sem_check(std::size_t /*doc_ndx*/, fsp::cb_data_root* doc_data) override
+    bool on_doc_sem_check(std::size_t doc_ndx) override
     {
       state_->doc_sem_check_calls.fetch_add(1, std::memory_order_relaxed);
       // Every segment's on_seg_sem_check() must have already run by the time doc-level semantics
@@ -212,7 +218,7 @@ namespace
       // V) -- see doc_counters.hpp.
       if (state_->segments_ever_seen.load(std::memory_order_relaxed) > 0)
         state_->doc_sem_check_seen_all_segments_done.store(true, std::memory_order_relaxed);
-      if (auto* d = dynamic_cast<test_doc_data*>(doc_data)) d->touched.fetch_add(1, std::memory_order_relaxed);
+      doc_data(doc_ndx).touched.fetch_add(1, std::memory_order_relaxed);
       return state_->doc_sem_check_verdict;
     }
     [[nodiscard]] bool on_doc_close(std::size_t /*doc_ndx*/,

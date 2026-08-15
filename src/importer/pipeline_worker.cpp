@@ -35,6 +35,15 @@ namespace fsp
 
   void pipeline_worker::do_cut(std::size_t doc_ndx)
   {
+    // Assigns doc_ndx a doc-level shared-data instance (recycled if one is free, otherwise
+    // freshly made) -- unconditionally, before the failed() bailout below, because even a
+    // document whose cut is skipped here can still reach on_doc_safe_sem_check() (its
+    // already-queued segments still flow through xml_worker::process_one(), which
+    // unconditionally calls doc_data(doc_ndx) via maybe_finish_seg_processing() once "all
+    // segments processed" fires -- see pipeline.hpp's own doc comment on that cascade). Every
+    // doc_ndx reaches do_cut() exactly once (see pipeline::seed_queues()), so this is still
+    // exactly one assign_doc_data() call per document, same recycling guarantee as before.
+    pipeline_.assign_doc_data(doc_ndx, *hooks_);
     // Requirement: a document already known to be invalid is never cut at all. doc_dscr::failed()
     // (not status().status(), which is ALSO three_state::unknown -- not three_state::invalid --
     // for a document nothing has reported on yet) is the correct "known bad" predicate here.
@@ -88,7 +97,7 @@ namespace fsp
   {
     logger::Logger::make_log_name(parent_log_name_, fmt::format("pipe-wrk.{:02}", worker_id));
     const auto thread_name = logger::Logger::log_name();
-    hooks_->on_wrk_safe_start(worker_id, thread_name, log_);
+    hooks_->on_wrk_safe_start(pipeline_, worker_id, thread_name, log_);
     auto&             pool       = pipeline_.pool();
     const std::size_t num_shards = pool.num_shards();
     // Each P-capable thread is permanently assigned one shard (worker_id % num_shards) of the

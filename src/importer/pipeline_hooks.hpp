@@ -6,34 +6,20 @@
 #include "error_info.hpp"
 #include <logger/logger.hpp>
 #include "result_values.hpp"
+#include "run_doc_data.hpp"
 #include "segment_pool.hpp"
 #include "segment_result.hpp"
 #include "xml_segment.hpp"
 #include <cassert>
 #include <chrono>
+#include <concepts>
 #include <cstdint>
 #include <memory>
 #include <span>
 
 namespace fsp
 {
-  /**
-   * @brief Minimal polymorphic base for a cb's own doc-level, opaque, cross-thread state (e.g.
-   * ct-in's "header says N transactions, sum X" vs. "actually saw M transactions, sum Y"
-   * aggregation) -- see pipeline_hooks::make_doc_data(). fsp only owns the slot's lifetime (one
-   * shared_ptr<cb_data_root> per document, in pipeline::doc_data_) -- the concrete type and ALL
-   * internal synchronization (atomics/mutex) inside it is entirely the cb's own responsibility.
-   * fsp itself never reads or writes anything through this base beyond the vtable/destructor.
-   */
-  struct cb_data_root
-  {
-    cb_data_root()                               = default;
-    virtual ~cb_data_root()                      = default;
-    cb_data_root(const cb_data_root&)            = default;
-    cb_data_root& operator=(const cb_data_root&) = default;
-    cb_data_root(cb_data_root&&)                 = default;
-    cb_data_root& operator=(cb_data_root&&)      = default;
-  };
+  class pipeline; // forward declaration is enough -- only used via pointer here, see pipeline_'s own doc comment below
 
   /**
    * @brief Lifecycle/observability hooks a caller of process_files() can plug into, without
@@ -48,8 +34,12 @@ namespace fsp
    *
    * All hook bodies default to a no-op (or, for on_seg_sem_check/on_doc_sem_check/on_doc_close, a
    * sensible default verdict) so a derived class only needs to override what it actually cares
-   * about -- make_doc_data() is the one exception, see its own doc comment for why it is pure
-   * virtual instead.
+   * about.
+   *
+   * Every hook that concerns a specific document, plus on_run_start()/on_run_end(), can reach the
+   * cb's own run-level/doc-level shared data (see run_doc_data.hpp) via the protected run_data()/
+   * doc_data(doc_ndx) accessors declared on pipeline_hooks_crtp below -- not as a parameter, see
+   * pipeline_hooks_crtp's own doc comment.
    *
    * EXPERIMENTAL (see pipeline_hooks.hpp's own git history/PR discussion before relying on this
    * shape long-term): every hook pipeline/pipeline_worker/xml_worker actually call is now the
@@ -81,12 +71,14 @@ namespace fsp
     [[nodiscard]] virtual std::unique_ptr<pipeline_hooks> clone() const = 0;
 
     /**
-     * @brief Main thread, once, before any document is cut/processed. Final -- stamps run_start_
-     * and log_ unconditionally, then dispatches to on_run_start() (see the class's own doc
-     * comment on why a derived class overrides that one instead of this one).
+     * @brief Main thread, once, before any document is cut/processed. Final -- stamps run_start_/
+     * log_ and binds pipeline_ (see its own doc comment) unconditionally, then dispatches to
+     * on_run_start() (see the class's own doc comment on why a derived class overrides that one
+     * instead of this one).
      */
-    virtual void on_run_safe_start(const doc_set_dscr& ds_dscr, const logger::Logger& log) final
+    virtual void on_run_safe_start(pipeline& pl, const doc_set_dscr& ds_dscr, const logger::Logger& log) final
     {
+      pipeline_  = &pl;
       run_start_ = std::chrono::steady_clock::now();
       log_       = &log;
       on_run_start(ds_dscr);
@@ -118,32 +110,35 @@ namespace fsp
     [[nodiscard]] virtual std::uint64_t get_doc_id([[maybe_unused]] std::size_t node_hint) { return next_doc_id_++; }
 
     /**
-     * @brief Main thread, once per document, called from pipeline::add_documents() right after
-     * that document's doc_dscr is added to doc_set_dscr -- on the ORIGINAL hooks instance the
-     * caller passed to process_files() (not a per-worker clone), strictly before any worker
-     * thread starts. Returns a caller-owned, opaque, doc-level aggregate (e.g. ct-in's own
-     * "header says N transactions, sum X" vs. "actually saw M transactions, sum Y" accumulator) --
-     * fsp stores the returned shared_ptr (one per document, doc_ndx-indexed) and exposes it back
-     * to every worker thread via pipeline::doc_data(doc_ndx), but never itself reads or writes
-     * anything through it beyond the base cb_data_root's own vtable/destructor: ALL internal
-     * synchronization (atomics/mutex) inside whatever concrete type this returns is entirely the
-     * cb's own responsibility, same as on_doc_sem_check() reading it back later from any worker
-     * thread. Pure virtual, deliberately NOT defaulted to returning nullptr: a cb author must
-     * explicitly decide whether doc-level semantics matter to them (returning nullptr is a valid,
-     * explicit "no" -- on_doc_sem_check()'s default body never dereferences its doc_data
-     * parameter), rather than silently getting nullptr from forgetting to override this.
-     * @param doc_ndx the document's index -- stable for the whole run, same indexing as every
-     * other doc_ndx-keyed accessor (ds_dscr()[doc_ndx], pipeline::doc_data(doc_ndx), ...).
+     * @brief Makes this hooks instance's own concrete run-level shared-data instance (see
+     * run_doc_data.hpp's run_data_root and pipeline_hooks_crtp's RunData template parameter) --
+     * called once, on the ORIGINAL hooks instance only, by pipeline::process_files() immediately
+     * before on_run_safe_start(). Default body returns a plain run_data_root (timing only) -- a
+     * derived class never overrides this directly, pipeline_hooks_crtp<Derived, RunData, DocData>
+     * does it automatically from the RunData template argument.
      */
-    [[nodiscard]] virtual std::shared_ptr<cb_data_root> make_doc_data(std::size_t doc_ndx) const = 0;
+    [[nodiscard]] virtual std::unique_ptr<run_data_root> make_run_data_struct() const { return std::make_unique<run_data_root>(); }
+
+    /**
+     * @brief Makes one fresh (or, after the pool has grown once, recycled -- see doc_data_root::
+     * reset()) instance of this hooks instance's own concrete doc-level shared-data type (see
+     * run_doc_data.hpp's doc_data_root and pipeline_hooks_crtp's DocData template parameter) --
+     * called by pipeline's doc-data pool, on the ORIGINAL hooks instance only, only when the pool
+     * needs to grow (see pipeline_worker::do_cut()). Default body returns a plain doc_data_root
+     * (timing only) -- a derived class never overrides this directly, pipeline_hooks_crtp<Derived,
+     * RunData, DocData> does it automatically from the DocData template argument.
+     */
+    [[nodiscard]] virtual std::unique_ptr<doc_data_root> make_doc_data_struct() const { return std::make_unique<doc_data_root>(); }
 
     /**
      * @brief The pipeline_worker thread itself, once at start and once at end of its lifetime.
-     * Final -- stamps worker_start_ and log_ unconditionally, then dispatches to
-     * on_wrk_start() (see on_run_safe_start()'s own doc comment).
+     * Final -- stamps worker_start_/log_ and binds pipeline_ (see its own doc comment)
+     * unconditionally, then dispatches to on_wrk_start() (see on_run_safe_start()'s own doc
+     * comment).
      */
-    virtual void on_wrk_safe_start(int worker_id, cstr_t thread_name, const logger::Logger& log) final
+    virtual void on_wrk_safe_start(pipeline& pl, int worker_id, cstr_t thread_name, const logger::Logger& log) final
     {
+      pipeline_     = &pl;
       worker_start_ = std::chrono::steady_clock::now();
       log_          = &log;
       on_wrk_start(worker_id, thread_name);
@@ -166,9 +161,8 @@ namespace fsp
      * @brief Fires once every segment of doc_ndx has been processed (fsp-core's existing
      * cut_finished && total>=expected_total condition, see doc_counters::maybe_seg_processing_complete()) --
      * deliberately independent of whether syntax/validation are known yet (see doc_status_t's own
-     * class doc comment in doc_dscr.hpp). doc_data is whatever this SAME hooks instance's
-     * make_doc_data(doc_ndx) returned (never null unless the cb's own make_doc_data() returned
-     * null itself) -- a cb's override typically dynamic_casts it to its own concrete type to read
+     * class doc comment in doc_dscr.hpp). A cb's override reaches its own doc-level shared data
+     * via the protected doc_data(doc_ndx) accessor (see pipeline_hooks_crtp), not a parameter --
      * whatever per-segment hooks (on_seg_sem_safe_check()) already accumulated into it. Returns
      * the document's own doc-level semantic verdict (true = ok); the fsp-core worker that calls
      * this immediately feeds the returned bool into doc_status_t::set_semantic() (see
@@ -177,7 +171,7 @@ namespace fsp
      * record_doc_close()/end_segment() call happens to be the one that satisfies the completion
      * condition -- exactly once per document. Final -- see on_run_safe_start()'s own doc comment.
      */
-    virtual bool on_doc_safe_sem_check(std::size_t doc_ndx, cb_data_root* doc_data) final { return on_doc_sem_check(doc_ndx, doc_data); }
+    virtual bool on_doc_safe_sem_check(std::size_t doc_ndx) final { return on_doc_sem_check(doc_ndx); }
 
     /**
      * @brief Fires once syntax+validation+doc-level-semantics are ALL known for doc_ndx (the
@@ -193,10 +187,28 @@ namespace fsp
      * move a document to a done-path or an err-path. Final -- see on_run_safe_start()'s own doc
      * comment. Whichever of C/V/the on_doc_safe_sem_check() orchestrator won
      * doc_status_t::try_start_closing() is the one, and only one, thread that ever calls this for
-     * a given document.
+     * a given document. NOTE: doc_data(doc_ndx) is still valid inside this call and inside
+     * on_doc_safe_finish() below -- the doc-level slot is only recycled AFTER on_doc_finish()
+     * returns, see pipeline::finish_doc_close().
      */
     virtual bool on_doc_safe_close(std::size_t doc_ndx, const doc_status_t& verdict, const error_info& err, const doc_dscr& dscr) final
     { return on_doc_close(doc_ndx, verdict, err, dscr); }
+
+    /**
+     * @brief Fires immediately after on_doc_safe_close() returns -- same call site, same "exactly
+     * once, from whichever thread won doc_status_t::try_start_closing()" guarantee. Final --
+     * unconditionally stops this document's doc_data(doc_ndx).timing() (so duration() is already
+     * frozen and readable inside on_doc_finish() below) BEFORE dispatching to it; AFTER
+     * on_doc_finish() returns, pipeline::finish_doc_close() hands the doc-level slot back to the
+     * recycling pool (see pipeline_hooks_crtp's own doc comment on doc_data()) -- this is the one
+     * and only place a cb is guaranteed to see this document's final, frozen doc-level state
+     * before it may be reset() and reused by a different document.
+     */
+    virtual void on_doc_safe_finish(std::size_t doc_ndx) final
+    {
+      doc_data_timing_stop(doc_ndx);
+      on_doc_finish(doc_ndx);
+    }
 
     /**
      * @brief A P-role thread just extracted values from one segment. is_first/is_last mark the
@@ -280,22 +292,30 @@ namespace fsp
     /// @brief Override point for on_doc_safe_cutting_finished() -- see the class's own doc comment. log() is valid inside this call.
     virtual void on_doc_cutting_finished([[maybe_unused]] std::size_t doc_ndx, [[maybe_unused]] const doc_dscr& dscr) { }
     /**
-     * @brief Override point for on_doc_safe_sem_check() -- see the class's own doc comment. log() is
-     * valid inside this call. Default: no doc-level semantic opinion, always ok.
+     * @brief Override point for on_doc_safe_sem_check() -- see the class's own doc comment. log()
+     * and doc_data(doc_ndx) (see pipeline_hooks_crtp) are valid inside this call. Default: no
+     * doc-level semantic opinion, always ok.
      */
-    virtual bool on_doc_sem_check([[maybe_unused]] std::size_t doc_ndx, [[maybe_unused]] cb_data_root* doc_data) { return true; }
+    virtual bool on_doc_sem_check([[maybe_unused]] std::size_t doc_ndx) { return true; }
     /**
-     * @brief Override point for on_doc_safe_close() -- see the class's own doc comment. log() is
-     * valid inside this call. Default: the final verdict is exactly verdict.ok() (syntax AND
-     * validation AND semantic all passed) -- a derived class overrides this to act on the
-     * decision (e.g. move a document to a done-path/err-path) while keeping (or refining) that
-     * same default logic.
+     * @brief Override point for on_doc_safe_close() -- see the class's own doc comment. log() and
+     * doc_data(doc_ndx) are valid inside this call. Default: the final verdict is exactly
+     * verdict.ok() (syntax AND validation AND semantic all passed) -- a derived class overrides
+     * this to act on the decision (e.g. move a document to a done-path/err-path) while keeping
+     * (or refining) that same default logic.
      */
     virtual bool on_doc_close([[maybe_unused]] std::size_t       doc_ndx,
                               const doc_status_t&                verdict,
                               [[maybe_unused]] const error_info& err,
                               [[maybe_unused]] const doc_dscr&   dscr)
     { return verdict.ok(); }
+    /**
+     * @brief Override point for on_doc_safe_finish() -- see the class's own doc comment. log() and
+     * doc_data(doc_ndx) are valid inside this call (doc_data(doc_ndx).timing() is already
+     * stopped). Default: no-op. This is the LAST chance to read this document's doc-level state
+     * before the slot is recycled for a different document.
+     */
+    virtual void on_doc_finish([[maybe_unused]] std::size_t doc_ndx) { }
     /**
      * @brief Override point for on_seg_sem_safe_check() -- see the class's own doc comment. log() is
      * valid inside this call. Default mirrors technical completeness (result.values().complete()),
@@ -333,6 +353,31 @@ namespace fsp
      */
     [[nodiscard]] double elapsed_worker_sec() const
     { return std::chrono::duration_cast<std::chrono::duration<double>>(std::chrono::steady_clock::now() - worker_start_).count(); }
+
+    /**
+     * @brief Non-templated run-level shared-data accessor -- pipeline_hooks_crtp<Derived, RunData,
+     * DocData>'s own run_data() wraps this with a static_cast<RunData&>. Defined in
+     * pipeline_hooks.cpp (not inline here) so this header doesn't need pipeline.hpp's full
+     * definition -- pipeline.hpp already includes THIS header, so the reverse would cycle.
+     * Reaches pipeline_'s single, run-lifetime run_data_root instance (see
+     * pipeline::process_files()) -- the SAME instance on every worker clone, see pipeline_'s own
+     * doc comment.
+     */
+    [[nodiscard]] run_data_root& run_data_impl() const;
+    /**
+     * @brief Non-templated doc-level shared-data accessor -- pipeline_hooks_crtp<Derived, RunData,
+     * DocData>'s own doc_data(doc_ndx) wraps this with a static_cast<DocData&>. See
+     * run_data_impl()'s own doc comment for why this is defined out-of-line. Reaches pipeline_'s
+     * recycling doc-data pool slot currently assigned to doc_ndx (see pipeline_worker::do_cut()).
+     */
+    [[nodiscard]] doc_data_root& doc_data_impl(std::size_t doc_ndx) const;
+    /**
+     * @brief Stops doc_ndx's doc-level timing_fields -- called unconditionally by
+     * on_doc_safe_finish() before dispatching to on_doc_finish(), so duration() is already frozen
+     * by the time a cb's override runs. Defined in pipeline_hooks.cpp, same reason as
+     * run_data_impl().
+     */
+    void doc_data_timing_stop(std::size_t doc_ndx);
   private:
     std::chrono::steady_clock::time_point run_start_;
     std::chrono::steady_clock::time_point worker_start_;
@@ -345,6 +390,14 @@ namespace fsp
     // logger a hook's messages land in, only how a derived class reaches it (log() instead of a
     // parameter on every single hook).
     const logger::Logger* log_ = nullptr;
+    // Not owned -- bound once by on_run_safe_start() (on the original instance) or
+    // on_wrk_safe_start() (on each worker clone, see clone()), both of which happen before any
+    // other hook fires (see the class's own doc comment) -- run_data_impl()/doc_data_impl() read
+    // through this to reach pipeline_'s own run-level/doc-level shared-data storage. The SAME
+    // pipeline instance for every clone of one process_files() call, so run_data_impl() always
+    // resolves to the SAME run_data_root object across every clone (see pipeline_hooks_crtp's own
+    // doc comment on why this is the point of the whole mechanism).
+    pipeline* pipeline_ = nullptr;
   };
 
   /**
@@ -370,27 +423,53 @@ namespace fsp
    * mixin between pipeline_hooks_crtp and Derived, such as typed_semantic_check.hpp's own
    * typed_semantic_check<Derived, Namespace>, whose own (implicitly generated) constructor needs
    * to reach this one.
+   * @tparam RunData  a package's own run-level shared-data type (see run_doc_data.hpp) -- must
+   * derive from run_data_root; defaults to run_data_root itself (timing only) for a package that
+   * needs nothing more. A document type that needs nothing beyond an intermediate package-level
+   * cb's own RunData simply doesn't repeat this template argument (see typed_semantic_check.hpp's
+   * own doc comment for the worked ach_cb/ct_in_cb example) -- ordinary C++ default template
+   * arguments give "prevzame lastnosti predhodnega nivoja" for free, no extra machinery needed.
+   * @tparam DocData  same role as RunData, for doc-level shared data -- must derive from
+   * doc_data_root; defaults to doc_data_root itself.
    */
-  template <typename Derived>
+  template <typename Derived, typename RunData = run_data_root, typename DocData = doc_data_root>
+    requires std::derived_from<RunData, run_data_root> && std::derived_from<DocData, doc_data_root>
   class pipeline_hooks_crtp : public pipeline_hooks
   {
   protected:
     pipeline_hooks_crtp() = default; // NOLINT(bugprone-crtp-constructor-accessibility) -- see the class's own note above
+
+    /**
+     * @brief This run's own RunData instance -- the SAME object on every worker clone (see
+     * pipeline_hooks::run_data_impl()'s own doc comment). Valid inside on_run_start()/
+     * on_run_end() and every doc-scoped override point (see pipeline_hooks.hpp's own
+     * availability table in its class doc comment). Unsynchronized by default -- wrap in
+     * fsp::lock() (run_doc_data.hpp) when concurrent access from multiple worker clones is
+     * actually possible (e.g. aggregating into it from on_seg_sem_check(), called by every
+     * worker thread at once).
+     */
+    [[nodiscard]] RunData& run_data() const noexcept { return static_cast<RunData&>(run_data_impl()); }
+    /**
+     * @brief doc_ndx's own DocData instance -- the SAME object seen by whichever worker thread
+     * happens to touch this document (recycled, not per-worker, see run_doc_data.hpp's own doc
+     * comment on doc_data_root::reset()). Valid inside every doc-scoped override point. Same
+     * locking contract as run_data() above.
+     */
+    [[nodiscard]] DocData& doc_data(std::size_t doc_ndx) const noexcept { return static_cast<DocData&>(doc_data_impl(doc_ndx)); }
   public:
     [[nodiscard]] std::unique_ptr<pipeline_hooks> clone() const override
     { return std::make_unique<Derived>(static_cast<const Derived&>(*this)); }
+    [[nodiscard]] std::unique_ptr<run_data_root> make_run_data_struct() const override { return std::make_unique<RunData>(); }
+    [[nodiscard]] std::unique_ptr<doc_data_root> make_doc_data_struct() const override { return std::make_unique<DocData>(); }
   };
 
   /**
    * @brief The no-op hook set used when a caller doesn't supply their own -- keeps
-   * process_files() usable without hooks at all. Doesn't care about doc-level semantics, so
-   * make_doc_data() explicitly opts out (returns nullptr) -- see make_doc_data()'s own doc
-   * comment on why every concrete hooks class must make that choice explicitly.
+   * process_files() usable without hooks at all. Plain run_data_root/doc_data_root (timing only)
+   * suffice, so no_op_hooks doesn't need to name either template argument.
    */
   class no_op_hooks : public pipeline_hooks_crtp<no_op_hooks>
   {
-  public:
-    [[nodiscard]] std::shared_ptr<cb_data_root> make_doc_data(std::size_t /*doc_ndx*/) const override { return nullptr; }
   };
 
   /**
