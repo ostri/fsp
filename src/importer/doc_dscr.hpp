@@ -5,6 +5,7 @@
 #include <atomic>
 #include <cstdint>
 #include <mutex>
+#include <optional>
 #include <string_view>
 
 namespace fsp
@@ -368,6 +369,20 @@ namespace fsp
      */
     [[nodiscard]] std::uint64_t out_doc_id() const noexcept { return out_doc_id_; }
     void                        set_out_doc_id(std::uint64_t id) noexcept { out_doc_id_ = id; }
+    /**
+     * @brief Caller-assigned agent id for this document, resolved from whatever a hook's own
+     * get_doc_agent_id() implementation derives it from (e.g. a BIC4 prefix in the document's own
+     * filename today; a public key or some other document property later) -- fsp itself never
+     * inspects or interprets this value, only carries it (same "opaque payload, domain-neutral
+     * pipeline" contract as out_doc_id() above). std::nullopt if get_doc_agent_id() didn't resolve
+     * one (its default body always returns std::nullopt -- see pipeline_hooks.hpp).
+     *
+     * Same happens-before/thread-safety argument as out_doc_id(): plain, non-atomic, written
+     * exactly once, from the main thread, in pipeline::add_documents(), before this doc_dscr is
+     * shared with any worker thread -- every later read is therefore safe without synchronization.
+     */
+    [[nodiscard]] std::optional<std::int16_t> agent_id() const noexcept { return agent_id_; }
+    void                                      set_agent_id(std::optional<std::int16_t> id) noexcept { agent_id_ = id; }
   private: //< methods
     void open(cstr_t path);
     // Records err_ the first time EITHER set_syntax_result()/set_validation_result() reports a
@@ -379,12 +394,13 @@ namespace fsp
     // sibling field, so it needs its own tiny guard).
     void note_error_once(error_info err) noexcept;
   private:
-    mmap_file     doc_;             // core document functionality
-    doc_status_t  status_;          // syntax/validation/semantic verdict + completion logic, see its own class doc comment
-    std::mutex    err_mutex_;       // guards err_/err_set_, see note_error_once()
-    bool          err_set_ = false; // true once note_error_once() has recorded the first failure reason
-    error_info    err_;             // if there is an error, here it is the error description (first reporter wins)
-    std::uint64_t out_doc_id_ = 0;  // caller-assigned output document id, see out_doc_id() above
+    mmap_file                   doc_;             // core document functionality
+    doc_status_t                status_;          // syntax/validation/semantic verdict + completion logic, see its own class doc comment
+    std::mutex                  err_mutex_;       // guards err_/err_set_, see note_error_once()
+    bool                        err_set_ = false; // true once note_error_once() has recorded the first failure reason
+    error_info                  err_;             // if there is an error, here it is the error description (first reporter wins)
+    std::uint64_t               out_doc_id_ = 0;  // caller-assigned output document id, see out_doc_id() above
+    std::optional<std::int16_t> agent_id_;        // caller-assigned agent id, see agent_id() above -- nullopt until/unless set
   };
   ///////////////////////////////////////////////////////////////////////////////////////////
   inline doc_dscr::doc_dscr(cstr_t path)
@@ -406,6 +422,7 @@ namespace fsp
   , err_set_(o.err_set_)
   , err_(std::move(o.err_))
   , out_doc_id_(o.out_doc_id_)
+  , agent_id_(o.agent_id_)
   {
   }
   inline doc_dscr& doc_dscr::operator=(doc_dscr&& o) noexcept
@@ -417,6 +434,7 @@ namespace fsp
       err_set_    = o.err_set_;
       err_        = std::move(o.err_);
       out_doc_id_ = o.out_doc_id_;
+      agent_id_   = o.agent_id_;
     }
     return *this;
   }

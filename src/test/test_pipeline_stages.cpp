@@ -31,6 +31,8 @@
 #include <fstream>
 #include <logger/logger_config.hpp>
 #include <memory>
+#include <mutex>
+#include <optional>
 #include <string>
 #include <thread>
 #include <vector>
@@ -169,6 +171,17 @@ namespace
     std::atomic<int>          segments_ever_seen{0};        // on_seg_sem_check() call count, cross-clone
     std::chrono::milliseconds seg_delay{0};                 // artificial per-segment delay, see class doc comment
     bool                      doc_sem_check_verdict = true; // what on_doc_sem_check() should return
+    // --- on_type()'s own new raw_msg/dscr parameters (see typed_semantic_check.hpp's own class
+    // comment) -- captured by on_type(hdr,...)/on_type(txn,...) below, one shared_ptr<string> per
+    // captured raw_msg (not a plain std::string, so a std::atomic<std::string> isn't needed) plus
+    // one atomic snapshot of dscr.agent_id() per hook. ---
+    std::mutex                raw_msg_mutex; // guards hdr_raw_msg/txn_raw_msg (plain strings, not atomics -- string isn't lock-free)
+    fsp::str_t                hdr_raw_msg;   // last on_type(hdr,...)'s own raw_msg, verbatim
+    fsp::str_t                txn_raw_msg;   // last on_type(txn,...)'s own raw_msg, verbatim
+    std::atomic<bool>         hdr_agent_id_has_value{false};
+    std::atomic<std::int16_t> hdr_agent_id_value{0};
+    std::atomic<bool>         txn_agent_id_has_value{false};
+    std::atomic<std::int16_t> txn_agent_id_value{0};
   };
 
   // A tiny doc-level doc_data_root, used only to prove the DocData template argument/
@@ -189,23 +202,49 @@ namespace
   : public fsp::typed_semantic_check<stage_test_hooks, ^^fsp::work, fsp::seg_schema, fsp::run_data_root, test_doc_data>
   {
   public:
-    explicit stage_test_hooks(std::shared_ptr<shared_state> state)
+    // resolved_agent_id: what get_doc_agent_id() below should resolve every document's path to --
+    // std::nullopt (the default) exercises pipeline_hooks::get_doc_agent_id()'s own default no-op
+    // body instead (see its own doc comment), same as a hook that never overrides it at all.
+    explicit stage_test_hooks(std::shared_ptr<shared_state> state, std::optional<std::int16_t> resolved_agent_id = std::nullopt)
     : state_(std::move(state))
+    , resolved_agent_id_(resolved_agent_id)
     {
     }
     [[nodiscard]] bool on_type(const fsp::work::pacs8_hdr& /*hdr*/,
+                               std::string_view     raw_msg,
+                               const fsp::doc_dscr& dscr,
                                fsp::segment_result& /*result*/,
                                bool /*is_first*/,
                                bool /*is_last*/) const
     {
+      {
+        const std::scoped_lock lock(state_->raw_msg_mutex);
+        state_->hdr_raw_msg = fsp::str_t(raw_msg);
+      }
+      if (const auto agent_id = dscr.agent_id(); agent_id)
+      {
+        state_->hdr_agent_id_value.store(*agent_id, std::memory_order_relaxed);
+        state_->hdr_agent_id_has_value.store(true, std::memory_order_relaxed);
+      }
       on_any_segment();
       return true;
     }
     [[nodiscard]] bool on_type(const fsp::work::pacs8_txn& /*txn*/,
+                               std::string_view     raw_msg,
+                               const fsp::doc_dscr& dscr,
                                fsp::segment_result& /*result*/,
                                bool /*is_first*/,
                                bool /*is_last*/) const
     {
+      {
+        const std::scoped_lock lock(state_->raw_msg_mutex);
+        state_->txn_raw_msg = fsp::str_t(raw_msg);
+      }
+      if (const auto agent_id = dscr.agent_id(); agent_id)
+      {
+        state_->txn_agent_id_value.store(*agent_id, std::memory_order_relaxed);
+        state_->txn_agent_id_has_value.store(true, std::memory_order_relaxed);
+      }
       on_any_segment();
       return true;
     }
@@ -232,6 +271,11 @@ namespace
       state_->doc_close_seen_semantic_ok.store(verdict.semantic_status() == fsp::three_state::valid, std::memory_order_relaxed);
       return verdict.ok();
     }
+    // Override point exercised directly (not via a real BIC4/dictionary lookup -- see
+    // ach_hook::get_doc_agent_id() for that concrete use case) -- proves pipeline::add_documents()
+    // calls this hook and stores its result into doc_dscr::agent_id() BEFORE any worker thread
+    // starts (same call site/ordering as get_doc_id(), see pipeline_hooks.hpp's own doc comment).
+    [[nodiscard]] std::optional<std::int16_t> get_doc_agent_id(fsp::cstr_t /*path*/) override { return resolved_agent_id_; }
   private:
     // Common tail for both on_type() overloads above -- const because on_type() itself is const
     // (typed_semantic_check's own contract), but state_ is a shared_ptr to shared, atomically
@@ -243,6 +287,7 @@ namespace
       if (state_->seg_delay.count() > 0) std::this_thread::sleep_for(state_->seg_delay);
     }
     std::shared_ptr<shared_state> state_;
+    std::optional<std::int16_t>   resolved_agent_id_; // what get_doc_agent_id() resolves every document's path to
   };
 
   fsp::importer_config make_cfg(std::string_view app_name, std::size_t num_of_workers)
@@ -401,5 +446,85 @@ TEST_CASE("pipeline: happy path calls on_doc_close exactly once, after syntax+va
   // Both segments (header + one transaction) were actually processed, and none discarded.
   CHECK(p->get_results().size() == 2);
   CHECK(p->get_errors().empty());
+}
+
+// --- Scenario 5: get_doc_agent_id()'s default body -- doc_dscr::agent_id() stays nullopt --------
+TEST_CASE("pipeline: get_doc_agent_id()'s default (no override) leaves doc_dscr::agent_id() unset", "[pipeline][stages][agent-id]")
+{
+  temp_dir_guard dir;
+  const auto     doc_path = dir.write("doc.xml", well_formed_valid_doc());
+
+  auto state = std::make_shared<shared_state>();
+  // No resolved_agent_id passed -- stage_test_hooks::get_doc_agent_id() itself still overrides the
+  // hook (returning std::nullopt), but that's functionally identical to inheriting
+  // pipeline_hooks::get_doc_agent_id()'s own no-op default body (see its own doc comment) -- both
+  // paths leave doc_dscr::agent_id() unset for every document.
+  stage_test_hooks hooks(state);
+
+  auto cfg      = make_cfg("test-agent-id-default", 1);
+  auto [p, res] = fsp::importer::exec(cfg, std::vector<std::string>{doc_path}, xsd_path(), hooks);
+
+  REQUIRE(res.has_value());
+  const auto& ds_dscr = p->ds_dscr();
+  CHECK_FALSE(ds_dscr[0].agent_id().has_value());
+
+  // Both on_type() overloads observed the same unset state through their own dscr parameter.
+  CHECK_FALSE(state->hdr_agent_id_has_value.load());
+  CHECK_FALSE(state->txn_agent_id_has_value.load());
+}
+
+// --- Scenario 6: get_doc_agent_id() override resolves a value -- doc_dscr::agent_id() carries it,
+// on_type()'s own dscr parameter observes the SAME value, main-thread-computed strictly before any
+// worker thread starts (same happens-before argument as out_doc_id(), see doc_dscr.hpp) -----------
+TEST_CASE("pipeline: get_doc_agent_id()'s resolved value reaches doc_dscr::agent_id() and on_type()'s own dscr parameter",
+          "[pipeline][stages][agent-id]")
+{
+  temp_dir_guard dir;
+  const auto     doc_path = dir.write("doc.xml", well_formed_valid_doc());
+
+  constexpr std::int16_t resolved_id = 42;
+  auto                   state       = std::make_shared<shared_state>();
+  stage_test_hooks       hooks(state, resolved_id);
+
+  auto cfg      = make_cfg("test-agent-id-resolved", 1);
+  auto [p, res] = fsp::importer::exec(cfg, std::vector<std::string>{doc_path}, xsd_path(), hooks);
+
+  REQUIRE(res.has_value());
+  const auto& ds_dscr = p->ds_dscr();
+  REQUIRE(ds_dscr[0].agent_id().has_value());
+  CHECK(*ds_dscr[0].agent_id() == resolved_id);
+
+  // Both on_type() overloads (header and transaction) received the exact same resolved value
+  // through their own dscr parameter -- proves the ONE hooks.get_doc_agent_id() call in
+  // pipeline::add_documents() is what every later on_type() call reads back, not a per-call
+  // re-resolution.
+  REQUIRE(state->hdr_agent_id_has_value.load());
+  CHECK(state->hdr_agent_id_value.load() == resolved_id);
+  REQUIRE(state->txn_agent_id_has_value.load());
+  CHECK(state->txn_agent_id_value.load() == resolved_id);
+}
+
+// --- Scenario 7: on_type()'s own raw_msg parameter carries the segment's own raw XML fragment,
+// independent of (but derived from) doc_dscr's own mmap -- matches xml_segment::view() directly ---
+TEST_CASE("pipeline: on_type()'s own raw_msg parameter carries the segment's raw XML fragment", "[pipeline][stages][raw-msg]")
+{
+  temp_dir_guard dir;
+  const auto     doc_path = dir.write("doc.xml", well_formed_valid_doc());
+
+  auto             state = std::make_shared<shared_state>();
+  stage_test_hooks hooks(state);
+
+  auto cfg      = make_cfg("test-raw-msg", 1);
+  auto [p, res] = fsp::importer::exec(cfg, std::vector<std::string>{doc_path}, xsd_path(), hooks);
+
+  REQUIRE(res.has_value());
+  const std::scoped_lock lock(state->raw_msg_mutex);
+  // k_valid_hdr's/k_valid_txn's own top-level tags -- raw_msg is the exact XML subtree C cut for
+  // this segment, so it must at minimum contain the fixture's own distinguishing content (MsgId
+  // for the header, TxId for the transaction) verbatim.
+  CHECK(state->hdr_raw_msg.find("MSG1") != fsp::str_t::npos);
+  CHECK(state->hdr_raw_msg.find("GrpHdr") != fsp::str_t::npos);
+  CHECK(state->txn_raw_msg.find("TXN1") != fsp::str_t::npos);
+  CHECK(state->txn_raw_msg.find("CdtTrfTxInf") != fsp::str_t::npos);
 }
 // NOLINTEND(readability-magic-numbers)

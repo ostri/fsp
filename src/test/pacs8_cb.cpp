@@ -99,7 +99,12 @@ bool pacs8_cb::on_doc_close(std::size_t doc_ndx, const fsp::doc_status_t& verdic
 // pipeline::record_segment_done() (the caller of typed_semantic_check's own generic
 // on_seg_sem_check()) -- see the class's own doc comment on why this hook doesn't also
 // keep its own ok/error counters.
-bool pacs8_cb::on_type(const fsp::work::pacs8_hdr& hdr, fsp::segment_result& result, bool is_first, bool is_last) const
+bool pacs8_cb::on_type(const fsp::work::pacs8_hdr& hdr,
+                       std::string_view /*raw_msg*/,
+                       const fsp::doc_dscr& /*dscr*/,
+                       fsp::segment_result& result,
+                       bool                 is_first,
+                       bool                 is_last) const
 {
   // Artificial rule for this demo: every ODD seg_id is a semantic error, every EVEN is ok.
   const bool ok = (result.seg_id() % 2 == 0);
@@ -115,7 +120,12 @@ bool pacs8_cb::on_type(const fsp::work::pacs8_hdr& hdr, fsp::segment_result& res
   return ok;
 }
 
-bool pacs8_cb::on_type(const fsp::work::pacs8_txn& txn, fsp::segment_result& result, bool is_first, bool is_last) const
+bool pacs8_cb::on_type(const fsp::work::pacs8_txn& txn,
+                       std::string_view /*raw_msg*/,
+                       const fsp::doc_dscr& /*dscr*/,
+                       fsp::segment_result& result,
+                       bool                 is_first,
+                       bool                 is_last) const
 {
   // Artificial rule for this demo: every ODD seg_id is a semantic error, every EVEN is ok.
   const bool       ok = (result.seg_id() % 2 == 0);

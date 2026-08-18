@@ -1,10 +1,12 @@
 // typed_semantic_check.hpp
 #pragma once
+#include "doc_dscr.hpp"
 #include "pipeline_hooks.hpp"
 #include "reflection.hpp"
 #include "segment_result.hpp"
 #include "xml_segment.hpp"
 #include <meta>
+#include <string_view>
 #include <variant>
 
 // Kept separate from reflection.hpp (rather than folded into it) so a translation unit that only
@@ -22,7 +24,10 @@ namespace fsp
    * itself) so the fold expression's operands -- one requires-expression per Ts -- stay readable.
    */
   template <typename Derived, typename... Ts>
-  constexpr bool has_on_type_for_every_v = (... && requires(Derived& d, Ts& s, segment_result& r, bool b) { d.on_type(s, r, b, b); });
+  constexpr bool has_on_type_for_every_v =
+    (... && requires(Derived& d, Ts& s, std::string_view raw_msg, const doc_dscr& dscr, segment_result& r, bool b) {
+      d.on_type(s, raw_msg, dscr, r, b, b);
+    });
 
   /** @brief Pack-deduction helper: instantiates has_on_type_for_every_v<Derived, Ts...> from a variant_of_t<Namespace, Base> pointer. */
   template <typename Derived, typename... Ts>
@@ -36,17 +41,18 @@ namespace fsp
    * pipeline_hooks_crtp<YourClass> directly, and declare one on_type() overload per schema class
    * you care about --
    *
-   *   bool on_type(const YourNamespace::some_schema_class& s, segment_result& result,
-   *                bool is_first, bool is_last);
+   *   bool on_type(const YourNamespace::some_schema_class& s, std::string_view raw_msg,
+   *                const doc_dscr& dscr, segment_result& result, bool is_first, bool is_last);
    *
-   * -- with the exact same parameter list pipeline_hooks::on_seg_sem_check() itself takes,
-   * minus the raw xml_segment (materialize_variant() already replaces it with s) and with the
-   * segment's own materialized type as the first parameter instead -- and, same as every other
-   * override point (see pipeline_hooks.hpp's own class comment), no logger::Logger parameter:
-   * call the protected log() accessor instead. on_seg_sem_check() itself is implemented here,
-   * once, and marked final -- a derived class overriding it instead of declaring on_type()
-   * overloads would silently lose this whole mechanism, so that path is closed off entirely
-   * rather than left as a footgun.
+   * -- with the same parameter list pipeline_hooks::on_seg_sem_check() itself takes, minus the raw
+   * xml_segment (materialize_variant() already replaces it with s; raw_msg -- segment.view(dscr.
+   * mmf().data()), computed once here -- covers the one thing a caller would otherwise still need
+   * the xml_segment itself for) and with the segment's own materialized type as the first
+   * parameter instead -- and, same as every other override point (see pipeline_hooks.hpp's own
+   * class comment), no logger::Logger parameter: call the protected log() accessor instead.
+   * on_seg_sem_check() itself is implemented here, once, and marked final -- a derived class
+   * overriding it instead of declaring on_type() overloads would silently lose this whole
+   * mechanism, so that path is closed off entirely rather than left as a footgun.
    *
    * @details on_seg_sem_check()'s own static_assert requires Derived to declare an
    * on_type() overload for EVERY schema class Namespace declares, not just the ones a caller
@@ -83,16 +89,18 @@ namespace fsp
   class typed_semantic_check : public pipeline_hooks_crtp<Derived, RunData, DocData>
   {
   protected:
-    bool on_seg_sem_check([[maybe_unused]] const xml_segment& segment, segment_result& result, bool is_first, bool is_last) final
+    bool on_seg_sem_check(const xml_segment& segment, const doc_dscr& dscr, segment_result& result, bool is_first, bool is_last) final
     {
       // See the class's own doc comment for why this check lives here (first use, Derived
       // already complete) rather than directly in typed_semantic_check's own class body.
       static_assert(check_on_type_coverage<Derived>(static_cast<variant_of_t<Namespace, Base>*>(nullptr)),
                     "typed_semantic_check<Derived, Namespace>: Derived is missing an on_type() overload for at least one of "
                     "Namespace's schema classes (or one overload's parameter list doesn't match exactly) -- add "
-                    "bool on_type(const YourSchemaClass&, segment_result&, bool, bool) for each one.");
-      auto seg = materialize_variant<Namespace, Base>(result.seg_type(), result);
-      return std::visit([&]<typename T>(T& s) -> bool { return static_cast<Derived&>(*this).on_type(s, result, is_first, is_last); }, seg);
+                    "bool on_type(const YourSchemaClass&, std::string_view, const doc_dscr&, segment_result&, bool, bool) for each one.");
+      auto       seg     = materialize_variant<Namespace, Base>(result.seg_type(), result);
+      const auto raw_msg = segment.view(dscr.mmf().data());
+      return std::visit(
+        [&]<typename T>(T& s) -> bool { return static_cast<Derived&>(*this).on_type(s, raw_msg, dscr, result, is_first, is_last); }, seg);
     }
   };
 } // namespace fsp

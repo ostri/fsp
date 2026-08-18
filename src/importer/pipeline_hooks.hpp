@@ -16,6 +16,7 @@
 #include <concepts>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <span>
 
 namespace fsp
@@ -114,6 +115,23 @@ namespace fsp
      * @return an opaque, caller-chosen 64-bit id; the default is a simple 1, 2, 3, ... counter.
      */
     [[nodiscard]] virtual std::uint64_t get_doc_id([[maybe_unused]] std::size_t node_hint) { return next_doc_id_++; }
+
+    /**
+     * @brief Main thread, once per document, right after get_doc_id() (see its own doc comment --
+     * same call site, same "before any worker thread starts" guarantee) -- the returned value is
+     * stored as that document's doc_dscr::agent_id(), for a hook's own on_type()/on_doc_open() etc.
+     * to read back later without recomputing it per call. fsp itself never interprets path or the
+     * returned value -- purely an opaque payload a concrete hook resolves however it likes (e.g. a
+     * BIC4 prefix in path's own filename mapped through some agent dictionary today; a public key
+     * or some other document property later) and fsp only carries (same domain-neutral contract as
+     * get_doc_id()/node_hint's own doc comment on why pipeline/importer stay generic).
+     * @param path the document's own path, exactly as passed to process_files() -- same string a
+     * concrete hook would otherwise have to re-derive from doc_dscr::path() later, at every call
+     * site that wants it, if this hook didn't exist.
+     * @return an opaque, caller-chosen id, or std::nullopt if this run's hooks don't resolve one
+     * (the default, no-op body) -- doc_dscr::agent_id() then stays std::nullopt for that document.
+     */
+    [[nodiscard]] virtual std::optional<std::int16_t> get_doc_agent_id([[maybe_unused]] cstr_t path) { return std::nullopt; }
 
     /**
      * @brief Makes this hooks instance's own concrete run-level shared-data instance (see
@@ -225,14 +243,22 @@ namespace fsp
      * result_values -- result is non-const because a validated_t<X> field's failure gets appended
      * to result.errors() during materialization (see reflection.hpp). segment is the raw cut this
      * result came from (offset/length/ns/attrs of the top-level tag), for callers that want more
-     * than the extracted values. Returns the segment's semantic verdict (true = semantically
-     * correct). Final -- see on_run_safe_start()'s own doc comment.
+     * than the extracted values (e.g. segment.view(dscr.mmf().data()) for the raw XML fragment).
+     * dscr is doc_ndx's own doc_dscr (out_doc_id()/agent_id()/mmf() and the rest) -- passed through
+     * so typed_semantic_check's on_type() dispatch (see its own class comment) can hand it straight
+     * to a concrete cb's on_type() overload without a second, redundant ds_dscr[doc_ndx] lookup at
+     * that call site. Returns the segment's semantic verdict (true = semantically correct). Final
+     * -- see on_run_safe_start()'s own doc comment.
      * @note Called potentially millions of times per run -- always a genuine virtual call (see
      * pipeline_hooks_crtp's doc comment for why the earlier "detect override, skip the call"
      * idea was dropped).
      */
-    virtual bool on_seg_sem_safe_check(const xml_segment& segment, segment_result& result, bool is_first, bool is_last) final
-    { return on_seg_sem_check(segment, result, is_first, is_last); }
+    virtual bool on_seg_sem_safe_check(const xml_segment& segment,
+                                       const doc_dscr&    dscr,
+                                       segment_result&    result,
+                                       bool               is_first,
+                                       bool               is_last) final
+    { return on_seg_sem_check(segment, dscr, result, is_first, is_last); }
 
     /**
      * @brief A P-role thread hands off a batch of semantically OK segments (on_seg_sem_check()
@@ -342,6 +368,7 @@ namespace fsp
      * i.e. semantic == technical until a derived class adds real business logic.
      */
     virtual bool on_seg_sem_check([[maybe_unused]] const xml_segment& segment,
+                                  [[maybe_unused]] const doc_dscr&    dscr,
                                   segment_result&                     result,
                                   [[maybe_unused]] bool               is_first,
                                   [[maybe_unused]] bool               is_last)

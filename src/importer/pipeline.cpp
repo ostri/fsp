@@ -56,7 +56,7 @@ namespace fsp
     const auto doc_ndx         = static_cast<std::size_t>(result.doc_ndx());
     auto&      counters        = (*doc_counters_)[doc_ndx];
     const auto pos             = counters.begin_segment(result.seg_id());
-    const bool semantically_ok = hooks.on_seg_sem_safe_check(segment, result, pos.is_first, pos.is_last);
+    const bool semantically_ok = hooks.on_seg_sem_safe_check(segment, ds_dscr_[doc_ndx], result, pos.is_first, pos.is_last);
     const bool completed       = counters.end_segment(semantically_ok);
     if (completed) log_doc_done(doc_ndx);
     if (completed) maybe_finish_seg_processing(doc_ndx, hooks);
@@ -205,11 +205,13 @@ namespace fsp
                                              // xml_paths.size() by the loop condition
       try
       {
-        // Built here, not via doc_set_dscr::add_document(cstr_t), so out_doc_id() can be filled
-        // in BEFORE the doc_dscr is handed to doc_set_dscr -- see get_doc_id()'s own doc comment
-        // on why this must happen strictly before any worker thread starts.
+        // Built here, not via doc_set_dscr::add_document(cstr_t), so out_doc_id()/agent_id() can be
+        // filled in BEFORE the doc_dscr is handed to doc_set_dscr -- see get_doc_id()'s/
+        // get_doc_agent_id()'s own doc comments on why this must happen strictly before any worker
+        // thread starts.
         doc_dscr doc(file);
         doc.set_out_doc_id(hooks.get_doc_id(doc_ndx % doc_id_node_hint_modulo));
+        doc.set_agent_id(hooks.get_doc_agent_id(file));
         if (! ds_dscr_.add_document(std::move(doc)))
           return std::unexpected(error_info{processor_error::file_open_failed, fmt::format("Failed to add document: '{}'", file), file, 0});
       }

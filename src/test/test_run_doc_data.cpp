@@ -271,7 +271,12 @@ namespace
   public:
     // Not an override point (typed_semantic_check dispatches per schema class) -- both on_type()
     // overloads funnel through this so declared_count/actual_count stay in one place.
-    [[nodiscard]] bool on_type(const fsp::work::pacs8_hdr& hdr, fsp::segment_result& result, bool /*is_first*/, bool /*is_last*/) const
+    [[nodiscard]] bool on_type(const fsp::work::pacs8_hdr& hdr,
+                               std::string_view /*raw_msg*/,
+                               const fsp::doc_dscr& /*dscr*/,
+                               fsp::segment_result& result,
+                               bool /*is_first*/,
+                               bool /*is_last*/) const
     {
       {
         auto guard            = fsp::lock(doc_data(result.doc_ndx()));
@@ -280,7 +285,12 @@ namespace
       observed_->log_call("on_type(hdr)");
       return true;
     }
-    [[nodiscard]] bool on_type(const fsp::work::pacs8_txn& /*txn*/, fsp::segment_result& result, bool /*is_first*/, bool /*is_last*/) const
+    [[nodiscard]] bool on_type(const fsp::work::pacs8_txn& /*txn*/,
+                               std::string_view /*raw_msg*/,
+                               const fsp::doc_dscr& /*dscr*/,
+                               fsp::segment_result& result,
+                               bool /*is_first*/,
+                               bool /*is_last*/) const
     {
       // The artificial delay sits INSIDE the lock, on purpose -- this is what forces a second
       // concurrent thread to genuinely block on fsp::lock() (mutual exclusion under real
