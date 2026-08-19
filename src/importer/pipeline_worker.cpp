@@ -44,6 +44,25 @@ namespace fsp
     // doc_ndx reaches do_cut() exactly once (see pipeline::seed_queues()), so this is still
     // exactly one assign_doc_data() call per document, same recycling guarantee as before.
     pipeline_.assign_doc_data(doc_ndx, *hooks_);
+    // A hook's own get_doc_agent_id() (see pipeline::add_documents(), called on the main thread
+    // before any worker starts) may resolve to 0 rather than a real id -- an opaque, hook-chosen
+    // convention for "no agent recognized for this document" (fsp itself never interprets
+    // agent_id(), see doc_dscr::agent_id()'s own doc comment; ach's own ach_hook uses 0 this way).
+    // Rejected here, before any cut work, the same way an already-known-invalid document is
+    // rejected below -- report_syntax_result(false) both marks the document invalid AND (if this
+    // call wins try_start_closing()) dispatches hooks.on_doc_close() itself, so a hook still gets
+    // exactly one terminal callback for such a document, same as any other syntax failure.
+    if (pipeline_.ds_dscr()[doc_ndx].agent_id() == 0)
+    {
+      log_.warn(fmt::format("Doc {}: agent_id()==0 (unresolved agent) -- cut skipped.", doc_ndx));
+      pipeline_.report_syntax_result(
+        doc_ndx,
+        false,
+        *hooks_,
+        error_info{processor_error::unknown, "agent_id()==0 (unresolved agent)", pipeline_.ds_dscr()[doc_ndx].path(), 0});
+      pipeline_.notify_cut_done();
+      return;
+    }
     // Requirement: a document already known to be invalid is never cut at all. doc_dscr::failed()
     // (not status().status(), which is ALSO three_state::unknown -- not three_state::invalid --
     // for a document nothing has reported on yet) is the correct "known bad" predicate here.
@@ -73,6 +92,24 @@ namespace fsp
 
   void pipeline_worker::do_validate(std::size_t doc_ndx)
   {
+    // Same agent_id()==0 rejection as do_cut() above, and for the same reason -- but here mostly
+    // a defensive no-op rather than the primary rejection path: do_cut()'s own report_syntax_result
+    // (false) already drags BOTH syntax and validation invalid for this document (see
+    // doc_dscr::set_syntax_result()'s own doc comment), and C always runs ahead of/in parallel
+    // with V (see pipeline_worker::operator()()'s own priority comment) -- but C/V order relative
+    // to each other is NOT guaranteed for any single document, so V can still reach this doc_ndx
+    // first. Bailing out here too, rather than relying on failed() alone, keeps this check as
+    // cheap/obvious as do_cut()'s own and avoids a redundant validator_->validate() call either way.
+    if (pipeline_.ds_dscr()[doc_ndx].agent_id() == 0)
+    {
+      log_.warn(fmt::format("Doc {}: agent_id()==0 (unresolved agent) -- validation skipped.", doc_ndx));
+      pipeline_.report_validation_result(
+        doc_ndx,
+        false,
+        *hooks_,
+        error_info{processor_error::unknown, "agent_id()==0 (unresolved agent)", pipeline_.ds_dscr()[doc_ndx].path(), 0});
+      return;
+    }
     auto res = validator_->validate(doc_ndx);
     if (! res)
     {

@@ -504,6 +504,38 @@ TEST_CASE("pipeline: get_doc_agent_id()'s resolved value reaches doc_dscr::agent
   CHECK(state->txn_agent_id_value.load() == resolved_id);
 }
 
+// --- Scenario 6b: get_doc_agent_id() resolves to 0 (a hook's own "unresolved agent" convention,
+// see doc_dscr::agent_id()'s own doc comment - fsp itself never interprets the value) -- C/V both
+// reject the document before doing any real cut/validate work, doc_dscr::agent_id() still carries
+// the 0, and on_doc_close() still fires exactly once (verdict.ok()==false, syntax/validation both
+// invalid) -- same terminal-callback guarantee as any other syntax/validation failure. ------------
+TEST_CASE("pipeline: get_doc_agent_id()'s resolved 0 rejects the document before any cut/validate work", "[pipeline][stages][agent-id]")
+{
+  temp_dir_guard dir;
+  const auto     doc_path = dir.write("doc.xml", well_formed_valid_doc());
+
+  auto             state = std::make_shared<shared_state>();
+  stage_test_hooks hooks(state, static_cast<std::int16_t>(0));
+
+  auto cfg      = make_cfg("test-agent-id-zero", 1);
+  auto [p, res] = fsp::importer::exec(cfg, std::vector<std::string>{doc_path}, xsd_path(), hooks);
+
+  REQUIRE(res.has_value());
+  const auto& ds_dscr = p->ds_dscr();
+  REQUIRE(ds_dscr[0].agent_id().has_value());
+  CHECK(*ds_dscr[0].agent_id() == 0);
+  CHECK(ds_dscr[0].failed());
+
+  // Exactly one terminal callback, never a cut/validate/semantic-check attempt.
+  CHECK(state->doc_close_calls.load() == 1);
+  CHECK_FALSE(state->doc_close_seen_syntax_ok.load());
+  CHECK_FALSE(state->doc_close_seen_validation_ok.load());
+  CHECK(state->doc_sem_check_calls.load() == 0);
+  CHECK(state->segments_ever_seen.load() == 0);
+  CHECK(p->get_results().empty());
+  CHECK(p->get_errors().empty());
+}
+
 // --- Scenario 7: on_type()'s own raw_msg parameter carries the segment's own raw XML fragment,
 // independent of (but derived from) doc_dscr's own mmap -- matches xml_segment::view() directly ---
 TEST_CASE("pipeline: on_type()'s own raw_msg parameter carries the segment's raw XML fragment", "[pipeline][stages][raw-msg]")
