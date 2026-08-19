@@ -59,7 +59,7 @@ namespace fsp
         doc_ndx,
         false,
         *hooks_,
-        error_info{processor_error::unknown, "agent_id()==0 (unresolved agent)", pipeline_.ds_dscr()[doc_ndx].path(), 0});
+        error_info{processor_error::unknown, "agent_id()==0 (unresolved agent) -- cut skipped", pipeline_.ds_dscr()[doc_ndx].path(), 0});
       pipeline_.notify_cut_done();
       return;
     }
@@ -92,22 +92,19 @@ namespace fsp
 
   void pipeline_worker::do_validate(std::size_t doc_ndx)
   {
-    // Same agent_id()==0 rejection as do_cut() above, and for the same reason -- but here mostly
-    // a defensive no-op rather than the primary rejection path: do_cut()'s own report_syntax_result
-    // (false) already drags BOTH syntax and validation invalid for this document (see
-    // doc_dscr::set_syntax_result()'s own doc comment), and C always runs ahead of/in parallel
-    // with V (see pipeline_worker::operator()()'s own priority comment) -- but C/V order relative
-    // to each other is NOT guaranteed for any single document, so V can still reach this doc_ndx
-    // first. Bailing out here too, rather than relying on failed() alone, keeps this check as
-    // cheap/obvious as do_cut()'s own and avoids a redundant validator_->validate() call either way.
+    // Same agent_id()==0 rejection as do_cut() above and for the same reason, but a plain, silent
+    // bailout here rather than do_cut()'s own report_syntax_result(false) call: do_cut() is the
+    // ONLY caller of pipeline::assign_doc_data() (see its own doc comment - "every doc_ndx reaches
+    // do_cut() exactly once, so this is still exactly one assign_doc_data() call per document"),
+    // and calling report_validation_result(false) here (winning try_start_closing()) would
+    // dispatch finish_doc_close() -> mark_doc_data_reader_done() before assign_doc_data() has
+    // necessarily run for this doc_ndx at all - an underflow of doc_data_pending_readers_, not a
+    // race that only shows up occasionally. do_cut() itself still rejects the SAME document (its
+    // own agent_id()==0 bailout above), so on_doc_close() still fires exactly once for it, same
+    // terminal-callback guarantee as any other rejection - just always via C, never via V.
     if (pipeline_.ds_dscr()[doc_ndx].agent_id() == 0)
     {
-      log_.warn(fmt::format("Doc {}: agent_id()==0 (unresolved agent) -- validation skipped.", doc_ndx));
-      pipeline_.report_validation_result(
-        doc_ndx,
-        false,
-        *hooks_,
-        error_info{processor_error::unknown, "agent_id()==0 (unresolved agent)", pipeline_.ds_dscr()[doc_ndx].path(), 0});
+      if (log_info_) log_.info(fmt::format("Doc {}: agent_id()==0 (unresolved agent) -- validation skipped.", doc_ndx));
       return;
     }
     auto res = validator_->validate(doc_ndx);

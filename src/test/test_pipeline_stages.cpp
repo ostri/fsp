@@ -182,6 +182,8 @@ namespace
     std::atomic<std::int16_t> hdr_agent_id_value{0};
     std::atomic<bool>         txn_agent_id_has_value{false};
     std::atomic<std::int16_t> txn_agent_id_value{0};
+    std::mutex                doc_close_err_mutex;   // guards doc_close_err_message (plain string, not lock-free)
+    fsp::str_t                doc_close_err_message; // last on_doc_close()'s own err.message(), verbatim
   };
 
   // A tiny doc-level doc_data_root, used only to prove the DocData template argument/
@@ -262,13 +264,17 @@ namespace
     }
     [[nodiscard]] bool on_doc_close(std::size_t /*doc_ndx*/,
                                     const fsp::doc_status_t& verdict,
-                                    const fsp::error_info& /*err*/,
+                                    const fsp::error_info&   err,
                                     const fsp::doc_dscr& /*dscr*/) override
     {
       state_->doc_close_calls.fetch_add(1, std::memory_order_relaxed);
       state_->doc_close_seen_syntax_ok.store(verdict.syntax_status() == fsp::three_state::valid, std::memory_order_relaxed);
       state_->doc_close_seen_validation_ok.store(verdict.valid_status() == fsp::three_state::valid, std::memory_order_relaxed);
       state_->doc_close_seen_semantic_ok.store(verdict.semantic_status() == fsp::three_state::valid, std::memory_order_relaxed);
+      {
+        const std::scoped_lock lock(state_->doc_close_err_mutex);
+        state_->doc_close_err_message = fsp::str_t(err.message());
+      }
       return verdict.ok();
     }
     // Override point exercised directly (not via a real BIC4/dictionary lookup -- see
@@ -534,6 +540,47 @@ TEST_CASE("pipeline: get_doc_agent_id()'s resolved 0 rejects the document before
   CHECK(state->segments_ever_seen.load() == 0);
   CHECK(p->get_results().empty());
   CHECK(p->get_errors().empty());
+  {
+    // do_cut() always wins for such a document (do_validate() only ever bails out silently - see
+    // its own doc comment on why it cannot itself call report_validation_result() here).
+    const std::scoped_lock lock(state->doc_close_err_mutex);
+    CHECK(state->doc_close_err_message.find("cut skipped") != fsp::str_t::npos);
+  }
+}
+
+// --- Scenario 6c: same as Scenario 6b, with two documents instead of one, both agent_id()==0 -
+// do_validate() never rejects a document itself (it only bails out silently - see its own doc
+// comment on why: it is not pipeline::assign_doc_data()'s caller, do_cut() is), so do_cut() is
+// always the one that actually closes such a document, with 2+ documents same as with 1. ----------
+TEST_CASE("pipeline: with 2+ documents, every agent_id()==0 document is still rejected before any cut/validate work",
+          "[pipeline][stages][agent-id]")
+{
+  temp_dir_guard dir;
+  const auto     doc_path_a = dir.write("doc-a.xml", well_formed_valid_doc());
+  const auto     doc_path_b = dir.write("doc-b.xml", well_formed_valid_doc());
+
+  auto             state = std::make_shared<shared_state>();
+  stage_test_hooks hooks(state, static_cast<std::int16_t>(0)); // both documents resolve to agent_id 0
+
+  auto cfg      = make_cfg("test-agent-id-zero-two-docs", 2);
+  auto [p, res] = fsp::importer::exec(cfg, std::vector<std::string>{doc_path_a, doc_path_b}, xsd_path(), hooks);
+
+  REQUIRE(res.has_value());
+  const auto& ds_dscr = p->ds_dscr();
+  REQUIRE(ds_dscr[0].agent_id().has_value());
+  CHECK(*ds_dscr[0].agent_id() == 0);
+  CHECK(ds_dscr[0].failed());
+  REQUIRE(ds_dscr[1].agent_id().has_value());
+  CHECK(*ds_dscr[1].agent_id() == 0);
+  CHECK(ds_dscr[1].failed());
+
+  CHECK(state->doc_close_calls.load() == 2);
+  CHECK(state->doc_sem_check_calls.load() == 0);
+  CHECK(state->segments_ever_seen.load() == 0); // P never ran for either document
+  {
+    const std::scoped_lock lock(state->doc_close_err_mutex);
+    CHECK(state->doc_close_err_message.find("cut skipped") != fsp::str_t::npos);
+  }
 }
 
 // --- Scenario 7: on_type()'s own raw_msg parameter carries the segment's own raw XML fragment,
