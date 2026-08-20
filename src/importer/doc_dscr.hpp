@@ -383,6 +383,23 @@ namespace fsp
      */
     [[nodiscard]] std::optional<std::int16_t> agent_id() const noexcept { return agent_id_; }
     void                                      set_agent_id(std::optional<std::int16_t> id) noexcept { agent_id_ = id; }
+
+    /**
+     * @brief True once pipeline_worker::do_cut() has called hooks.on_doc_safe_open() (and that
+     * call has RETURNED) for this document - false until then. C and V are seeded into their own
+     * queues independently (pipeline::seed_queues()) and can run on different threads with no
+     * ordering between them, so a fast-failing V pass can otherwise call report_validation_result()
+     * (and, if it wins doc_status_t::try_start_closing(), hooks.on_doc_safe_close()) BEFORE
+     * on_doc_safe_open() has even started - a hook whose own on_doc_open() does work (e.g. an
+     * ach_hook-derived class writing a database row) then sees on_doc_close() for a document it
+     * never opened. pipeline_worker::do_validate() checks this before validating (see its own doc
+     * comment) and, if not yet opened, re-queues the document instead of proceeding - this flag is
+     * that check's own signal. mark_opened()/is_opened() are the only writer/reader; no separate
+     * mutex needed (bool is naturally atomic-safe to publish this way, and the two are never used
+     * for anything requiring a stronger ordering than "eventually visible").
+     */
+    void               mark_opened() const noexcept { open_reported_.store(true, std::memory_order_release); }
+    [[nodiscard]] bool is_opened() const noexcept { return open_reported_.load(std::memory_order_acquire); }
   private: //< methods
     void open(cstr_t path);
     // Records err_ the first time EITHER set_syntax_result()/set_validation_result() reports a
@@ -401,6 +418,10 @@ namespace fsp
     error_info                  err_;             // if there is an error, here it is the error description (first reporter wins)
     std::uint64_t               out_doc_id_ = 0;  // caller-assigned output document id, see out_doc_id() above
     std::optional<std::int16_t> agent_id_;        // caller-assigned agent id, see agent_id() above -- nullopt until/unless set
+    // mutable: mark_opened() is called through pipeline::ds_dscr()'s own const-only accessor (see
+    // pipeline.hpp) - same "logical, not representational, state" reasoning doc_status_t's own
+    // mtx_ already carries elsewhere in this file.
+    mutable std::atomic<bool> open_reported_{false}; // see mark_opened()/is_opened() above
   };
   ///////////////////////////////////////////////////////////////////////////////////////////
   inline doc_dscr::doc_dscr(cstr_t path)
@@ -423,6 +444,7 @@ namespace fsp
   , err_(std::move(o.err_))
   , out_doc_id_(o.out_doc_id_)
   , agent_id_(o.agent_id_)
+  , open_reported_(o.open_reported_.load(std::memory_order_relaxed))
   {
   }
   inline doc_dscr& doc_dscr::operator=(doc_dscr&& o) noexcept
@@ -435,6 +457,7 @@ namespace fsp
       err_        = std::move(o.err_);
       out_doc_id_ = o.out_doc_id_;
       agent_id_   = o.agent_id_;
+      open_reported_.store(o.open_reported_.load(std::memory_order_relaxed), std::memory_order_relaxed);
     }
     return *this;
   }

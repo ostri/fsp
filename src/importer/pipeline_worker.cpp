@@ -1,6 +1,7 @@
 #include "pipeline_worker.hpp"
 #include "pipeline.hpp"
 #include <fmt/format.h>
+#include <thread>
 
 namespace fsp
 {
@@ -74,6 +75,12 @@ namespace fsp
     }
     pipeline_.record_doc_open(doc_ndx);
     hooks_->on_doc_safe_open(doc_ndx, pipeline_.ds_dscr()[doc_ndx]);
+    // Published AFTER on_doc_safe_open() has returned, BEFORE any further work on this document -
+    // do_validate() (below) checks this before validating, so a V pass racing ahead of this C
+    // pass on another thread never reports a result (and possibly wins try_start_closing(),
+    // dispatching on_doc_close()) for a document whose own on_doc_open() hasn't run yet. See
+    // doc_dscr::mark_opened()'s own doc comment for the full race this closes.
+    pipeline_.ds_dscr()[doc_ndx].mark_opened();
     auto res = cutter_->cut(doc_ndx);
     // A malformed document is a per-document failure, not a fatal one: mark it invalid so any
     // already-cut segments of this document get discarded by P, then keep going. May itself
@@ -107,6 +114,16 @@ namespace fsp
       if (log_info_) log_.info(fmt::format("Doc {}: agent_id()==0 (unresolved agent) -- validation skipped.", doc_ndx));
       return;
     }
+    // C and V are seeded into their own queues independently (pipeline::seed_queues()) and can run
+    // on different threads with no ordering between them - a fast-failing V pass could otherwise
+    // report a result (and possibly win doc_status_t::try_start_closing(), dispatching
+    // hooks.on_doc_safe_close()) for a document whose own on_doc_safe_open() hasn't even started
+    // yet on the C thread - see doc_dscr::mark_opened()'s own doc comment for the full race this
+    // closes. The window is normally sub-millisecond (on_doc_open() doing real work, e.g. a
+    // database insert, is the only thing this can ever wait on) - a short spin-yield loop, not a
+    // queue requeue (lock_queue<T> has no plain push(), only push_range() at seed time), keeps this
+    // fix local and avoids re-plumbing the C/V queue relationship.
+    while (! pipeline_.ds_dscr()[doc_ndx].is_opened()) std::this_thread::yield();
     auto res = validator_->validate(doc_ndx);
     if (! res)
     {
