@@ -45,10 +45,11 @@ int main(int argc, const char* argv[])
   {
     const auto no_of_cores = 16U;                 // number of paralell worker threads
     auto       cfg         = fsp::importer_config{//
-                                                  .targets        = fsp::proc_data_of<^^fsp::work>(),
-                                                  .num_of_workers = no_of_cores,
-                                                  .log_config     = load_program_logger_config(args.bare_name),
-                                                  .program_name   = args.bare_name};
+                                                  .targets          = fsp::proc_data_of<^^fsp::work>(),
+                                                  .num_of_workers   = no_of_cores,
+                                                  .log_config       = load_program_logger_config(args.bare_name),
+                                                  .program_name     = args.bare_name,
+                                                  .header_seg_types = {}};
     auto [p, res]          = fsp::importer::exec(cfg, args.files, args.xsd_file);
     if (! res)
     {

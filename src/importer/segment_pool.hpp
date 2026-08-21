@@ -25,9 +25,23 @@ namespace fsp
     void                      ready_queue_close();
     void                      abort();
     queue_status              pop_segment_ndx(std::size_t shard, std::size_t& ndx);
-    void                      set_segment(std::size_t ndx, xml_segment seg);
-    void                      set_result(std::size_t ndx, const segment_result& seg_r);
-    xml_segment               retrieve_segment(std::size_t ndx);
+    // --- Header-priority counterparts to push_ready()/try_pop_ready()/pop_segment_ndx()/
+    // ready_queue_size_approx() above -- a second, independent set of sharded queues (same
+    // sharding scheme, shard_of_slot_) reserved for segments the CALLER (the cutter, via
+    // importer_config::header_seg_types -- segment_pool itself has no notion of schema types)
+    // decides are headers. Deliberately mirrors the ordinary ready-queue API 1:1 rather than
+    // adding a "which queue" parameter to the existing methods, so a caller that never uses
+    // header_seg_types (the default) pays no extra branching on push_ready()'s/try_pop_ready()'s
+    // own hot path -- see docs/importer_usage.md's own "Header segments are processed first"
+    // section for the full mechanism this exists to support.
+    void                         push_ready_header(std::size_t idx);
+    auto                         try_pop_ready_header(std::size_t shard);
+    queue_status                 pop_segment_ndx_header(std::size_t shard, std::size_t& ndx);
+    [[nodiscard]] std::ptrdiff_t ready_queue_size_approx_header(std::size_t shard) const noexcept;
+    void                         ready_queue_close_header();
+    void                         set_segment(std::size_t ndx, xml_segment seg);
+    void                         set_result(std::size_t ndx, const segment_result& seg_r);
+    xml_segment                  retrieve_segment(std::size_t ndx);
     /**
      * @brief In-place access to slot ndx's xml_segment/segment_result -- unlike
      * retrieve_segment(), does NOT free the slot: the caller (see xml_worker::process_one())
@@ -71,10 +85,15 @@ namespace fsp
     // contend on any one queue's mutex+condition_variable (see the 21x-more-CPU-seconds/327x-more
     // voluntary-context-switches blowup measured going from 1 to 10 concurrent documents).
     std::vector<lock_queue<std::size_t>> ready_queues_; // C -> P : indices ready for processing, sharded
-    std::vector<lock_queue<std::size_t>> free_queues_;  // P -> C : reusable slot indices, sharded
-    mutable std::mutex                   resize_mtx_;   // whenever we access segments_ or results_ as whole
-    std::unique_ptr<xml_segment[]>       segments_;     // NOLINT(hicpp-avoid-c-arrays)
-    std::unique_ptr<segment_result[]>    results_;      // NOLINT(hicpp-avoid-c-arrays)
+    // Header-priority counterpart to ready_queues_ above -- same sharding scheme, same slot
+    // indices (a slot lives in EITHER ready_queues_ OR header_ready_queues_ at a time, never
+    // both), just a separate set of queues a caller can drain first -- see push_ready_header()'s
+    // own doc comment.
+    std::vector<lock_queue<std::size_t>> header_ready_queues_;
+    std::vector<lock_queue<std::size_t>> free_queues_; // P -> C : reusable slot indices, sharded
+    mutable std::mutex                   resize_mtx_;  // whenever we access segments_ or results_ as whole
+    std::unique_ptr<xml_segment[]>       segments_;    // NOLINT(hicpp-avoid-c-arrays)
+    std::unique_ptr<segment_result[]>    results_;     // NOLINT(hicpp-avoid-c-arrays)
     // Which shard owns each slot -- set once in acquire_slot(), read (never concurrently with
     // the write) in push_ready()/retrieve_segment() via the happens-before edge each queue's
     // mutex already provides, so a plain array is enough, no atomics needed.
@@ -91,6 +110,7 @@ namespace fsp
   : log_(log)
   , num_shards_(std::max<std::size_t>(1, num_shards))
   , ready_queues_(num_shards_)
+  , header_ready_queues_(num_shards_)
   , free_queues_(num_shards_)
   { init(no_of_slots); }
   /////////////////////////////////////////////////////////////////////////////////////////////////
@@ -137,8 +157,14 @@ namespace fsp
     return slot;
   }
 
-  inline void        segment_pool::push_ready(std::size_t idx) { ready_queues_[shard_of_slot_[idx]].push(idx); }
-  inline auto        segment_pool::try_pop_ready(std::size_t shard) { return ready_queues_[shard].try_pop(); }
+  inline void         segment_pool::push_ready(std::size_t idx) { ready_queues_[shard_of_slot_[idx]].push(idx); }
+  inline auto         segment_pool::try_pop_ready(std::size_t shard) { return ready_queues_[shard].try_pop(); }
+  inline void         segment_pool::push_ready_header(std::size_t idx) { header_ready_queues_[shard_of_slot_[idx]].push(idx); }
+  inline auto         segment_pool::try_pop_ready_header(std::size_t shard) { return header_ready_queues_[shard].try_pop(); }
+  inline queue_status segment_pool::pop_segment_ndx_header(std::size_t shard, std::size_t& ndx)
+  { return header_ready_queues_[shard].pop(ndx); }
+  inline std::ptrdiff_t segment_pool::ready_queue_size_approx_header(std::size_t shard) const noexcept
+  { return header_ready_queues_[shard].size_approx(); }
   inline std::size_t segment_pool::size() const noexcept
   {
     std::lock_guard lock(resize_mtx_);
@@ -147,10 +173,21 @@ namespace fsp
   inline void segment_pool::ready_queue_close()
   {
     for (auto& q : ready_queues_) q.set_finished();
+    ready_queue_close_header();
+  }
+  // Separate from ready_queue_close() above only so a caller (none currently) could close the two
+  // independently -- pipeline::notify_cut_done() (the only caller of ready_queue_close()) always
+  // wants both, since a header queue left open after the ordinary one closes would leave a P-role
+  // thread's blocking pop_segment_ndx_header() fallback waiting forever for work that will never
+  // arrive.
+  inline void segment_pool::ready_queue_close_header()
+  {
+    for (auto& q : header_ready_queues_) q.set_finished();
   }
   inline void segment_pool::abort()
   {
     for (auto& q : ready_queues_) q.set_abort();
+    for (auto& q : header_ready_queues_) q.set_abort();
     for (auto& q : free_queues_) q.set_abort();
   }
   inline queue_status segment_pool::pop_segment_ndx(std::size_t shard, std::size_t& ndx) { return ready_queues_[shard].pop(ndx); }

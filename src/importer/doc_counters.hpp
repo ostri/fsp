@@ -78,6 +78,23 @@ namespace fsp
     // comment on why that single mutex-protected latch replaced this class's former second stage).
     [[nodiscard]] bool maybe_seg_processing_complete() noexcept;
 
+    /**
+     * @brief Called by xml_worker::flush_ok_block()/flush_nak_block(), once per (document,
+     * flush-batch) pair, AFTER hooks.on_block_safe_store()/on_failed_block_safe_store() has
+     * returned success for that batch -- count is however many of THIS document's segments were
+     * in that one batch (a batch can freely mix segments from several documents, see
+     * pipeline::record_segments_stored()'s own doc comment, so this is a per-document subset of
+     * the batch, not the whole batch's size). Adds count to stored_ and, still under that same
+     * atomic operation's happens-before edge, checks whether the running total has now reached
+     * expected_total_ (set once by record_doc_close(), same total maybe_seg_processing_complete()
+     * already compares against) -- returns true to EXACTLY ONE caller, ever, the one whose
+     * fetch_add() is the one that pushes stored_ from below expected_total_ to at-or-above it (see
+     * stored_seg_logged_'s own doc comment for the CAS that makes this one-shot). A document whose
+     * segments are flushed across several batches/worker threads calls this several times; only
+     * the crossing call returns true.
+     */
+    [[nodiscard]] bool add_segments_stored(std::size_t count) noexcept;
+
     [[nodiscard]] std::chrono::milliseconds processing_doc() const noexcept;  // doc open -> doc close
     [[nodiscard]] std::chrono::milliseconds processing_segs() const noexcept; // first segment -> last segment
     // True end-to-end latency for this document: from the moment cutting started to the moment
@@ -98,6 +115,14 @@ namespace fsp
     std::atomic<bool>        cut_finished_{false};     // set once, by record_doc_close()
     std::atomic<bool>        first_seg_logged_{false}; // guards first_seg_ against a double write
     std::atomic<bool> last_seg_logged_{false}; // guards last_seg_ / completion against firing twice -- see maybe_seg_processing_complete()
+    // Running count of this document's own segments that have left on_block_store()/
+    // on_failed_block_store() (see add_segments_stored()) -- deliberately separate from ok_/
+    // error_ above (which count "semantically checked", not "durably written"). Compared against
+    // the SAME expected_total_ ok_/error_ already use.
+    std::atomic<std::size_t> stored_{0};
+    // Guards add_segments_stored()'s "exactly one caller sees stored_ cross expected_total_"
+    // one-shot answer, same CAS pattern as last_seg_logged_ above.
+    std::atomic<bool> stored_seg_logged_{false};
     clock::time_point doc_open_;
     clock::time_point doc_close_;
     clock::time_point first_seg_;
@@ -144,6 +169,16 @@ namespace fsp
     const bool completed = maybe_seg_processing_complete();
     if (completed) last_seg_ = clock::now();
     return completed;
+  }
+
+  inline bool doc_counters::add_segments_stored(std::size_t count) noexcept
+  {
+    // fetch_add returns the value BEFORE this call's own contribution -- adding count to it gives
+    // the running total AFTER, which is what actually needs comparing against expected_total_.
+    const std::size_t before = stored_.fetch_add(count, std::memory_order_acq_rel);
+    if (before + count < expected_total_.load(std::memory_order_acquire)) return false;
+    bool expected = false;
+    return stored_seg_logged_.compare_exchange_strong(expected, true, std::memory_order_acq_rel);
   }
 
   inline std::size_t doc_counters::ok() const noexcept { return ok_.load(std::memory_order_relaxed); }

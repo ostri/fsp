@@ -19,7 +19,7 @@ namespace fsp
 
   // Identical body to xml_processor::setup_parser_no_validation() — same xercesc configuration,
   // just without validation grammar (validation is a separate V responsibility in this pipeline).
-  void_result doc_cutter::setup_parser_no_validation()
+  e_void doc_cutter::setup_parser_no_validation()
   {
     try
     {
@@ -50,7 +50,7 @@ namespace fsp
   // pool, locks it, then builds a validating SGXMLScanner reader bound to that single grammar --
   // identical pattern to doc_validator::ensure_grammar_loaded(), plus fgXercesCalculateSrcOfs
   // which C (unlike V) needs for Handler::endElement()'s getSrcOffset()-based segment cutting.
-  void_result doc_cutter::setup_parser_with_validation()
+  e_void doc_cutter::setup_parser_with_validation()
   {
     try
     {
@@ -92,7 +92,7 @@ namespace fsp
     }
   }
 
-  void_result doc_cutter::init()
+  e_void doc_cutter::init()
   {
     // Must match pipeline::process_files()'s identical computation of the same condition exactly
     // -- both independently decide from the same (has_grammar(), doc count) inputs, since pipeline
@@ -104,7 +104,20 @@ namespace fsp
     if (! ps) return std::unexpected(ps.error());
     try
     {
-      handler_ = make_unique<Handler>(cfg_.targets, log_, parser_.get(), seg_pool_, ds_dscr_);
+      // Resolves importer_config::header_seg_types (a caller-facing list of seg_type() values,
+      // see its own doc comment) into a dense, index-by-seg_type() lookup vector Handler's own
+      // endElement() can check with a single, branch-predictable bounds check per segment (see
+      // Handler::is_header_seg_type_'s own doc comment) -- built once here, not per segment.
+      // cfg_.targets.xpaths.size() is the number of schema classes in the reflected namespace
+      // targets was built from (one xpath_set per class, see proc_data's own doc comment) -- the
+      // same upper bound seg_type() itself can never reach or exceed. An out-of-range
+      // header_seg_types entry (a caller mistake) is simply ignored rather than resized into,
+      // matching how an unmatched xpath is silently a no-op elsewhere in this class.
+      std::vector<bool> is_header_seg_type(cfg_.targets.xpaths.size(), false);
+      for (const int header_type : cfg_.header_seg_types)
+        if (header_type >= 0 && static_cast<std::size_t>(header_type) < is_header_seg_type.size())
+          is_header_seg_type[static_cast<std::size_t>(header_type)] = true;
+      handler_ = make_unique<Handler>(cfg_.targets, log_, parser_.get(), seg_pool_, ds_dscr_, std::move(is_header_seg_type));
       handler_->set_validating(validate_here);
       parser_->setContentHandler(handler_.get());
       parser_->setErrorHandler(handler_.get());
@@ -116,7 +129,7 @@ namespace fsp
     return {};
   }
 
-  void_result doc_cutter::cut(std::size_t doc_ndx)
+  e_void doc_cutter::cut(std::size_t doc_ndx)
   {
     handler_->set_doc(ds_dscr_[doc_ndx].string_view());
     handler_->set_doc_ndx(static_cast<int>(doc_ndx));

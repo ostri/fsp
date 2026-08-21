@@ -22,12 +22,19 @@ namespace fsp
   {
   public:
     pipeline_worker(pipeline& pl, const importer_config& cfg, const logger::Logger& log, str_t parent_log_name, pipeline_hooks& hooks);
-    void_result                         init(); // sets up the doc_cutter (xerces parser + Handler); call once before operator()
+    e_void                              init(); // sets up the doc_cutter (xerces parser + Handler); call once before operator()
     void                                operator()(const std::stop_token& st, int worker_id);
     [[nodiscard]] const pipeline_hooks& hooks() const noexcept { return *hooks_; }
   private:
     void do_cut(std::size_t doc_ndx);
     void do_validate(std::size_t doc_ndx);
+    // Non-blocking P attempt: header shards first (own, then a sweep of the others), then
+    // ordinary shards the same way -- see operator()'s own doc comment on why header segments
+    // win within P. Returns true iff a segment was actually processed (own_shard/num_shards are
+    // this thread's own fixed values, computed once in operator()). Split out of operator()
+    // purely to keep that loop's own cognitive complexity down -- not meant to be called from
+    // anywhere else.
+    [[nodiscard]] bool try_process_ready_segment(std::size_t own_shard, std::size_t num_shards);
   private:
     // NOLINTBEGIN(cppcoreguidelines-avoid-const-or-ref-data-members)
     pipeline&                       pipeline_;

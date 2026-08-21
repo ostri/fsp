@@ -82,7 +82,7 @@ namespace fsp
     // Only meaningful right after a validate() call that returned false.
     [[nodiscard]] sax_error_source last_error_source() const noexcept { return err_handler_.last_error_source(); }
   private:
-    void_result ensure_grammar_loaded();
+    e_void ensure_grammar_loaded();
   private:
     // NOLINTBEGIN(cppcoreguidelines-avoid-const-or-ref-data-members)
     const logger::Logger&                        log_;

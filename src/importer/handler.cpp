@@ -15,12 +15,14 @@ namespace fsp
                    const logger::Logger&         log,
                    const xercesc::SAX2XMLReader* parser,
                    segment_pool&                 pool,
-                   const doc_set_dscr&           ds_dscr)
-  : log_(log)         // log
-  , targets_(targets) //
-  , parser_(parser)   // parser
-  , ds_dscr_(ds_dscr) // documents to be processed
-  , pool_(pool)       // segment pool
+                   const doc_set_dscr&           ds_dscr,
+                   std::vector<bool>             is_header_seg_type)
+  : log_(log)                                          // log
+  , targets_(targets)                                  //
+  , parser_(parser)                                    // parser
+  , ds_dscr_(ds_dscr)                                  // documents to be processed
+  , pool_(pool)                                        // segment pool
+  , is_header_seg_type_(std::move(is_header_seg_type)) // see its own doc comment in handler.hpp
   , max_xpath_depth_(static_cast<int>(targets_.targets.max_xpath_size()))
   {
     // targets are converted to wide characters to make all matching in XMLCh
@@ -260,7 +262,16 @@ namespace fsp
           log_.trace(fmt::format("{}", seg.dump_all(doc_)));
         }
         pool_.set_segment(idx, std::move(seg));
-        pool_.push_ready(idx);
+        // is_header_seg_type_ is empty unless importer_config::header_seg_types was actually set
+        // (see its own doc comment) -- the bounds check below is therefore free in the common
+        // case (empty vector short-circuits before ever indexing it) and only ever indexes
+        // is_header_seg_type_[seg_type_] once it's known non-empty AND seg_type_ (always >= 0
+        // here -- set from a live, matched xpath rule, never the -1 "no capture" sentinel) is in
+        // range.
+        const bool is_header = ! is_header_seg_type_.empty() && static_cast<std::size_t>(seg_type_) < is_header_seg_type_.size() &&
+                               is_header_seg_type_[static_cast<std::size_t>(seg_type_)];
+        if (is_header) pool_.push_ready_header(idx);
+        else pool_.push_ready(idx);
 
         frag_depth_ = -1; // we are outside of capturing
         seg_type_   = -1; // undefined segment type

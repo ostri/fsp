@@ -205,7 +205,7 @@ namespace
     {
     }
   protected:
-    [[nodiscard]] fsp::void_result on_run_start(const fsp::doc_set_dscr& /*ds_dscr*/) override
+    [[nodiscard]] fsp::e_void on_run_start(const fsp::doc_set_dscr& /*ds_dscr*/) override
     {
       auto guard = fsp::lock(run_data());
       // factory_tag is checked here, not after the run -- run_data_ itself is destroyed right
@@ -218,9 +218,9 @@ namespace
       observed_->hook_call_order.push_back("on_run_start");
       return {};
     }
-    void on_run_end(const fsp::doc_set_counter& /*counters*/,
-                    const fsp::doc_set_dscr& /*ds_dscr*/,
-                    std::span<const fsp::pipeline_hooks*> /*worker_clones*/) override
+    [[nodiscard]] fsp::e_void on_run_end(const fsp::doc_set_counter& /*counters*/,
+                                         const fsp::doc_set_dscr& /*ds_dscr*/,
+                                         std::span<const fsp::pipeline_hooks*> /*worker_clones*/) override
     {
       auto guard = fsp::lock(run_data());
       REQUIRE(guard->factory_tag == k_factory_tag_run);
@@ -228,19 +228,32 @@ namespace
       observed_->run_end_seen                   = true;
       observed_->total_segments_seen_at_run_end = guard->total_segments_seen;
       observed_->hook_call_order.push_back("on_run_end");
+      return {};
     }
-    void on_wrk_start(int /*worker_id*/, fsp::cstr_t /*thread_name*/) override { observed_->log_call("on_wrk_start"); }
-    void on_wrk_end(int /*worker_id*/, fsp::cstr_t /*thread_name*/) override { observed_->log_call("on_wrk_end"); }
-    void on_doc_open(std::size_t doc_ndx, const fsp::doc_dscr& /*dscr*/) override
+    [[nodiscard]] fsp::e_void on_wrk_start(int /*worker_id*/, fsp::cstr_t /*thread_name*/) override
+    {
+      observed_->log_call("on_wrk_start");
+      return {};
+    }
+    [[nodiscard]] fsp::e_void on_wrk_end(int /*worker_id*/, fsp::cstr_t /*thread_name*/) override
+    {
+      observed_->log_call("on_wrk_end");
+      return {};
+    }
+    [[nodiscard]] fsp::e_void on_doc_open(std::size_t doc_ndx, const fsp::doc_dscr& /*dscr*/) override
     {
       auto guard = fsp::lock(doc_data(doc_ndx));
       REQUIRE(guard->factory_tag == k_factory_tag_doc);
       const std::lock_guard lk(observed_->mtx);
       observed_->doc_data_factory_tag_seen = guard->factory_tag;
       observed_->hook_call_order.push_back("on_doc_open");
+      return {};
     }
-    void on_doc_cutting_finished(std::size_t /*doc_ndx*/, const fsp::doc_dscr& /*dscr*/) override
-    { observed_->log_call("on_doc_cutting_finished"); }
+    [[nodiscard]] fsp::e_void on_doc_cutting_end(std::size_t /*doc_ndx*/, const fsp::doc_dscr& /*dscr*/) override
+    {
+      observed_->log_call("on_doc_cutting_end");
+      return {};
+    }
     bool on_doc_sem_check(std::size_t doc_ndx) override
     {
       auto guard = fsp::lock(doc_data(doc_ndx));
@@ -267,7 +280,11 @@ namespace
       observed_->log_call("on_doc_close");
       return true;
     }
-    void on_doc_finish(std::size_t /*doc_ndx*/) override { observed_->log_call("on_doc_finish"); }
+    [[nodiscard]] fsp::e_void on_doc_finish(std::size_t /*doc_ndx*/) override
+    {
+      observed_->log_call("on_doc_finish");
+      return {};
+    }
   public:
     // Not an override point (typed_semantic_check dispatches per schema class) -- both on_type()
     // overloads funnel through this so declared_count/actual_count stay in one place.
@@ -314,10 +331,11 @@ namespace
 
   fsp::importer_config make_cfg(std::string_view app_name, std::size_t num_of_workers)
   {
-    return fsp::importer_config{.targets        = fsp::proc_data_of<^^fsp::work>(),
-                                .num_of_workers = num_of_workers,
-                                .log_config     = silent_log_cfg(app_name),
-                                .program_name   = std::string(app_name)};
+    return fsp::importer_config{.targets          = fsp::proc_data_of<^^fsp::work>(),
+                                .num_of_workers   = num_of_workers,
+                                .log_config       = silent_log_cfg(app_name),
+                                .program_name     = std::string(app_name),
+                                .header_seg_types = {}};
   }
 } // namespace
 
@@ -364,7 +382,7 @@ TEST_CASE("run_doc_data: every on_* hook fires during processing, using the fact
                                "on_doc_open",
                                "on_type(hdr)",
                                "on_type(txn)",
-                               "on_doc_cutting_finished",
+                               "on_doc_cutting_end",
                                "on_doc_sem_check",
                                "on_doc_close",
                                "on_doc_finish",

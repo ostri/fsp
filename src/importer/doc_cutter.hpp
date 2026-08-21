@@ -17,15 +17,15 @@ namespace fsp
   {
   public:
     doc_cutter(const importer_config& cfg, const logger::Logger& log, segment_pool& pool, const doc_set_dscr& ds_dscr);
-    void_result               init();                   //< once, when the hybrid thread starts
-    void_result               cut(std::size_t doc_ndx); //< cuts ONE document; caller checks doc_status before calling
+    e_void                    init();                   //< once, when the hybrid thread starts
+    e_void                    cut(std::size_t doc_ndx); //< cuts ONE document; caller checks doc_status before calling
     [[nodiscard]] std::size_t segments_found() const noexcept;
   private:
-    void_result setup_parser_no_validation();
+    e_void setup_parser_no_validation();
     // Experiment (cfg_.cut_with_validation): folds XSD validation into this same SAX pass --
     // see doc_cutter.cpp for details. Mirrors doc_validator::ensure_grammar_loaded()'s grammar
     // setup, plus the offset-tracking feature C needs that V doesn't.
-    void_result setup_parser_with_validation();
+    e_void setup_parser_with_validation();
   private:
     // NOLINTBEGIN(cppcoreguidelines-avoid-const-or-ref-data-members)
     const logger::Logger&  log_;

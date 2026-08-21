@@ -59,6 +59,19 @@ namespace fsp
     // "dispatch on_doc_safe_close() if this call wins try_start_closing()" behavior as
     // report_syntax_result() above.
     void report_validation_result(std::size_t doc_ndx, bool ok, pipeline_hooks& hooks, error_info err = {});
+    // Called by xml_worker::flush_ok_block()/flush_nak_block(), once per (document, flush-batch)
+    // pair, AFTER hooks.on_block_safe_store()/on_failed_block_safe_store() has already returned
+    // success for that batch -- count is however many of doc_ndx's own segments were in that one
+    // batch (a batch can freely mix segments from several different documents, and one document's
+    // segments can be flushed across several batches from several different worker threads -- see
+    // docs/importer_usage.md's own "Knowing every segment has been stored" section). Folds count
+    // into doc_counters()[doc_ndx].add_segments_stored() (see its own doc comment) -- if THAT call
+    // is the one whose running total crosses doc_ndx's known segment count, dispatches
+    // hooks.on_doc_safe_stored() and folds ITS result into doc_dscr::set_stored_result(); if THAT
+    // wins doc_status_t::try_start_closing() (see doc_dscr.hpp), dispatches hooks.on_doc_safe_close()
+    // itself, right here -- same "dispatch on_doc_safe_close() if this call wins try_start_closing()"
+    // shape as report_syntax_result()/report_validation_result() above.
+    void record_segments_stored(std::size_t doc_ndx, std::size_t count, pipeline_hooks& hooks);
     void report_fatal_error(error_info err);
     // Per-document C+P end-to-end timing and semantic outcome counts (sparse info logs, for
     // benchmarking, and the running total dumped at the end of process_files()). May itself
@@ -67,13 +80,24 @@ namespace fsp
     // hooks.on_doc_safe_close() -- see maybe_finish_seg_processing().
     void record_doc_open(std::size_t doc_ndx);
     void record_doc_close(std::size_t doc_ndx, std::size_t segment_count, pipeline_hooks& hooks);
-    // Runs the on_seg_sem_check hook and folds the resulting verdict into doc_counters. May itself
-    // trigger the same "all segments processed" cascade as record_doc_close() above. Returns the
-    // segment's own verdict (NOT the document's -- see on_doc_sem_check() for that).
-    bool record_segment_done(const xml_segment& segment, segment_result& result, pipeline_hooks& hooks);
+    // Runs ONLY the on_seg_sem_check hook -- no doc_counters bookkeeping, so this alone can never
+    // trigger the "all segments processed" cascade (unlike the old, single-call record_segment_done()
+    // this replaces). Split out so a caller (xml_worker::process_one()) can flush this segment into
+    // storage (record_ok()/record_nak() -> flush_ok_block()/flush_nak_block()) BEFORE calling
+    // finish_segment() below -- otherwise a segment that happens to be its document's last could
+    // reach hooks.on_doc_safe_close() while still sitting unflushed in ok_block_indices_/
+    // nak_block_indices_, letting a caller's on_doc_close() run before that segment's own storage
+    // write ever happened. Returns the segment's own verdict (NOT the document's -- see
+    // on_doc_sem_check() for that).
+    bool check_segment_semantics(const xml_segment& segment, segment_result& result, pipeline_hooks& hooks);
+    // Second half of the old record_segment_done(): folds semantically_ok (check_segment_semantics()'s
+    // own return value) into doc_counters -- may trigger the "all segments processed" cascade (and,
+    // from there, hooks.on_doc_safe_close()). Call this AFTER the segment has been flushed into
+    // storage (see check_segment_semantics()'s own doc comment above).
+    void finish_segment(std::size_t doc_ndx, bool semantically_ok, pipeline_hooks& hooks);
     // For a segment that failed technically (never reached process_segment()'s value extraction,
     // so there's no result_values to hand to a hook) -- bookkeeping only, no hook call, but may
-    // still trigger the same cascade as record_segment_done() above.
+    // still trigger the same cascade as finish_segment() above.
     void                                 record_segment_failed(std::size_t doc_ndx, std::size_t seg_id, pipeline_hooks& hooks);
     [[nodiscard]] segment_pool&          pool() noexcept { return seg_pool_; }
     [[nodiscard]] const doc_set_dscr&    ds_dscr() const noexcept { return ds_dscr_; }
@@ -144,7 +168,7 @@ namespace fsp
     // separately readable -- none of these are meant to be called from anywhere else. ---
     // hooks: only get_doc_id() is called here, once per document, on the main thread, before
     // add_documents() returns -- see pipeline_hooks::get_doc_id()'s own doc comment.
-    [[nodiscard]] void_result add_documents(const std::vector<str_t>& xml_paths, cstr_t xsd_path, pipeline_hooks& hooks);
+    [[nodiscard]] e_void add_documents(const std::vector<str_t>& xml_paths, cstr_t xsd_path, pipeline_hooks& hooks);
     // Modulo used to turn a doc_ndx into get_doc_id()'s node_hint parameter -- deliberately
     // generic (not, say, a Snowflake-specific "max node id"): pipeline/importer stay
     // domain-neutral, a hook implementation (e.g. one built on a Snowflake-style id generator) is

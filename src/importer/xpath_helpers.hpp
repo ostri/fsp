@@ -9,8 +9,8 @@ namespace fsp
 {
   // Type aliases for expected patterns
   template <typename T>
-  using result      = std::expected<T, error_info>;
-  using void_result = std::expected<void, error_info>;
+  using result = std::expected<T, error_info>;
+  using e_void = std::expected<void, error_info>;
 } // namespace fsp
 
 namespace fsp::xpath_helpers

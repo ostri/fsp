@@ -82,7 +82,7 @@ namespace fsp
      * pipeline.cpp) -- on_run_init() failing skips on_run_start() entirely, exactly as if
      * process_files() itself had failed to even start.
      */
-    [[nodiscard]] virtual void_result on_run_safe_start(pipeline& pl, const doc_set_dscr& ds_dscr, const logger::Logger& log) final
+    [[nodiscard]] virtual e_void on_run_safe_start(pipeline& pl, const doc_set_dscr& ds_dscr, const logger::Logger& log) final
     {
       pipeline_  = &pl;
       run_start_ = std::chrono::steady_clock::now();
@@ -94,12 +94,19 @@ namespace fsp
      * @brief Main thread, once, after every worker thread has finished. worker_clones holds one
      * entry per worker thread (see clone()); the original instance's own on_run_safe_end() is the
      * only place all of them are visible at once. Final -- see on_run_safe_start()'s own doc
-     * comment.
+     * comment. By the time this fires the run is already over (every worker thread has already
+     * joined) -- there is nothing left an error here could still abort, so unlike
+     * on_run_safe_start() this does NOT stop anything on failure: it logs on_run_end()'s error at
+     * error level through log() and still returns success, so a caller of process_files() never
+     * has to handle an error from a hook that fires after its own work is already done.
      */
-    virtual void on_run_safe_end(const doc_set_counter&           counters,
-                                 const doc_set_dscr&              ds_dscr,
-                                 std::span<const pipeline_hooks*> worker_clones) final
-    { on_run_end(counters, ds_dscr, worker_clones); }
+    virtual e_void on_run_safe_end(const doc_set_counter&           counters,
+                                   const doc_set_dscr&              ds_dscr,
+                                   std::span<const pipeline_hooks*> worker_clones) final
+    {
+      if (auto res = on_run_end(counters, ds_dscr, worker_clones); ! res) log_hook_error("on_run_end", res.error());
+      return {};
+    }
 
     /**
      * @brief Main thread, once per document, right after its doc_dscr is constructed but before
@@ -160,26 +167,52 @@ namespace fsp
      * unconditionally, then dispatches to on_wrk_start() (see on_run_safe_start()'s own doc
      * comment).
      */
-    virtual void on_wrk_safe_start(pipeline& pl, int worker_id, cstr_t thread_name, const logger::Logger& log) final
+    /**
+     * @brief The pipeline_worker thread itself, once at start of its lifetime. Final -- stamps
+     * worker_start_/log_ and binds pipeline_ (see its own doc comment) unconditionally, then
+     * dispatches to on_wrk_start(). An error from on_wrk_start() is logged (through log(), now
+     * valid) and swallowed rather than propagated -- this fires from inside pipeline_worker's own
+     * thread-start path, well before process_files()'s caller has any error channel left open for
+     * a single worker thread's setup hook; failing the whole run over one thread's optional setup
+     * hook would be a much bigger behavior change than what was asked for here.
+     */
+    virtual e_void on_wrk_safe_start(pipeline& pl, int worker_id, cstr_t thread_name, const logger::Logger& log) final
     {
       pipeline_     = &pl;
       worker_start_ = std::chrono::steady_clock::now();
       log_          = &log;
-      on_wrk_start(worker_id, thread_name);
+      if (auto res = on_wrk_start(worker_id, thread_name); ! res) log_hook_error("on_wrk_start", res.error());
+      return {};
     }
-    virtual void on_wrk_safe_end(int worker_id, cstr_t thread_name) final { on_wrk_end(worker_id, thread_name); }
+    /// @brief See on_wrk_safe_start()'s own doc comment for why an on_wrk_end() error is logged, not propagated.
+    virtual e_void on_wrk_safe_end(int worker_id, cstr_t thread_name) final
+    {
+      if (auto res = on_wrk_end(worker_id, thread_name); ! res) log_hook_error("on_wrk_end", res.error());
+      return {};
+    }
 
     /** @brief The cutter thread for this specific document (cutting just started / cutting just finished, NOT the whole document's final
-     * verdict -- see on_doc_safe_close() below for that). Final -- see on_run_safe_start()'s own doc comment. */
-    virtual void on_doc_safe_open(std::size_t doc_ndx, const doc_dscr& dscr) final { on_doc_open(doc_ndx, dscr); }
+     * verdict -- see on_doc_safe_close() below for that). Final -- see on_run_safe_start()'s own doc comment. An on_doc_open() error is
+     * logged, not propagated -- see on_wrk_safe_start()'s own doc comment for why aborting a whole multi-threaded run from one document's
+     * open hook would be a much bigger behavior change than what was asked for here. */
+    virtual e_void on_doc_safe_open(std::size_t doc_ndx, const doc_dscr& dscr) final
+    {
+      if (auto res = on_doc_open(doc_ndx, dscr); ! res) log_hook_error("on_doc_open", res.error());
+      return {};
+    }
     /**
      * @brief Fires right after doc_cutter::cut() returns for this document -- BEFORE P has
      * necessarily processed any of its segments and before a separate V pass has necessarily run.
      * Renamed from the old on_doc_close() (which this exact firing point used to be called,
      * misleadingly): see on_doc_safe_sem_check()/on_doc_safe_close() below for the hooks that fire
-     * once more is actually known. Final -- see on_run_safe_start()'s own doc comment.
+     * once more is actually known. Final -- see on_run_safe_start()'s own doc comment. An
+     * on_doc_cutting_end() error is logged, not propagated -- same reasoning as on_doc_safe_open().
      */
-    virtual void on_doc_safe_cutting_finished(std::size_t doc_ndx, const doc_dscr& dscr) final { on_doc_cutting_finished(doc_ndx, dscr); }
+    virtual e_void on_doc_safe_cutting_end(std::size_t doc_ndx, const doc_dscr& dscr) final
+    {
+      if (auto res = on_doc_cutting_end(doc_ndx, dscr); ! res) log_hook_error("on_doc_cutting_end", res.error());
+      return {};
+    }
 
     /**
      * @brief Fires once every segment of doc_ndx has been processed (fsp-core's existing
@@ -198,22 +231,46 @@ namespace fsp
     virtual bool on_doc_safe_sem_check(std::size_t doc_ndx) final { return on_doc_sem_check(doc_ndx); }
 
     /**
-     * @brief Fires once syntax+validation+doc-level-semantics are ALL known for doc_ndx (the
-     * renamed old on_doc_close(), now firing at the point its name always implied instead of
-     * right after cutting -- see on_doc_safe_cutting_finished() above for that). verdict is the
-     * document's own live doc_status_t (see doc_dscr.hpp's own class doc comment) -- by the time
-     * this fires, verdict.is_finished() is guaranteed true, so verdict.status()/verdict.ok() give
-     * the final aggregate, and verdict.syntax_status()/valid_status()/semantic_status() give the
-     * individual partial verdicts if a cb needs to know WHICH fact specifically failed. err is
-     * fsp-core's own error_info for a syntax/validation failure (its default-constructed
-     * processor_error::success state means "no error" -- see error_info.hpp). Returns the FINAL
-     * verdict for this document (default: verdict.ok()) -- e.g. an importer deciding whether to
-     * move a document to a done-path or an err-path. Final -- see on_run_safe_start()'s own doc
-     * comment. Whichever of C/V/the on_doc_safe_sem_check() orchestrator won
+     * @brief Fires once every one of doc_ndx's segments has actually left
+     * on_block_safe_store()/on_failed_block_safe_store() -- i.e. nothing more will ever be written
+     * for this document (see pipeline::record_segments_stored()). Deliberately independent of
+     * on_doc_safe_sem_check()/syntax/validation above -- a batch's own successful store doesn't
+     * depend on whether this document's semantics/syntax turned out fine, so this can fire before,
+     * after, or interleaved with those. Folded into doc_status_t::set_stored() (see doc_dscr.hpp)
+     * as the FOURTH independent fact on_doc_safe_close() below now waits on -- see its own doc
+     * comment. Called from whichever worker thread's flush_ok_block()/flush_nak_block() call is
+     * the one whose running per-document count crosses this document's known segment total --
+     * exactly once per document. Final -- see on_run_safe_start()'s own doc comment. An error here
+     * is logged, not propagated -- see on_doc_safe_open()'s own doc comment for why.
+     */
+    virtual e_void on_doc_safe_stored(std::size_t doc_ndx, const doc_dscr& dscr) final
+    {
+      if (auto res = on_doc_stored(doc_ndx, dscr); ! res) log_hook_error("on_doc_stored", res.error());
+      return {};
+    }
+
+    /**
+     * @brief Fires once syntax+validation+doc-level-semantics+storage-completeness are ALL known
+     * for doc_ndx (the renamed old on_doc_close(), now firing at the point its name always implied
+     * instead of right after cutting -- see on_doc_safe_cutting_end() above for that). verdict is
+     * the document's own live doc_status_t (see doc_dscr.hpp's own class doc comment) -- by the
+     * time this fires, verdict.is_finished() is guaranteed true, so verdict.status()/verdict.ok()
+     * give the final aggregate, and verdict.syntax_status()/valid_status()/semantic_status() give
+     * the individual partial verdicts if a cb needs to know WHICH fact specifically failed (note
+     * verdict.stored_status() also exists, for symmetry/diagnostics, but never influences
+     * status()/ok() -- see doc_status_t's own class doc comment on why storage-completeness is a
+     * GATE on this hook's timing, not a reported verdict dimension). err is fsp-core's own
+     * error_info for a syntax/validation failure (its default-constructed processor_error::success
+     * state means "no error" -- see error_info.hpp). Returns the FINAL verdict for this document
+     * (default: verdict.ok()) -- e.g. an importer deciding whether to move a document to a
+     * done-path or an err-path. Final -- see on_run_safe_start()'s own doc comment. Whichever of
+     * C/V/the on_doc_safe_sem_check() orchestrator/pipeline::record_segments_stored() won
      * doc_status_t::try_start_closing() is the one, and only one, thread that ever calls this for
-     * a given document. NOTE: doc_data(doc_ndx) is still valid inside this call and inside
-     * on_doc_safe_finish() below -- the doc-level slot is only recycled AFTER on_doc_finish()
-     * returns, see pipeline::finish_doc_close().
+     * a given document -- now guaranteed to be the LAST of those four to complete, so a document's
+     * segments are ALWAYS durably stored (on_doc_safe_stored() already fired) by the time this
+     * runs. NOTE: doc_data(doc_ndx) is still valid inside this call and inside on_doc_safe_finish()
+     * below -- the doc-level slot is only recycled AFTER on_doc_finish() returns, see
+     * pipeline::finish_doc_close().
      */
     virtual bool on_doc_safe_close(std::size_t doc_ndx, const doc_status_t& verdict, const error_info& err, const doc_dscr& dscr) final
     { return on_doc_close(doc_ndx, verdict, err, dscr); }
@@ -228,10 +285,11 @@ namespace fsp
      * and only place a cb is guaranteed to see this document's final, frozen doc-level state
      * before it may be reset() and reused by a different document.
      */
-    virtual void on_doc_safe_finish(std::size_t doc_ndx) final
+    virtual e_void on_doc_safe_finish(std::size_t doc_ndx) final
     {
       doc_data_timing_stop(doc_ndx);
-      on_doc_finish(doc_ndx);
+      if (auto res = on_doc_finish(doc_ndx); ! res) log_hook_error("on_doc_finish", res.error());
+      return {};
     }
 
     /**
@@ -274,24 +332,33 @@ namespace fsp
      * once for the whole batch. Final -- see on_run_safe_start()'s own doc comment.
      * @param indices pool slot indices belonging to this batch; empty is possible only for the
      * final end-of-loop flush and is a valid, harmless no-op call.
+     * @return on_block_store()'s own result, UNCHANGED (unlike every other _safe_ wrapper in this
+     * class, which logs and swallows an override's error) -- xml_worker::flush_ok_block() needs to
+     * know whether this batch's segments were genuinely written before it folds them into each
+     * document's own "segments stored" count (see pipeline::record_segments_stored()) and,
+     * eventually, fires on_doc_safe_stored() -- counting a segment as stored when its own storage
+     * call just failed would be a correctness bug, not merely a logging concern like the other
+     * hooks above.
      */
-    virtual void on_block_safe_store( //
+    [[nodiscard]] virtual e_void on_block_safe_store( //
       std::span<const std::size_t> indices,
       segment_pool&                pool,
       const doc_set_dscr&          ds_dscr) final
-    { on_block_store(indices, pool, ds_dscr); }
+    { return on_block_store(indices, pool, ds_dscr); }
 
     /**
      * @brief Same as on_block_safe_store(), for the batch of semantically FAILED segments
      * (on_seg_sem_check() returned false) -- see importer_config::nak_block_flush_size. errors holds
      * one entry per index, same order, same length as indices (errors[i] describes why
-     * indices[i] failed). Final -- see on_run_safe_start()'s own doc comment.
+     * indices[i] failed). Final -- see on_run_safe_start()'s own doc comment. Propagates
+     * on_failed_block_store()'s own result unchanged -- see on_block_safe_store()'s own doc
+     * comment for why.
      */
-    virtual void on_failed_block_safe_store(std::span<const std::size_t> indices,
-                                            std::span<const error_info>  errors,
-                                            segment_pool&                pool,
-                                            const doc_set_dscr&          ds_dscr) final
-    { on_failed_block_store(indices, errors, pool, ds_dscr); }
+    [[nodiscard]] virtual e_void on_failed_block_safe_store(std::span<const std::size_t> indices,
+                                                            std::span<const error_info>  errors,
+                                                            segment_pool&                pool,
+                                                            const doc_set_dscr&          ds_dscr) final
+    { return on_failed_block_store(indices, errors, pool, ds_dscr); }
   protected:
     /**
      * @brief This run's logger -- valid inside every override point below (on_run_start()/
@@ -320,29 +387,37 @@ namespace fsp
      * (ct_in_cb) still gets its own, unrelated on_run_start() override free of that concern -- both
      * fire, in order, from the same on_run_safe_start() dispatch. Default: no-op, success.
      */
-    [[nodiscard]] virtual void_result on_run_init() { return {}; }
+    [[nodiscard]] virtual e_void on_run_init() { return {}; }
     /// @brief Override point for on_run_safe_start() -- see the class's own doc comment. log() is valid inside this call.
-    [[nodiscard]] virtual void_result on_run_start([[maybe_unused]] const doc_set_dscr& ds_dscr) { return {}; }
-    /// @brief Override point for on_run_safe_end() -- see the class's own doc comment. log() is valid inside this call.
-    virtual void on_run_end([[maybe_unused]] const doc_set_counter&           counters,
-                            [[maybe_unused]] const doc_set_dscr&              ds_dscr,
-                            [[maybe_unused]] std::span<const pipeline_hooks*> worker_clones)
-    {
-    }
-    /// @brief Override point for on_wrk_safe_start() -- see the class's own doc comment. log() is valid inside this call.
-    virtual void on_wrk_start([[maybe_unused]] int worker_id, [[maybe_unused]] cstr_t thread_name) { }
-    /// @brief Override point for on_wrk_safe_end() -- see the class's own doc comment. log() is valid inside this call.
-    virtual void on_wrk_end([[maybe_unused]] int worker_id, [[maybe_unused]] cstr_t thread_name) { }
-    /// @brief Override point for on_doc_safe_open() -- see the class's own doc comment. log() is valid inside this call.
-    virtual void on_doc_open([[maybe_unused]] std::size_t doc_ndx, [[maybe_unused]] const doc_dscr& dscr) { }
-    /// @brief Override point for on_doc_safe_cutting_finished() -- see the class's own doc comment. log() is valid inside this call.
-    virtual void on_doc_cutting_finished([[maybe_unused]] std::size_t doc_ndx, [[maybe_unused]] const doc_dscr& dscr) { }
+    [[nodiscard]] virtual e_void on_run_start([[maybe_unused]] const doc_set_dscr& ds_dscr) { return {}; }
+    /// @brief Override point for on_run_safe_end() -- see the class's own doc comment. log() is valid inside this call. An error here is
+    /// logged by on_run_safe_end(), not propagated -- see its own doc comment.
+    [[nodiscard]] virtual e_void on_run_end([[maybe_unused]] const doc_set_counter&           counters,
+                                            [[maybe_unused]] const doc_set_dscr&              ds_dscr,
+                                            [[maybe_unused]] std::span<const pipeline_hooks*> worker_clones)
+    { return {}; }
+    /// @brief Override point for on_wrk_safe_start() -- see the class's own doc comment. log() is valid inside this call. An error here
+    /// is logged by on_wrk_safe_start(), not propagated -- see its own doc comment.
+    [[nodiscard]] virtual e_void on_wrk_start([[maybe_unused]] int worker_id, [[maybe_unused]] cstr_t thread_name) { return {}; }
+    /// @brief Override point for on_wrk_safe_end() -- see the class's own doc comment. log() is valid inside this call. An error here is
+    /// logged by on_wrk_safe_end(), not propagated -- see on_wrk_safe_start()'s own doc comment.
+    [[nodiscard]] virtual e_void on_wrk_end([[maybe_unused]] int worker_id, [[maybe_unused]] cstr_t thread_name) { return {}; }
+    /// @brief Override point for on_doc_safe_open() -- see the class's own doc comment. log() is valid inside this call. An error here
+    /// is logged by on_doc_safe_open(), not propagated -- see its own doc comment.
+    [[nodiscard]] virtual e_void on_doc_open([[maybe_unused]] std::size_t doc_ndx, [[maybe_unused]] const doc_dscr& dscr) { return {}; }
+    /// @brief Override point for on_doc_safe_cutting_end() -- see the class's own doc comment. log() is valid inside this call. An
+    /// error here is logged by on_doc_safe_cutting_end(), not propagated -- see its own doc comment.
+    [[nodiscard]] virtual e_void on_doc_cutting_end([[maybe_unused]] std::size_t doc_ndx, [[maybe_unused]] const doc_dscr& dscr)
+    { return {}; }
     /**
      * @brief Override point for on_doc_safe_sem_check() -- see the class's own doc comment. log()
      * and doc_data(doc_ndx) (see pipeline_hooks_crtp) are valid inside this call. Default: no
      * doc-level semantic opinion, always ok.
      */
     virtual bool on_doc_sem_check([[maybe_unused]] std::size_t doc_ndx) { return true; }
+    /// @brief Override point for on_doc_safe_stored() -- see the class's own doc comment. log() is valid inside this call. Default:
+    /// no-op, success. An error here is logged by on_doc_safe_stored(), not propagated -- see on_doc_safe_open()'s own doc comment.
+    [[nodiscard]] virtual e_void on_doc_stored([[maybe_unused]] std::size_t doc_ndx, [[maybe_unused]] const doc_dscr& dscr) { return {}; }
     /**
      * @brief Override point for on_doc_safe_close() -- see the class's own doc comment. log() and
      * doc_data(doc_ndx) are valid inside this call. Default: the final verdict is exactly
@@ -359,9 +434,10 @@ namespace fsp
      * @brief Override point for on_doc_safe_finish() -- see the class's own doc comment. log() and
      * doc_data(doc_ndx) are valid inside this call (doc_data(doc_ndx).timing() is already
      * stopped). Default: no-op. This is the LAST chance to read this document's doc-level state
-     * before the slot is recycled for a different document.
+     * before the slot is recycled for a different document. An error here is logged by
+     * on_doc_safe_finish(), not propagated -- see on_doc_safe_open()'s own doc comment for why.
      */
-    virtual void on_doc_finish([[maybe_unused]] std::size_t doc_ndx) { }
+    [[nodiscard]] virtual e_void on_doc_finish([[maybe_unused]] std::size_t doc_ndx) { return {}; }
     /**
      * @brief Override point for on_seg_sem_safe_check() -- see the class's own doc comment. log() is
      * valid inside this call. Default mirrors technical completeness (result.values().complete()),
@@ -373,19 +449,21 @@ namespace fsp
                                   [[maybe_unused]] bool               is_first,
                                   [[maybe_unused]] bool               is_last)
     { return result.values().complete(); }
-    /// @brief Override point for on_block_safe_store() -- see the class's own doc comment. log() is valid inside this call.
-    virtual void on_block_store([[maybe_unused]] std::span<const std::size_t> indices,
-                                [[maybe_unused]] segment_pool&                pool,
-                                [[maybe_unused]] const doc_set_dscr&          ds_dscr)
-    {
-    }
+    /// @brief Override point for on_block_safe_store() -- see the class's own doc comment. log() is valid inside this call. Unlike
+    /// every other override point above, this error is NOT swallowed by its _safe_ wrapper -- see on_block_safe_store()'s own doc
+    /// comment for why.
+    [[nodiscard]] virtual e_void on_block_store([[maybe_unused]] std::span<const std::size_t> indices,
+                                                [[maybe_unused]] segment_pool&                pool,
+                                                [[maybe_unused]] const doc_set_dscr&          ds_dscr)
+    { return {}; }
     /// @brief Override point for on_failed_block_safe_store() -- see the class's own doc comment. log() is valid inside this call.
-    virtual void on_failed_block_store([[maybe_unused]] std::span<const std::size_t> indices,
-                                       [[maybe_unused]] std::span<const error_info>  errors,
-                                       [[maybe_unused]] segment_pool&                pool,
-                                       [[maybe_unused]] const doc_set_dscr&          ds_dscr)
-    {
-    }
+    /// Unlike every other override point above, this error is NOT swallowed by its _safe_ wrapper -- see on_block_safe_store()'s own
+    /// doc comment for why.
+    [[nodiscard]] virtual e_void on_failed_block_store([[maybe_unused]] std::span<const std::size_t> indices,
+                                                       [[maybe_unused]] std::span<const error_info>  errors,
+                                                       [[maybe_unused]] segment_pool&                pool,
+                                                       [[maybe_unused]] const doc_set_dscr&          ds_dscr)
+    { return {}; }
 
     /**
      * @brief Seconds elapsed since on_run_safe_start() stamped run_start_. Only meaningful on the
@@ -426,6 +504,15 @@ namespace fsp
      */
     void doc_data_timing_stop(std::size_t doc_ndx);
   private:
+    /**
+     * @brief Shared tail for every _safe_ wrapper above that logs (rather than propagates) an
+     * e_void-returning override point's error -- see on_run_safe_end()'s own doc comment for why
+     * most of these swallow the error after logging it, and on_block_safe_store()'s own doc
+     * comment for the two exceptions that propagate instead. hook_name identifies which override
+     * point failed, for the log line. Defined in pipeline_hooks.cpp, same reason as
+     * run_data_impl()/doc_data_impl() (needs fmt, which this header otherwise doesn't pull in).
+     */
+    void                                  log_hook_error(cstr_t hook_name, const error_info& err) const;
     std::chrono::steady_clock::time_point run_start_;
     std::chrono::steady_clock::time_point worker_start_;
     std::uint64_t                         next_doc_id_ = 1; // get_doc_id()'s default counter -- main-thread-only, see its doc comment

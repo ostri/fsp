@@ -1,7 +1,7 @@
 // test_pipeline_stages.cpp
 //
 // Pipeline-level tests for the C(cutter)/V(validator)/P(processor) three-way race the
-// pipeline_hooks rework (on_doc_cutting_finished/on_doc_sem_check/on_doc_close, doc_status_t,
+// pipeline_hooks rework (on_doc_cutting_end/on_doc_sem_check/on_doc_close, doc_status_t,
 // make_doc_data()/cb_data_root) is meant to resolve deterministically -- see fsp's own
 // pipeline_hooks.hpp doc comments for the full design.
 //
@@ -25,6 +25,8 @@
 #include "work.hpp" // IWYU pragma: keep -- ^^fsp::work needs the actual schema classes
 #include <atomic>
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
+#include <catch2/generators/catch_generators_range.hpp>
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
@@ -147,6 +149,55 @@ namespace
 
   std::string well_formed_valid_doc() { return wrap_document(k_valid_hdr, k_valid_txn); }
   std::string well_formed_schema_invalid_doc() { return wrap_document(k_schema_invalid_hdr, k_valid_txn); }
+
+  // --- multi-transaction fixture, for on_doc_stored()/header-priority/shard tests below, which
+  // need enough segments per document to exercise multiple flush batches and genuine cross-shard/
+  // cross-thread traffic -- a single-transaction document (well_formed_valid_doc() above) can
+  // never do that. NbOfTxs in the header must match num_txns exactly, or schema validation fails. ---
+  std::string multi_txn_hdr(int num_txns)
+  {
+    return fmt::format(R"(<x:GrpHdr>
+      <x:MsgId>MSG1</x:MsgId>
+      <CreDtTm>2026-05-14T07:41:50.161Z</CreDtTm>
+      <NbOfTxs>{}</NbOfTxs>
+      <TtlIntrBkSttlmAmt Ccy="EUR">1.00</TtlIntrBkSttlmAmt>
+      <IntrBkSttlmDt>2026-05-14</IntrBkSttlmDt>
+      <SttlmInf><SttlmMtd>CLRG</SttlmMtd></SttlmInf>
+      <PmtTpInf><SvcLvl><Cd>SEPA</Cd></SvcLvl><CtgyPurp><Cd>FCIN</Cd></CtgyPurp></PmtTpInf>
+      <InstgAgt><FinInstnId><BICFI>FHQIBWWK</BICFI></FinInstnId></InstgAgt>
+      <InstdAgt><FinInstnId><BICFI>KWNRKEQS</BICFI></FinInstnId></InstdAgt>
+    </x:GrpHdr>)",
+                       num_txns);
+  }
+
+  std::string multi_txn_one(int n)
+  {
+    return fmt::format(R"(<CdtTrfTxInf>
+      <PmtId><EndToEndId>E2E{0}</EndToEndId><TxId>TXN{0}</TxId></PmtId>
+      <PmtTpInf><SvcLvl><Cd>SEPA</Cd></SvcLvl><CtgyPurp><Cd>FCIN</Cd></CtgyPurp></PmtTpInf>
+      <IntrBkSttlmAmt Ccy="EUR">1.00</IntrBkSttlmAmt>
+      <ChrgBr>SLEV</ChrgBr>
+      <InstgAgt><FinInstnId><BICFI>FHQIBWWK</BICFI></FinInstnId></InstgAgt>
+      <InstdAgt><FinInstnId><BICFI>KWNRKEQS</BICFI></FinInstnId></InstdAgt>
+      <Dbtr><Nm>DEBTOR</Nm><Id><OrgId><AnyBIC>PINVXDRY</AnyBIC></OrgId></Id></Dbtr>
+      <DbtrAcct><Id><IBAN>EE172303863092752160</IBAN></Id></DbtrAcct>
+      <DbtrAgt><FinInstnId><BICFI>SSMKBKTSPFP</BICFI></FinInstnId></DbtrAgt>
+      <CdtrAgt><FinInstnId><BICFI>EGOKPM2HXPI</BICFI></FinInstnId></CdtrAgt>
+      <Cdtr><Nm>CREDITOR</Nm><Id><OrgId><AnyBIC>UOEJUW06TBB</AnyBIC></OrgId></Id></Cdtr>
+      <CdtrAcct><Id><IBAN>EE654412207930872869</IBAN></Id></CdtrAcct>
+      <RmtInf><Strd><CdtrRefInf><Tp><CdOrPrtry><Cd>SCOR</Cd></CdOrPrtry><Issr>ISO</Issr></Tp><Ref>RF47TLOBX61dcMsQwVZ7ELlg4</Ref></CdtrRefInf></Strd></RmtInf>
+    </CdtTrfTxInf>)",
+                       n);
+  }
+
+  // Document with num_txns transactions (see multi_txn_hdr()/multi_txn_one() above) -- enough
+  // P-role segments for multiple flush batches and genuine cross-shard/cross-thread traffic.
+  std::string multi_txn_doc(int num_txns)
+  {
+    std::string txns;
+    for (int i = 0; i < num_txns; ++i) txns += multi_txn_one(i);
+    return wrap_document(multi_txn_hdr(num_txns), txns);
+  }
   // Not well-formed at all: an unclosed/mismatched tag inside the header -- Handler::fatalError()
   // territory (well-formedness), not Handler::error() (schema/validity).
   std::string ill_formed_doc()
@@ -184,6 +235,32 @@ namespace
     std::atomic<std::int16_t> txn_agent_id_value{0};
     std::mutex                doc_close_err_mutex;   // guards doc_close_err_message (plain string, not lock-free)
     fsp::str_t                doc_close_err_message; // last on_doc_close()'s own err.message(), verbatim
+    // --- on_doc_stored()/on_doc_close() ordering + per-document accounting (see the on_doc_stored
+    // TEST_CASEs below) -- a single, monotonically increasing global sequence counter is stamped
+    // into per-doc_ndx slots by both hooks, so a test can assert stored's own stamp is strictly
+    // less than close's own stamp for EVERY document, not just "both eventually fired". Sized to
+    // the actual document count by each TEST_CASE that uses these (resize() before exec()). ---
+    std::atomic<int>              global_seq{0};
+    std::vector<std::atomic<int>> doc_stored_seq;      // -1 until on_doc_stored() fires for that doc_ndx
+    std::vector<std::atomic<int>> doc_close_seq;       // -1 until on_doc_close() fires for that doc_ndx
+    std::atomic<int>              doc_stored_calls{0}; // total on_doc_stored() calls, cross-clone, cross-document
+    // Set if either hook below ever observes a violation of its own contract (fired twice for the
+    // same doc_ndx, or doc_ndx out of range) -- checked with REQUIRE() from the MAIN test thread
+    // after exec() returns, never from inside the hook itself: Catch2's assertion machinery is not
+    // documented as safe to call concurrently from multiple worker threads, unlike the plain
+    // atomics/mutexes shared_state already uses everywhere else in this file.
+    std::atomic<bool> doc_stored_contract_violated{false};
+    std::atomic<bool> doc_close_seq_contract_violated{false};
+    // Resizes doc_stored_seq/doc_close_seq to doc_count slots, all seeded to -1 ("not fired yet").
+    // std::atomic isn't movable/copyable, so this can't just be vector::resize() with a fill value
+    // -- rebuild from scratch instead. Call once, before exec(), from the main thread only.
+    void size_doc_seqs(std::size_t doc_count)
+    {
+      doc_stored_seq = std::vector<std::atomic<int>>(doc_count);
+      doc_close_seq  = std::vector<std::atomic<int>>(doc_count);
+      for (auto& s : doc_stored_seq) s.store(-1, std::memory_order_relaxed);
+      for (auto& s : doc_close_seq) s.store(-1, std::memory_order_relaxed);
+    }
   };
 
   // A tiny doc-level doc_data_root, used only to prove the DocData template argument/
@@ -262,12 +339,31 @@ namespace
       doc_data(doc_ndx).touched.fetch_add(1, std::memory_order_relaxed);
       return state_->doc_sem_check_verdict;
     }
-    [[nodiscard]] bool on_doc_close(std::size_t /*doc_ndx*/,
+    // Stamps doc_ndx's own slot in doc_stored_seq with the next tick of the shared global_seq
+    // counter -- see shared_state's own doc comment on why this, not a plain bool, is what lets a
+    // test assert ORDERING against on_doc_close()'s own stamp below, not just "both fired".
+    [[nodiscard]] fsp::e_void on_doc_stored(std::size_t doc_ndx, const fsp::doc_dscr& /*dscr*/) override
+    {
+      state_->doc_stored_calls.fetch_add(1, std::memory_order_relaxed);
+      const int seq = state_->global_seq.fetch_add(1, std::memory_order_relaxed);
+      if (doc_ndx >= state_->doc_stored_seq.size()) // caller forgot shared_state::size_doc_seqs()
+        state_->doc_stored_contract_violated.store(true, std::memory_order_relaxed);
+      else if (const int prev = state_->doc_stored_seq[doc_ndx].exchange(seq, std::memory_order_relaxed); prev != -1)
+        state_->doc_stored_contract_violated.store(true, std::memory_order_relaxed); // fired more than once for doc_ndx
+      return {};
+    }
+    [[nodiscard]] bool on_doc_close(std::size_t              doc_ndx,
                                     const fsp::doc_status_t& verdict,
                                     const fsp::error_info&   err,
                                     const fsp::doc_dscr& /*dscr*/) override
     {
       state_->doc_close_calls.fetch_add(1, std::memory_order_relaxed);
+      if (doc_ndx < state_->doc_close_seq.size()) // only sized by TEST_CASEs that actually check ordering
+      {
+        const int seq = state_->global_seq.fetch_add(1, std::memory_order_relaxed);
+        if (const int prev = state_->doc_close_seq[doc_ndx].exchange(seq, std::memory_order_relaxed); prev != -1)
+          state_->doc_close_seq_contract_violated.store(true, std::memory_order_relaxed); // fired more than once for doc_ndx
+      }
       state_->doc_close_seen_syntax_ok.store(verdict.syntax_status() == fsp::three_state::valid, std::memory_order_relaxed);
       state_->doc_close_seen_validation_ok.store(verdict.valid_status() == fsp::three_state::valid, std::memory_order_relaxed);
       state_->doc_close_seen_semantic_ok.store(verdict.semantic_status() == fsp::three_state::valid, std::memory_order_relaxed);
@@ -298,10 +394,31 @@ namespace
 
   fsp::importer_config make_cfg(std::string_view app_name, std::size_t num_of_workers)
   {
-    return fsp::importer_config{.targets        = fsp::proc_data_of<^^fsp::work>(),
-                                .num_of_workers = num_of_workers,
-                                .log_config     = silent_log_cfg(app_name),
-                                .program_name   = std::string(app_name)};
+    return fsp::importer_config{.targets          = fsp::proc_data_of<^^fsp::work>(),
+                                .num_of_workers   = num_of_workers,
+                                .log_config       = silent_log_cfg(app_name),
+                                .program_name     = std::string(app_name),
+                                .header_seg_types = {}};
+  }
+
+  // Extended knob set for the on_doc_stored()/header-priority/shard TEST_CASEs below, which need
+  // to force small flush batches (ok_block_flush_size) and specific shard counts
+  // (pool_shard_count) -- see each TEST_CASE's own comment for why. header_seg_types defaults
+  // empty (the header-priority mechanism is a no-op unless a TEST_CASE explicitly opts in).
+  fsp::importer_config make_cfg_ex(std::string_view app_name,
+                                   std::size_t      num_of_workers,
+                                   std::size_t      pool_shard_count,
+                                   std::size_t      ok_block_flush_size,
+                                   std::vector<int> header_seg_types = {})
+  {
+    return fsp::importer_config{.targets              = fsp::proc_data_of<^^fsp::work>(),
+                                .num_of_workers       = num_of_workers,
+                                .pool_shard_count     = pool_shard_count,
+                                .ok_block_flush_size  = ok_block_flush_size,
+                                .nak_block_flush_size = ok_block_flush_size,
+                                .log_config           = silent_log_cfg(app_name),
+                                .program_name         = std::string(app_name),
+                                .header_seg_types     = std::move(header_seg_types)};
   }
 } // namespace
 
@@ -605,5 +722,149 @@ TEST_CASE("pipeline: on_type()'s own raw_msg parameter carries the segment's raw
   CHECK(state->hdr_raw_msg.find("GrpHdr") != fsp::str_t::npos);
   CHECK(state->txn_raw_msg.find("TXN1") != fsp::str_t::npos);
   CHECK(state->txn_raw_msg.find("CdtTrfTxInf") != fsp::str_t::npos);
+}
+
+// --- Scenario 8: on_doc_stored() fires exactly once per document, strictly before on_doc_close()
+// for that same document, under BOTH pool_shard_count=1 and pool_shard_count>1 -- deliberately
+// forces multiple flush batches per document (a small ok_block_flush_size against a many-txn
+// document) so the per-document (not per-batch) counting in pipeline::record_segments_stored()
+// actually gets exercised across more than one flush -----------------------------------------------
+TEST_CASE("pipeline: on_doc_stored() fires exactly once, strictly before on_doc_close(), across shard counts",
+          "[pipeline][stages][on-doc-stored]")
+{
+  const auto shard_count = GENERATE(std::size_t{1}, std::size_t{4});
+  CAPTURE(shard_count);
+
+  temp_dir_guard dir;
+  // 25 transactions, flushed in batches of 4 (ok_block_flush_size below) -- 26 total segments
+  // (header + 25 txns) is NOT a clean multiple of 4, so the final flush_results() end-of-thread
+  // flush (see xml_worker::flush_results()) also gets exercised, not just threshold-triggered
+  // flushes.
+  constexpr int num_txns = 25;
+  const auto    doc_path = dir.write("doc.xml", multi_txn_doc(num_txns));
+
+  auto state = std::make_shared<shared_state>();
+  state->size_doc_seqs(1);
+  stage_test_hooks hooks(state);
+
+  auto cfg      = make_cfg_ex("test-doc-stored", /*num_of_workers=*/4, shard_count, /*ok_block_flush_size=*/4);
+  auto [p, res] = fsp::importer::exec(cfg, std::vector<std::string>{doc_path}, xsd_path(), hooks);
+
+  REQUIRE(res.has_value());
+  CHECK_FALSE(state->doc_stored_contract_violated.load());
+  CHECK_FALSE(state->doc_close_seq_contract_violated.load());
+  CHECK(state->doc_stored_calls.load() == 1); // exactly once, not zero, not more
+  CHECK(state->doc_close_calls.load() == 1);
+
+  const int stored_seq = state->doc_stored_seq[0].load();
+  const int close_seq  = state->doc_close_seq[0].load();
+  REQUIRE(stored_seq >= 0);      // on_doc_stored() actually fired
+  REQUIRE(close_seq >= 0);       // on_doc_close() actually fired
+  CHECK(stored_seq < close_seq); // storage-completeness known STRICTLY before the document closes
+
+  // Functional non-regression: every segment (header + all txns) actually made it through.
+  CHECK(p->get_results().size() == static_cast<std::size_t>(num_txns + 1));
+  CHECK(p->get_errors().empty());
+}
+
+// --- Scenario 9: several documents, several worker threads, several shards at once -- confirms no
+// on_doc_stored() fires early or twice under real concurrency, not just the single-document case
+// above. Repeated a few times (CATCH's GENERATE over an iteration index) since a race, if one
+// existed, would not necessarily reproduce on every run. ------------------------------------------
+TEST_CASE("pipeline: on_doc_stored() ordering holds for multiple documents under real concurrency", "[pipeline][stages][on-doc-stored]")
+{
+  const auto iteration = GENERATE(range(0, 3));
+  CAPTURE(iteration);
+
+  temp_dir_guard           dir;
+  constexpr int            num_docs     = 6;
+  constexpr int            txns_per_doc = 12;
+  std::vector<std::string> doc_paths;
+  for (int d = 0; d < num_docs; ++d) doc_paths.push_back(dir.write(fmt::format("doc-{}.xml", d), multi_txn_doc(txns_per_doc)));
+
+  auto state = std::make_shared<shared_state>();
+  state->size_doc_seqs(num_docs);
+  stage_test_hooks hooks(state);
+
+  // 4 shards, 6 worker threads, small flush size -- segments from different documents will end up
+  // interleaved within the same flush batches (see xml_worker::flush_ok_block()'s own doc comment
+  // on why record_segments_stored() must group by doc_ndx), and different worker threads race to
+  // be the one whose flush crosses each document's own segment-stored total.
+  auto cfg      = make_cfg_ex("test-doc-stored-concurrent", /*num_of_workers=*/6, /*pool_shard_count=*/4, /*ok_block_flush_size=*/5);
+  auto [p, res] = fsp::importer::exec(cfg, doc_paths, xsd_path(), hooks);
+
+  REQUIRE(res.has_value());
+  CHECK_FALSE(state->doc_stored_contract_violated.load());
+  CHECK_FALSE(state->doc_close_seq_contract_violated.load());
+  CHECK(state->doc_stored_calls.load() == num_docs);
+  CHECK(state->doc_close_calls.load() == num_docs);
+
+  for (int d = 0; d < num_docs; ++d)
+  {
+    CAPTURE(d);
+    const int stored_seq = state->doc_stored_seq[static_cast<std::size_t>(d)].load();
+    const int close_seq  = state->doc_close_seq[static_cast<std::size_t>(d)].load();
+    REQUIRE(stored_seq >= 0);
+    REQUIRE(close_seq >= 0);
+    CHECK(stored_seq < close_seq);
+  }
+
+  CHECK(p->get_results().size() == static_cast<std::size_t>(num_docs * (txns_per_doc + 1)));
+  CHECK(p->get_errors().empty());
+}
+
+// --- Scenario 10: importer_config::header_seg_types is a pure functional no-op when left at its
+// default (empty) -- existing behavior (Scenario 4's own happy path, re-run through make_cfg_ex()
+// instead of make_cfg() to prove the two configs are equivalent when header_seg_types is empty) --
+TEST_CASE("pipeline: empty header_seg_types (the default) changes nothing observable", "[pipeline][stages][header-priority]")
+{
+  temp_dir_guard dir;
+  const auto     doc_path = dir.write("doc.xml", multi_txn_doc(10));
+
+  auto             state = std::make_shared<shared_state>();
+  stage_test_hooks hooks(state);
+
+  auto cfg      = make_cfg_ex("test-header-empty", 4, /*pool_shard_count=*/2, /*ok_block_flush_size=*/1024);
+  auto [p, res] = fsp::importer::exec(cfg, std::vector<std::string>{doc_path}, xsd_path(), hooks);
+
+  REQUIRE(res.has_value());
+  CHECK(p->ds_dscr()[0].status().ok());
+  CHECK(p->get_results().size() == 11); // header + 10 txns
+  CHECK(p->get_errors().empty());
+}
+
+// --- Scenario 11: importer_config::header_seg_types set to pacs8_hdr's own seg_type() (0 -- see
+// work.hpp's declaration order: pacs8_hdr is declared before pacs8_txn) -- functional correctness
+// is unaffected (every segment still processed exactly once, same totals as Scenario 10), and the
+// header segment's own on_type() is observed to fire relative to the transactions -- a SOFT
+// scheduling signal, not a hard per-segment ordering guarantee (see docs/importer_usage.md's own
+// "Header segments are processed first" section: the guarantee is "never starved behind an
+// unbounded pile", not "always strictly first" under every possible thread interleaving), so this
+// asserts the header was seen at all (hdr_raw_msg non-empty) rather than a strict happens-before
+// relationship that could flake under real thread scheduling. --------------------------------------
+TEST_CASE("pipeline: header_seg_types routes the header segment through the priority queue without breaking correctness",
+          "[pipeline][stages][header-priority]")
+{
+  temp_dir_guard dir;
+  const auto     doc_path = dir.write("doc.xml", multi_txn_doc(20));
+
+  auto             state = std::make_shared<shared_state>();
+  stage_test_hooks hooks(state);
+
+  // seg_type 0 == pacs8_hdr (see work.hpp: pacs8_hdr is declared before pacs8_txn, and seg_type()
+  // is each schema class's declaration-order index -- see docs/importer_usage.md's own
+  // header_seg_types field doc comment).
+  auto cfg =
+    make_cfg_ex("test-header-priority", /*num_of_workers=*/4, /*pool_shard_count=*/2, /*ok_block_flush_size=*/3, /*header_seg_types=*/{0});
+  auto [p, res] = fsp::importer::exec(cfg, std::vector<std::string>{doc_path}, xsd_path(), hooks);
+
+  REQUIRE(res.has_value());
+  CHECK(p->ds_dscr()[0].status().ok());
+  CHECK(p->get_results().size() == 21); // header + 20 txns -- same total as without header_seg_types
+  CHECK(p->get_errors().empty());
+  {
+    const std::scoped_lock lock(state->raw_msg_mutex);
+    CHECK(state->hdr_raw_msg.find("GrpHdr") != fsp::str_t::npos); // the header segment was, in fact, processed
+  }
 }
 // NOLINTEND(readability-magic-numbers)

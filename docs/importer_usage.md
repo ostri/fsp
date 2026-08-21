@@ -11,17 +11,17 @@ You don't need to understand any of that machinery to use the importer, though. 
 point of view, using it comes down to three steps:
 
 1. Describe which XML elements you care about, using a small set of C++ classes (see
-   [Getting your data out](#getting-your-data-out) below).
+   [Getting your data out](#13-getting-your-data-out) below).
 2. Call one function, `fsp::importer::exec()`, with your files and that description.
 3. Read the result: either a summary of counts, or (if you want more control) a set of callback
    methods that get called live while documents are being processed.
 
-## API description
+## 1. API description
 
 Everything a caller needs lives in two headers: `importer.hpp` (the entry point) and
 `importer_config.hpp` (the settings struct).
 
-### `fsp::importer::exec()`
+### 1.1. `fsp::importer::exec()`
 
 This is the *only* way to run an import -- `importer` has no public constructor, so `exec()` is
 the sole entry point:
@@ -39,7 +39,7 @@ exec(const importer_config&    cfg,
 - `xsd_path` -- path to an XSD schema file, or an empty string if you don't want schema
   validation. When a schema is given, the importer checks every document against it before/while
   processing.
-- `hooks` -- your own callback object (see [callback description](#callback-description)), or
+- `hooks` -- your own callback object (see [callback description](#2-callback-description)), or
   omit it entirely if you just want the summary counts.
 
 `exec()` returns a pair:
@@ -81,7 +81,7 @@ Once you have the `importer` object, three more methods are available on it:
   semantically (a field failed your own validation rule).
 - `failed_document_indices()` -- indices (into `xml_paths`) of documents that failed outright.
 
-### `importer_config`
+### 1.2. `importer_config`
 
 ```cpp
 struct importer_config
@@ -99,6 +99,7 @@ struct importer_config
   std::size_t            cutter_ratio_num = 13;       // advanced tuning, leave at default
   std::size_t            cutter_ratio_den = 6;        // advanced tuning, leave at default
   std::size_t            pool_shard_count = 2;        // advanced tuning, leave at default
+  std::vector<int>       header_seg_types;            // see "Header segments are processed first" below, default: empty
 };
 ```
 
@@ -109,7 +110,7 @@ defaults tuned from real benchmarks -- only change them if you know you need to.
 `num_of_workers` is simply how many threads work on your documents at once; a good starting point
 is the number of CPU cores available.
 
-#### `cut_with_validation`
+#### 1.2.1. `cut_with_validation`
 
 This one only matters if you gave `exec()` an XSD schema (`xsd_path`). When you did, every
 document must be checked against it, and that check can happen in one of two ways:
@@ -136,10 +137,10 @@ only need to set this explicitly if your own workload doesn't match that assumpt
 schema was given (or it failed to load), this setting has no effect at all: there is nothing to
 validate either way.
 
-#### `ok_block_flush_size` / `nak_block_flush_size`
+#### 1.2.2. `ok_block_flush_size` / `nak_block_flush_size`
 
 These only matter if you actually override `on_block_store()`/`on_failed_block_store()`
-in your own hooks (see [Batch storage hooks](#batch-storage-hooks) below) -- with the default,
+in your own hooks (see [Batch storage hooks](#233-batch-storage-hooks) below) -- with the default,
 do-nothing hooks, they have no visible effect. Each worker thread accumulates the segments it
 processes locally, and only calls `on_block_store()` once `ok_block_flush_size` of them have
 piled up (or `on_failed_block_store()` once `nak_block_flush_size` failed ones have piled
@@ -152,7 +153,7 @@ threshold, failures could sit unflushed for a very long time. Raise these if you
 database) and you want fewer, larger calls; lower them if you want results to reach your storage
 sooner, at the cost of more, smaller calls.
 
-#### `cutter_ratio_num` / `cutter_ratio_den`
+#### 1.2.3. `cutter_ratio_num` / `cutter_ratio_den`
 
 Advanced tuning knob for the C (cutting) to P (processing) worker-thread ratio -- leave at the
 default (13:6) unless you have your own benchmark showing a different ratio works better for your
@@ -161,7 +162,7 @@ once than you have documents to cut is pointless), and the number of processor t
 derived from that cutter count using this ratio. 13:6 was found empirically fastest on a
 10-document/10M-transaction benchmark, tested against 13:5, 13:7, and 13:8.
 
-#### `pool_shard_count`
+#### 1.2.4. `pool_shard_count`
 
 Advanced tuning knob for how many independent shards the internal segment pool splits its
 ready/free queues into. More shards mean less lock contention between concurrent cutting/
@@ -169,7 +170,21 @@ processing threads, at the cost of some memory/bookkeeping overhead per shard. T
 was found empirically fastest when tested against 1, 3, and 4 shards -- only change this if your
 own measurements show otherwise for your workload.
 
-### Getting your data out
+#### 1.2.5. `header_seg_types`
+
+Which of your `targets` schema classes count as a header segment, expressed as `seg_type()`
+values -- the same integer `result.seg_type()` returns for a processed segment, i.e. each schema
+class's declaration-order index within the namespace you passed to `proc_data_of<^^YourNamespace>
+()` (see [Getting your data out](#13-getting-your-data-out) below and
+[`fsp::materialize_variant<^^YourNamespace>()`](#5-a-note-on-the-class-hierarchy) above for where
+that index comes from). Defaults to empty -- no schema class is treated as a header, and the
+importer processes segments in whatever order they become ready, exactly as if this field didn't
+exist. Listing one or more indices here enables the header-priority queue described in
+[Header segments are processed first](#231-header-segments-are-processed-first) below; a document
+format with no real header concept (or one where processing order genuinely doesn't matter) simply
+leaves this empty.
+
+### 1.3. Getting your data out
 
 `targets` tells the importer which pieces of an XML document you care about, and what to name
 their fields. You describe this as ordinary C++ classes, each annotated with an XPath-like
@@ -207,7 +222,7 @@ The two levels of annotation answer two different questions:
 - **Member-level annotation** (`[[= "x:GrpHdr/MsgId"]]` above a field) -- answers "which values
   do I want out of that segment?" It is an XPath relative to the segment's own root (not the whole
   document), and it is what actually gets extracted and handed back to you, inside a
-  `fsp::segment_result&` (see [method purpose and parameter semantics](#method-purpose-and-parameter-semantics)
+  `fsp::segment_result&` (see [method purpose and parameter semantics](#21-method-purpose-and-parameter-semantics)
   below), when that segment is processed.
 
 Any `prefix:` you use inside these paths (e.g. the `x:` in `x:GrpHdr/MsgId`) is resolved against
@@ -241,7 +256,7 @@ call:
 cfg.targets = fsp::proc_data_of<^^fsp::work>();
 ```
 
-#### Attribute paths and field types
+#### 1.3.1. Attribute paths and field types
 
 **`@` marks an XML attribute, not a child element** -- e.g.
 `[[= "GrpHdr/TtlIntrBkSttlmAmt/@Ccy"]]` reads the `Ccy` *attribute* of the `TtlIntrBkSttlmAmt`
@@ -253,7 +268,7 @@ The field's own declared C++ type (not a marker character in the path string) is
 importer both *what scalar kind* of value to parse the extracted text as, and *how many* of them
 to expect. The rest of this section goes through each type family in turn.
 
-##### Scalar base types
+##### 1.3.1.1. Scalar base types
 
 These are the seven C++ types `convert_scalar()` (see `reflection.hpp`) knows how to parse XML
 text into -- every other type family below (`o_`, `m_`, `validated_t<X>`) is built out of one of
@@ -279,7 +294,7 @@ integer. Internally it stores the value scaled by `10^amount_scale` (`amount_sca
 `fmt::formatter` (e.g. `fmt::format("{}", hdr.amount_sum)` prints `"123.45000"`), not by reading
 `.value` directly.
 
-##### `o_` prefix -- optional (0 or 1 occurrences)
+##### 1.3.1.2. `o_` prefix -- optional (0 or 1 occurrences)
 
 One `o_`-prefixed alias per scalar base type above, each an alias for `std::optional<T>`:
 `o_str_t`, `o_big_int_t`, `o_int_t`, `o_small_int_t`, `o_date_t`, `o_ts_t`, `o_amount_t` (all
@@ -291,7 +306,7 @@ failure:
 [[= "GrpHdr/TtlIntrBkSttlmAmt/@Ccy"]] o_str_t currency; // not every message repeats the currency
 ```
 
-##### `m_` prefix -- repeated, fixed capacity (0 to `max_values` occurrences)
+##### 1.3.1.3. `m_` prefix -- repeated, fixed capacity (0 to `max_values` occurrences)
 
 One `m_`-prefixed alias per scalar base type above, each an alias for `std::array<T, max_values>`
 (`max_values = 10`, see `parsing_util.hpp`): `m_str_t`, `m_big_int_t`, `m_int_t`, `m_small_int_t`,
@@ -309,14 +324,14 @@ A plain `std::vector<T>` field (no `m_` alias -- just write `std::vector<T>` you
 same way but grows without the `max_values` cap, at the cost of a heap allocation; prefer `m_*`
 unless you specifically expect to exceed `max_values` occurrences.
 
-##### `validated_t<X>` -- a field that validates itself
+##### 1.3.1.4. `validated_t<X>` -- a field that validates itself
 
 `validated_t<X>` (an alias for `std::expected<X, int>`, see `reflection.hpp`) wraps a field type
 `X` that validates itself: `X` must provide `static std::expected<X, error_info> parse(cstr_t)`,
 called automatically during extraction instead of a plain string-to-value conversion. On success
 the field holds `X`; on failure it holds an index into the owning `segment_result::errors()` (see
 that parameter's own description in
-[method purpose and parameter semantics](#method-purpose-and-parameter-semantics) above) -- this
+[method purpose and parameter semantics](#21-method-purpose-and-parameter-semantics) above) -- this
 is what lets a field validate itself (an IBAN's checksum, an amount's allowed range, a BIC against
 a reference table, ...) entirely inside the schema class, with no extra code in your callback:
 
@@ -336,7 +351,7 @@ Three examples of a `validated_t<X>` payload type, all from this repository:
 - **`fsp::value_set_t<Tag>`** (`value_set_t.hpp`) -- validates that a string is a member of a
   fixed set of allowed values, loaded once at runtime rather than known at compile time (e.g. a
   reference table of valid BIC codes, too large/data-driven to spell out as template parameters).
-  See [Membership validation with `value_set_t`](#membership-validation-with-value_set_t) below for
+  See [Membership validation with `value_set_t`](#1315-membership-validation-with-value_set_t) below for
   how to set one up.
 
 `validated_t<X>` combines freely with the `o_`/`m_` cardinality prefixes too --
@@ -348,7 +363,7 @@ counterparts of plain `validated_t<X>`, same relationship as `o_str_t`/`m_str_t`
 [[= "SomePath/RepeatedValidatedField"]] m_validated_t<fsp::ach::iban_t> several_ibans;
 ```
 
-##### Membership validation with `value_set_t`
+##### 1.3.1.5. Membership validation with `value_set_t`
 
 `fsp::value_set_t<Tag>` (`value_set_t.hpp`) is a `validated_t<X>` payload type for the common case
 of "must be one of these values", where the set of allowed values is data (a reference table),
@@ -378,12 +393,12 @@ using bic_code_t = fsp::value_set_t<bic_codes_tag>;
 Before any segment is processed, populate the set from your own delimiter-separated buffer, via
 `bic_code_t::init(packed_values, delimiter)` -- typically from your own `pipeline_hooks::on_run_init()`
 or `on_run_start()` override (both guaranteed to run on the main thread, strictly before any worker
-thread starts, see [method purpose and parameter semantics](#method-purpose-and-parameter-semantics)
+thread starts, see [method purpose and parameter semantics](#21-method-purpose-and-parameter-semantics)
 above). Prefer `on_run_init()` if the setup can fail (e.g. it reads a database) -- returning an
 error from it stops the run before `on_run_start()`/any document is ever cut:
 
 ```cpp
-fsp::void_result my_hooks::on_run_start(const fsp::doc_set_dscr& ds_dscr)
+fsp::e_void my_hooks::on_run_start(const fsp::doc_set_dscr& ds_dscr)
 {
   usr::bic_code_t::init("HAABSI22;BAKOSI2X;KSPKSI22", ';'); // one call, before any parse()
   return {};
@@ -396,7 +411,7 @@ happen, i.e. for the whole run. Every `parse()` call after `init()` -- there can
 per matching field across every worker thread -- is then just an O(1) hash-set lookup, never
 touching your raw data again.
 
-## callback description
+## 2. callback description
 
 If you only need the summary counts (`res->total_docs()` etc.) and the full lists from
 `get_results()`/`get_errors()`, you don't need a callback at all -- just omit the `hooks`
@@ -405,11 +420,11 @@ happening *while* the import is still running: log progress, apply your own busi
 validation rules, or stream results out to a database as they're produced instead of waiting for
 the whole run to finish.
 
-### method purpose and parameter semantics
+### 2.1. method purpose and parameter semantics
 
 To use callbacks, derive your own class from `fsp::typed_semantic_check<YourClass, ^^YourNamespace>`
 (not from `pipeline_hooks` directly -- this base takes care of some bookkeeping for you, see
-[A note on the class hierarchy](#a-note-on-the-class-hierarchy) below) and override whichever
+[A note on the class hierarchy](#5-a-note-on-the-class-hierarchy) below) and override whichever
 methods you need -- `on_run_start()`, `on_wrk_start()`, `on_doc_open()`, `on_type()`, and so on.
 Every one of these has a safe do-nothing default (or, for `on_type()`, a sensible default
 verdict), so you only override what you actually care about.
@@ -421,103 +436,236 @@ the importer's own.
 **Threading note:** the importer makes one independent copy of your hooks object per worker
 thread (via `clone()`, handled for you by `pipeline_hooks_crtp`, which `typed_semantic_check`
 derives from). Because of this, plain (not atomic) member variables are safe to use inside
-`on_doc_open`/`on_doc_close`/`on_type`/`on_block_store`/`on_failed_block_store` -- each thread
-only ever touches its own copy. `on_run_start()` and `on_run_end()` are the two exceptions: they
-run on the main thread, on your *original* object, not a clone, and `on_run_end()` is handed every
-worker clone so you can add their counters together yourself.
+`on_doc_open`/`on_doc_cutting_end`/`on_type`/`on_doc_sem_check`/`on_doc_stored`/`on_doc_close`/
+`on_doc_finish`/`on_block_store`/`on_failed_block_store` -- each thread only ever touches its own
+copy. `on_run_start()` and `on_run_end()` are the two exceptions: they run on the main thread, on
+your *original* object, not a clone, and `on_run_end()` is handed every worker clone so you can add
+their counters together yourself.
 
-| Method                    | Called                                                          | Typical use                                                     |
-| ------------------------- | --------------------------------------------------------------- | --------------------------------------------------------------- |
-| `on_run_init()`           | once, before `on_run_start()`, can fail                         | fallible one-time setup a package-level cb owns (e.g. read a database into `run_data()`); an error here skips `on_run_start()` and stops the run entirely |
-| `on_run_start()`          | once, before anything is processed (after `on_run_init()` succeeds) | start a stopwatch, log the run's document count                 |
-| `on_run_end()`            | once, after every worker thread has finished                    | sum up counters from all worker clones, log a summary           |
-| `get_doc_id()`            | once per document, on the main thread, before processing starts | assign your own external id to a document (e.g. a database key) |
-| `on_wrk_start()`          | once per worker thread, when it starts                          | per-thread setup, e.g. open a database connection               |
-| `on_wrk_end()`            | once per worker thread, when it finishes                        | per-thread cleanup, e.g. close that connection                  |
-| `on_doc_open()`           | when a document starts being cut into segments                  | log which document is being processed                           |
-| `on_doc_close()`          | when a document is done being cut                               | log the outcome (`fsp::doc_status`)                             |
-| `on_type()`               | once per segment, after its fields have been extracted          | your own semantic validation; return `true`/`false`             |
-| `on_block_store()`        | periodically, for a batch of successfully validated segments    | write results out to your own storage                           |
-| `on_failed_block_store()` | periodically, for a batch of failed segments                    | write/log failures out to your own storage                      |
+### 2.2. Document lifecycle, in order
 
-Below is what each parameter of each method actually means -- useful once you go past the
-one-line summary above.
+This is the part that matters for knowing, at any moment, exactly where a document stands: when it
+was opened, when it was fully cut into segments, when each segment (including the header) was
+checked, when every segment has actually been written to storage, and when the document is
+finally, truly closed. Seven hooks fire, in this order, for every document (a segment that fails to
+even parse skips `on_type()` and goes straight to `record_segment_failed()`'s own bookkeeping
+instead, but still counts towards "all segments processed"/"all segments stored" below):
 
-- **`on_run_start(const doc_set_dscr& ds_dscr)`**
-  - `ds_dscr` -- describes the whole set of documents this run was given (e.g. `ds_dscr.size()`
-    for how many).
-- **`on_run_end(const doc_set_counter& counters, const doc_set_dscr& ds_dscr, std::span<const pipeline_hooks*> worker_clones)`**
-  - `counters` -- the same whole-run totals `exec()`'s own return value exposes (see
-    [`fsp::importer::exec()`](#fspimporterexec) above).
-  - `ds_dscr` -- same as `on_run_start()`'s.
-  - `worker_clones` -- one pointer per worker thread, each pointing at that thread's own hooks
-    clone (see the CRTP base's `clone()`). This is your only chance to see every thread's
-    per-thread state (e.g. counters you accumulated in `on_type()`) all at once --
-    `static_cast` each pointer back to your own hook type (it is always safe: every element was
-    made by cloning your own object) and add up whatever fields you care about.
-- **`get_doc_id(std::size_t node_hint)`**
-  - `node_hint` -- a document index modulo some block size meaningful to you (e.g. if you're
-    generating ids with a Snowflake-style generator, this could be which "node" in that scheme
-    should mint this document's id) -- deliberately not the raw document index, and never tied to
-    which thread will later process the document. Ignore it if you don't need it.
-  - Returns -- your own opaque, 64-bit id for this document. Whatever you return is stored on the
-    document and later handed back to `on_block_store()`/`on_failed_block_store()` (via
-    `doc_set_dscr`), so you can tell which document a stored segment came from.
-- **`on_wrk_start(int worker_id, cstr_t thread_name)`** /
-  **`on_wrk_end(int worker_id, cstr_t thread_name)`**
-  - `worker_id` -- a small integer identifying this worker thread (0, 1, 2, ...).
-  - `thread_name` -- this thread's own name, as it appears in log lines.
-- **`on_doc_open(std::size_t doc_ndx, const doc_dscr& dscr)`** /
-  **`on_doc_close(std::size_t doc_ndx, doc_status status, const doc_dscr& dscr)`**
-  - `doc_ndx` -- this document's index into the `xml_paths` vector you gave `exec()`.
-  - `dscr` -- this one document's own description (e.g. `dscr.path()` for its file path).
-  - `status` (`on_doc_close()` only) -- `fsp::doc_status`, this document's outcome (e.g.
-    whether cutting/validation succeeded).
-- **`on_type(const YourSchemaClass& s, segment_result& result, bool is_first, bool is_last)`**
-  -- one overload per schema class in your namespace (see
-  [Getting your data out](#getting-your-data-out) above); `typed_semantic_check` dispatches to
-  whichever overload matches the segment just extracted.
-  - `s` -- the segment's own fields, fully typed (e.g. `s.msg_id`, `s.amount_sum` for a
-    `pacs8_hdr`) -- exactly the members you annotated on that schema class, no string-based
-    lookups needed.
-  - `result` -- the same segment, as a generic, name-indexed `segment_result` -- only useful if
-    you need something `s` doesn't already give you fully typed (e.g. `result.seg_id()`). Passed
-    by non-const reference because extracting a `validated_t<X>` field can append to
-    `result.errors()` if that field's own validation fails.
-  - `is_first` / `is_last` -- whether this is the first/last segment of its document (both `true`
-    at once for a document with exactly one segment).
-  - Returns -- this segment's semantic verdict: `true` if it's fine, `false` if something about
-    its content is wrong by your own business rules.
-- **`on_block_store(std::span<const std::size_t> indices, segment_pool& pool, const doc_set_dscr& ds_dscr)`** /
-  **`on_failed_block_store(std::span<const std::size_t> indices, std::span<const error_info> errors, segment_pool& pool, const doc_set_dscr& ds_dscr)`**
-  - `indices` -- pool slot indices belonging to this batch. Look each one up via
-    `pool.segment_at(idx)`/`pool.result_at(idx)` -- these slots are guaranteed not to be reused by
-    anyone else until your call returns. Can be empty (a harmless no-op call) for the final
-    end-of-thread flush.
-  - `errors` (`on_failed_block_store()` only) -- one entry per `indices` (same order, same
-    length): why `indices[i]` failed.
-  - `pool` -- the segment pool your `indices` refer to; use `pool.segment_at(idx)`/
-    `pool.result_at(idx)` to read the actual segment/result data.
-  - `ds_dscr` -- the full document set; look up `ds_dscr[pool.segment_at(idx).doc_ndx()]` per
-    index (a batch can mix segments from different documents) to resolve that document's own
-    data, e.g. the id you returned from `get_doc_id()`.
+1. **`on_doc_open(doc_ndx, dscr)`** -- the document has been handed to a cutter thread; cutting is
+   about to start.
+2. **`on_doc_cutting_end(doc_ndx, dscr)`** -- the document has been fully split into segments.
+   This does **not** mean syntax/validation/semantics are known yet -- only that the cutter is done
+   producing segments (renamed from the old, misleadingly-named `on_doc_close()` this hook used to
+   be -- see point 6 below for the hook that now actually fires once the document is closed).
+3. **`on_type()`** (dispatched from `on_seg_sem_check()`) -- fires once per segment, in whatever
+   order/thread each segment happens to be processed, including the document's header segment like
+   any other. Use `is_first`/`is_last` if you need to know "this was the header" / "this was the
+   last segment" without tracking it yourself.
+4. **`on_doc_sem_check(doc_ndx)`** -- fires exactly once, as soon as every one of the document's
+   segments has gone through step 3 (fsp-core's own "all segments processed" condition) --
+   independent of whether syntax/validation are known yet. This is your one chance to check
+   document-wide invariants across segments (e.g. "declared count in the header matches the actual
+   number of transaction segments") via `doc_data(doc_ndx)`. Returns this document's own semantic
+   verdict.
+5. **`on_doc_stored(doc_ndx, dscr)`** -- fires exactly once, as soon as every one of the document's
+   segments has actually been written out via `on_block_store()`/`on_failed_block_store()` (see
+   [Batch storage hooks](#233-batch-storage-hooks) below) -- independent of steps 3/4 above and of
+   syntax/validation. Because a single P-role worker thread can be mid-flight on segments from
+   several different documents at once, and a flush batch can freely mix segments from different
+   documents, this is NOT simply "one flush happened" -- it is fsp-core counting, per document, how
+   many of its segments have actually left `on_block_store()`/`on_failed_block_store()`, against the
+   same total the cutter already recorded for step 4. This is your signal that nothing more will
+   ever be written for this document.
+6. **`on_doc_close(doc_ndx, verdict, err, dscr)`** -- fires exactly once, as soon as syntax,
+   validation, step 4's semantic verdict, AND step 5's storage-completeness are ALL known
+   (whichever of those four facts happens to complete last is what triggers it -- there is no fixed
+   order between steps 3/4 and step 5, only that step 5 is now, by construction, always known
+   before this fires). `verdict.is_finished()` is guaranteed true here; `verdict.ok()` gives the
+   final aggregate, `verdict.syntax_status()`/`valid_status()`/`semantic_status()` give the
+   individual partial results if you need to know exactly which fact failed.
+7. **`on_doc_finish(doc_ndx)`** -- fires immediately after `on_doc_close()` returns. `doc_data
+   (doc_ndx)`'s timing is already stopped by the time this runs, so `duration()` is safe to read.
+   This is the LAST point at which `doc_data(doc_ndx)` is guaranteed to still hold this document's
+   own state -- right after this call returns, the slot may be reset and handed to a different
+   document.
+
+### 2.3. Segment processing order
+
+Once a document is cut, its segments land in a shared, sharded ready queue that every P-role
+worker thread pulls from -- across every document currently being processed, not just one. This
+section covers two things that follow from that: how header segments are kept from starving behind
+a pile of ordinary ones, and how fsp-core knows every one of a document's segments has actually
+been written to storage before it lets `on_doc_close()` fire.
+
+#### 2.3.1. Header segments are processed first
+
+Most document formats (SEPA pain/pacs messages included) have one or more header segments (e.g.
+`GrpHdr`) that logically precede a much larger number of transaction segments -- and it's common
+for a cb's own business logic to need the header's data (via `doc_data(doc_ndx)`) before it can
+meaningfully validate a transaction (see [Run-level and document-level shared
+data](#24-run-level-and-document-level-shared-data) below for the `doc_data()` mechanism itself). If
+header and transaction segments sat in the same ready queue with no distinction, every P-role
+thread could end up busy on transaction segments -- from this document or others -- while the one
+header segment that would unblock them all sits further back in the queue, never picked up because
+nothing prioritizes it.
+
+fsp-core avoids that with a second, parallel set of ready queues reserved for header segments only
+(sharded the same way as the ordinary ready queues, for the same contention reasons). A cutter
+routes each segment into the header queue or the ordinary queue as it produces it, based on whether
+the segment's own `seg_type()` appears in `importer_config::header_seg_types` (see
+[`header_seg_types`](#125-header_seg_types) above) -- if that list is left at its default, empty
+value, every segment goes into the ordinary queue and this whole mechanism is a no-op. Every P-role
+worker thread, each time it looks for work, checks the header queues (its own shard, then a sweep
+of the others) *before* it ever looks at the ordinary ready queues; only once no header segment is
+waiting anywhere does it fall through to ordinary segments, exactly as today. Because this check
+happens on every single work-fetch, not just at thread start-up, a header segment can never be
+starved behind an unbounded pile of transaction segments -- the moment one becomes ready, the next
+thread that goes looking for work picks it up first, regardless of which document it belongs to or
+how much ordinary work is already queued.
+
+In the common case this costs nothing: a document's header segment is produced by the cutter
+before its transaction segments (SEPA headers precede transactions in document order), so the
+header queue is usually already empty again by the time transaction segments start arriving. The
+mechanism exists as a guarantee for the uncommon case, not as a reordering of the common one.
+
+#### 2.3.2. Knowing every segment has been stored, before `on_doc_close()`
+
+`on_doc_stored()` (see step 5 in [Document lifecycle, in order](#22-document-lifecycle-in-order)
+above) is fsp-core's answer to "has everything this document produced actually left `on_block_
+store()`/`on_failed_block_store()` yet" -- and the reason it needs its own mechanism, rather than
+just counting flushes, is the same sharing that makes the header-queue problem possible in the
+first place: any P-role thread can process segments from any document, a single flush batch can
+freely mix segments from several different documents (see
+[Batch storage hooks](#233-batch-storage-hooks) above), and one document's segments can be spread
+across several batches, flushed by several different worker threads, at different times. Counting
+"batches flushed" would tell you
+nothing about any one document.
+
+Instead, fsp-core counts **segments actually written**, per document, against a total it already
+has on hand: the cutter records each document's exact segment count the moment cutting finishes
+(the same total `on_doc_sem_check()`'s own "all segments processed" condition already compares
+against). Every time `on_block_store()`/`on_failed_block_store()` is about to fire for a batch,
+fsp-core groups that batch's indices by their own `doc_ndx` first (a batch can span several
+documents, as above) and, for each document represented in it, adds however many of its segments
+just left the batch to that document's own running "segments stored" count. The moment that count
+reaches the document's known total, `on_doc_stored()` fires for that document -- exactly once,
+regardless of which thread's flush happened to be the one that pushed the count over the line.
+
+`on_doc_stored()`'s completion is then folded into the SAME four-way completion gate `on_doc_
+close()` already waits on (syntax, validation, `on_doc_sem_check()`'s semantic verdict, and now
+storage-completeness) -- so `on_doc_close()` is structurally unable to fire until every one of a
+document's segments has actually left `on_block_store()`/`on_failed_block_store()`, no matter which
+of the four facts happens to become true last. You never need to track or count anything yourself
+to get this guarantee.
+
+- **`[[nodiscard]] e_void on_run_init()`**
+  - when: once, before `on_run_start()`, can fail
+  - usage: fallible one-time setup a package-level cb owns (e.g. read a database into `run_data()`); an error here skips `on_run_start()` and stops the run before any document is cut
+  - parameters: *(none)*
+- **`[[nodiscard]] e_void on_run_start(const doc_set_dscr& ds_dscr)`**
+  - when: once, before anything is processed (after `on_run_init()` succeeds)
+  - usage: start a stopwatch, log the run's document count
+  - parameters:
+    - `ds_dscr` : `const doc_set_dscr&` -- describes the whole set of documents this run was given (e.g. `ds_dscr.size()` for how many)
+- **`e_void on_run_end(const doc_set_counter& counters, const doc_set_dscr& ds_dscr, std::span<const pipeline_hooks*> worker_clones)`**
+  - when: once, after every worker thread has finished
+  - usage: sum up per-thread state accumulated in `worker_clones`, log a summary
+  - parameters:
+    - `counters` : `const doc_set_counter&` -- the same whole-run totals `exec()`'s own return value exposes (see [`fsp::importer::exec()`](#11-fspimporterexec) above)
+    - `ds_dscr` : `const doc_set_dscr&` -- same as `on_run_start()`'s
+    - `worker_clones` : `std::span<const pipeline_hooks*>` -- one pointer per worker thread, each pointing at that thread's own hooks clone; `static_cast` each back to your own hook type (always safe: every element was made by cloning your own object) and add up whatever fields you care about
+- **`[[nodiscard]] std::uint64_t get_doc_id(std::size_t node_hint)`**
+  - when: once per document, on the main thread, before processing starts
+  - usage: assign your own external id to a document (e.g. a database key)
+  - parameters:
+    - `node_hint` : `std::size_t` -- a document index modulo some block size meaningful to you (e.g. which "node" a Snowflake-style generator should mint this document's id from) -- deliberately not the raw document index, never tied to which thread later processes the document; ignore it if you don't need it
+  - returns: your own opaque, 64-bit id for this document -- stored on the document, later handed back to `on_block_store()`/`on_failed_block_store()` via `doc_set_dscr`
+- **`[[nodiscard]] std::optional<std::int16_t> get_doc_agent_id(cstr_t path)`**
+  - when: once per document, right after `get_doc_id()`, on the main thread
+  - usage: resolve an opaque per-document id (e.g. from the file name) once, up front
+  - parameters:
+    - `path` : `cstr_t` -- the document's own path, exactly as passed to `exec()`
+  - returns: your own opaque id, or `std::nullopt` if you don't resolve one (the default); stored as `doc_dscr::agent_id()`, readable back from any later hook that gets a `doc_dscr`
+- **`e_void on_wrk_start(int worker_id, cstr_t thread_name)`** / **`e_void on_wrk_end(int worker_id, cstr_t thread_name)`**
+  - when: once per worker thread, when it starts / when it finishes
+  - usage: per-thread setup/cleanup, e.g. open/close a database connection
+  - parameters:
+    - `worker_id` : `int` -- a small integer identifying this worker thread (0, 1, 2, ...)
+    - `thread_name` : `cstr_t` -- this thread's own name, as it appears in log lines
+- **`e_void on_doc_open(std::size_t doc_ndx, const doc_dscr& dscr)`**
+  - when: 1. the document has been handed to a cutter thread; cutting is about to start
+  - usage: log which document is being processed
+  - parameters:
+    - `doc_ndx` : `std::size_t` -- this document's index into the `xml_paths` vector you gave `exec()`
+    - `dscr` : `const doc_dscr&` -- this one document's own description (e.g. `dscr.path()` for its file path)
+- **`e_void on_doc_cutting_end(std::size_t doc_ndx, const doc_dscr& dscr)`**
+  - when: 2. the document has been fully split into segments -- NOT a verdict, only "cutting is done" (renamed from the old, misleadingly-named `on_doc_close()`; see `on_doc_close()` below for the hook that fires once the document is actually closed)
+  - usage: log that cutting is done
+  - parameters:
+    - `doc_ndx` / `dscr` -- same as `on_doc_open()`'s
+- **`bool on_type(const YourSchemaClass& s, std::string_view raw_msg, const doc_dscr& dscr, segment_result& result, bool is_first, bool is_last)`**
+  - when: 3. once per segment (dispatched from `on_seg_sem_check()`), including the document's header segment, in whatever order/thread each segment happens to be processed -- one overload per schema class in your namespace (see [Getting your data out](#13-getting-your-data-out) above)
+  - usage: your own semantic validation
+  - parameters:
+    - `s` : `const YourSchemaClass&` -- the segment's own fields, fully typed (e.g. `s.msg_id`, `s.amount_sum` for a `pacs8_hdr`) -- exactly the members you annotated on that schema class, no string-based lookups needed
+    - `raw_msg` : `std::string_view` -- the segment's raw XML fragment (`segment.view(dscr.mmf().data())`, computed once for you), for the rare case you need more than `s`/`result` already give you
+    - `dscr` : `const doc_dscr&` -- this segment's own document's `doc_dscr` (`out_doc_id()`, `agent_id()`, `mmf()`, ...)
+    - `result` : `segment_result&` -- the same segment, as a generic, name-indexed `segment_result` -- only useful if you need something `s` doesn't already give you fully typed (e.g. `result.seg_id()`); non-const because extracting a `validated_t<X>` field can append to `result.errors()` if that field's own validation fails
+    - `is_first` / `is_last` : `bool` -- whether this is the first/last segment of its document (both `true` at once for a document with exactly one segment)
+  - returns: this segment's semantic verdict -- `true` if it's fine, `false` if something about its content is wrong by your own business rules
+- **`bool on_doc_sem_check(std::size_t doc_ndx)`**
+  - when: 4. once, right after every one of the document's segments has gone through `on_type()` (independent of whether syntax/validation are known yet)
+  - usage: cross-segment/document-wide checks (e.g. declared count in the header vs. actual number of transaction segments), via `doc_data(doc_ndx)`
+  - parameters:
+    - `doc_ndx` : `std::size_t` -- as above
+  - returns: this document's own semantic verdict (`true` = ok), fed into the document's overall `doc_status_t` alongside syntax/validation
+- **`e_void on_doc_stored(std::size_t doc_ndx, const doc_dscr& dscr)`**
+  - when: 5. once, as soon as every one of the document's segments has actually been written out via `on_block_store()`/`on_failed_block_store()` (independent of steps 3/4 and of syntax/validation) -- fsp-core tracks this per document, not per flush batch, since one batch can mix segments from several documents and one document's segments can be flushed across several batches/worker threads
+  - usage: your own "this document will never be written to again" signal -- e.g. mark it durably complete in your own storage, independent of the pass/fail verdict `on_doc_close()` below reports
+  - parameters:
+    - `doc_ndx` / `dscr` -- same as `on_doc_open()`'s
+- **`bool on_doc_close(std::size_t doc_ndx, const doc_status_t& verdict, const error_info& err, const doc_dscr& dscr)`**
+  - when: 6. once, as soon as syntax + validation + step 4's semantic verdict + step 5's storage-completeness are ALL known -- whichever of those four facts happens to complete last is what triggers it; step 5 is now, by construction, always known before this fires
+  - usage: log/act on the document's final verdict, e.g. move it to a done-path or an err-path
+  - parameters:
+    - `doc_ndx` / `dscr` -- as above
+    - `verdict` : `const doc_status_t&` -- this document's final status: `verdict.ok()` for the overall pass/fail, `verdict.syntax_status()`/`valid_status()`/`semantic_status()` for the individual partial results (each a `fsp::three_state`), `verdict.is_finished()` guaranteed `true` here
+    - `err` : `const error_info&` -- the syntax/validation error that failed the document, if any (default-constructed, i.e. "no error", otherwise)
+  - returns: the FINAL verdict you want recorded for this document (default: `verdict.ok()`)
+- **`e_void on_doc_finish(std::size_t doc_ndx)`**
+  - when: 7. once, immediately after `on_doc_close()` returns
+  - usage: last read of `doc_data(doc_ndx)` before it's recycled for a different document
+  - parameters:
+    - `doc_ndx` : `std::size_t` -- as above; `doc_data(doc_ndx)` is still valid here, its timing already stopped, so `duration()` is safe to read
+- **`e_void on_block_store(std::span<const std::size_t> indices, segment_pool& pool, const doc_set_dscr& ds_dscr)`** / **`e_void on_failed_block_store(std::span<const std::size_t> indices, std::span<const error_info> errors, segment_pool& pool, const doc_set_dscr& ds_dscr)`**
+  - when: periodically, for a batch of successfully-validated/failed segments -- either once `ok_block_flush_size`/`nak_block_flush_size` worth have piled up, or once, with the remainder, at the end of a worker thread's run
+  - usage: write results/failures out to your own storage (a file, a database, a message queue)
+  - parameters:
+    - `indices` : `std::span<const std::size_t>` -- pool slot indices belonging to this batch; not reused by anyone else until your call returns; can be empty (a harmless no-op call) for the final end-of-thread flush
+    - `errors` : `std::span<const error_info>` (`on_failed_block_store()` only) -- one entry per `indices` (same order, same length): why `indices[i]` failed
+    - `pool` : `segment_pool&` -- look up via `pool.segment_at(idx)`/`pool.result_at(idx)` to read the actual segment/result data
+    - `ds_dscr` : `const doc_set_dscr&` -- the full document set; look up `ds_dscr[pool.segment_at(idx).doc_ndx()]` per index (a batch can mix segments from different documents) to resolve that document's own data, e.g. the id you returned from `get_doc_id()`
 
 `on_type()` is the one you'll override most often -- declare one overload per schema class in
 your namespace, with this exact parameter list:
 
 ```cpp
-bool on_type(const fsp::work::pacs8_hdr& hdr, fsp::segment_result& result, bool is_first, bool is_last) override;
-bool on_type(const fsp::work::pacs8_txn& txn, fsp::segment_result& result, bool is_first, bool is_last) override;
+bool on_type(const fsp::work::pacs8_hdr& hdr, std::string_view raw_msg, const fsp::doc_dscr& dscr,
+             fsp::segment_result& result, bool is_first, bool is_last) override;
+bool on_type(const fsp::work::pacs8_txn& txn, std::string_view raw_msg, const fsp::doc_dscr& dscr,
+             fsp::segment_result& result, bool is_first, bool is_last) override;
 ```
 
 ```cpp
-bool on_type(const fsp::work::pacs8_hdr& hdr, fsp::segment_result& result, bool is_first, bool is_last) override
+bool on_type(const fsp::work::pacs8_hdr& hdr, std::string_view raw_msg, const fsp::doc_dscr& dscr,
+             fsp::segment_result& result, bool is_first, bool is_last) override
 {
   // hdr.msg_id, hdr.amount_sum, ... are already fully typed -- no string-based lookups needed.
   return true; // or false, if this segment fails your own business rule
 }
 
-bool on_type(const fsp::work::pacs8_txn& txn, fsp::segment_result& result, bool is_first, bool is_last) override
+bool on_type(const fsp::work::pacs8_txn& txn, std::string_view raw_msg, const fsp::doc_dscr& dscr,
+             fsp::segment_result& result, bool is_first, bool is_last) override
 {
   return txn.amount.value > 0; // your own business rule
 }
@@ -535,7 +683,7 @@ business rule of its own, its `on_type()` overload still needs to exist, just re
 unconditionally, so that decision is visible in your own source instead of inferred from an
 absence.
 
-#### Batch storage hooks
+#### 2.3.3. Batch storage hooks
 
 `on_block_store()`/`on_failed_block_store()` exist for one specific job: writing large
 numbers of results out to your own storage (a file, a database, a message queue) without doing it
@@ -547,7 +695,15 @@ indices for that batch and read the actual data back out via the `segment_pool&`
 parameters you're given. Most callers don't need these two hooks at all; ignore them unless you're
 streaming output to external storage while the import is still running.
 
-### Run-level and document-level shared data
+A single batch can freely mix segments belonging to different documents (a P-role worker thread
+processes whatever segment comes next, regardless of which document it belongs to), and one
+document's segments can be spread across several batches, even across several worker threads.
+fsp-core tracks, per document, how many of its segments have actually left one of these two hooks,
+against the same total the cutter already knows -- once that count reaches the total, `on_doc_
+stored()` (see [Document lifecycle, in order](#22-document-lifecycle-in-order) above) fires for that
+document, exactly once. You never need to do this counting yourself.
+
+### 2.4. Run-level and document-level shared data
 
 Besides your own plain member variables (safe per-thread, see the threading note above),
 `typed_semantic_check`/`pipeline_hooks_crtp` give you two more places to keep state, each with a
@@ -619,11 +775,12 @@ and a lot of doc-level state is only ever touched by whichever single thread hap
 processing that document at a given point. Wrap the access in `fsp::lock()` only when you know
 multiple threads genuinely can touch the SAME instance at the same time -- e.g. several worker
 threads aggregating into the same `run_data()` from `on_type()`, or two independent hooks
-(`on_doc_close()` and the segment-processing path) racing to read/update the same `doc_data()`:
+(`on_doc_sem_check()` and the segment-processing path) racing to read/update the same `doc_data()`:
 
 ```cpp
 // Example 1: run-level -- every worker thread's on_type() adds to the same running total.
-bool on_type(const fsp::work::pacs8_txn& txn, fsp::segment_result& result, bool is_first, bool is_last) override
+bool on_type(const fsp::work::pacs8_txn& txn, std::string_view raw_msg, const fsp::doc_dscr& dscr,
+             fsp::segment_result& result, bool is_first, bool is_last) override
 {
   {
     auto guard = fsp::lock(run_data());
@@ -635,7 +792,8 @@ bool on_type(const fsp::work::pacs8_txn& txn, fsp::segment_result& result, bool 
 // Example 2: doc-level -- on_type() accumulates the actual transaction count, on_doc_sem_check()
 // compares it against the header's declared count -- both could, in principle, be reached from
 // different threads for the same document.
-bool on_type(const fsp::work::pacs8_txn& txn, fsp::segment_result& result, bool is_first, bool is_last) override
+bool on_type(const fsp::work::pacs8_txn& txn, std::string_view raw_msg, const fsp::doc_dscr& dscr,
+             fsp::segment_result& result, bool is_first, bool is_last) override
 {
   auto guard = fsp::lock(doc_data(result.doc_ndx()));
   guard->actual_count += 1;
@@ -654,11 +812,11 @@ constructed and unlocks it automatically when the guard goes out of scope, so th
 `lock()`/`unlock()` pair to remember or get wrong. Access the locked data through the guard with
 `->`/`*`, same as a smart pointer.
 
-### calback example
+### 2.5. calback example
 
 Here is a complete, minimal callback class that counts documents and segments, and applies a
 simple validation rule. The callback below reads `txn.amount`, so first, here is the `fsp::work`
-namespace (see [Getting your data out](#getting-your-data-out) above) it dispatches segments
+namespace (see [Getting your data out](#13-getting-your-data-out) above) it dispatches segments
 against -- this is what defines that `pacs8_txn` even has an `amount` field to read:
 
 ```cpp
@@ -692,7 +850,8 @@ public:
   std::size_t segments_ok    = 0;
   std::size_t segments_error = 0;
 
-  bool on_type(const fsp::work::pacs8_txn& txn, fsp::segment_result& result, bool is_first, bool is_last)
+  bool on_type(const fsp::work::pacs8_txn& txn, std::string_view raw_msg, const fsp::doc_dscr& dscr,
+               fsp::segment_result& result, bool is_first, bool is_last)
   {
     const bool ok = txn.amount.value > 0; // your own business rule
     if (ok) ++segments_ok;
@@ -700,15 +859,16 @@ public:
     return ok;
   }
 protected:
-  void on_doc_open(std::size_t doc_ndx, const fsp::doc_dscr& dscr) override
+  fsp::e_void on_doc_open(std::size_t doc_ndx, const fsp::doc_dscr& dscr) override
   {
     ++documents_seen;
     log().info(fmt::format("Started document {}: '{}'", doc_ndx, dscr.path()));
+    return {};
   }
 
-  void on_run_end(const fsp::doc_set_counter&           counters,
-                  const fsp::doc_set_dscr&              ds_dscr,
-                  std::span<const fsp::pipeline_hooks*> worker_clones) override
+  fsp::e_void on_run_end(const fsp::doc_set_counter&           counters,
+                         const fsp::doc_set_dscr&              ds_dscr,
+                         std::span<const fsp::pipeline_hooks*> worker_clones) override
   {
     std::size_t total_ok = segments_ok, total_error = segments_error;
     for (const auto* clone : worker_clones)
@@ -718,6 +878,7 @@ protected:
       total_error += c->segments_error;
     }
     log().info(fmt::format("Run finished: {} ok, {} failed", total_ok, total_error));
+    return {};
   }
 };
 ```
@@ -732,7 +893,7 @@ auto [p, res] = fsp::importer::exec(cfg, xml_paths, xsd_path, hooks);
 For a full working example with every hook overridden, see `src/test/pacs8_cb.hpp`/
 `pacs8_cb.cpp` and `src/test/pacs8-cb.cpp` in this repository.
 
-## simple example
+## 3. simple example
 
 This is the smallest complete program that imports a set of XML files and prints a summary --
 no callback needed. See `src/test/pacs8.cpp` for the full, buildable version this is based on.
@@ -778,14 +939,14 @@ int main(int argc, const char* argv[])
 walks the `fsp::work` namespace at compile time (via C++26 reflection) and builds the full
 `proc_data` the importer needs to know how to cut/extract -- every other `importer_config` field
 is generic run configuration, unrelated to which XML elements you're after (see
-[Getting your data out](#getting-your-data-out) above for what goes into that namespace, and
-[`importer_config`](#importer_config) above for the rest of these fields).
+[Getting your data out](#13-getting-your-data-out) above for what goes into that namespace, and
+[`importer_config`](#12-importer_config) above for the rest of these fields).
 
 That's it: describe your target elements once (`work.hpp`), call `exec()`, check the result. Add
 a callback class only once you need to react to individual documents/segments while the run is
 still in progress.
 
-## complex example
+## 4. complex example
 
 This example puts everything from this document together into one working program, based on
 this repository's own `pacs8`/`pacs8-cb` demo (`src/test/work.hpp`, `pacs8_cb.hpp`/`.cpp`,
@@ -796,7 +957,7 @@ this repository's own `pacs8`/`pacs8-cb` demo (`src/test/work.hpp`, `pacs8_cb.hp
 3. the callback itself, and
 4. the main program tying it all together, `#include`s included.
 
-### 1. The namespace: how the document is cut
+### 4.1. The namespace: how the document is cut
 
 ```cpp
 // work.hpp
@@ -823,16 +984,16 @@ namespace fsp::work
 50000>>` -- a field type with its own built-in range check, applied automatically during
 extraction, before `on_type()` even runs, and reported through `result.errors()` on failure (see
 `result`'s own parameter description in
-[method purpose and parameter semantics](#method-purpose-and-parameter-semantics) above). Plain
+[method purpose and parameter semantics](#21-method-purpose-and-parameter-semantics) above). Plain
 `amount_t` here keeps this example focused on the callback itself.)
 
-### 2. The class members: what `on_type()` gets
+### 4.2. The class members: what `on_type()` gets
 
 The four annotated members above (`txn_id`, `amount`, `currency`, `debtor_bic`) are exactly what
 ends up readable, fully typed, in `on_type()`'s own `txn` parameter -- see step 3 below, where
 `txn.txn_id`/`txn.amount` are used directly, with no string-based lookups.
 
-### 3. The callback
+### 4.3. The callback
 
 ```cpp
 // my_pacs8_hooks.hpp
@@ -846,7 +1007,8 @@ public:
   std::size_t segments_ok    = 0;
   std::size_t segments_error = 0;
 
-  bool on_type(const fsp::work::pacs8_txn& txn, fsp::segment_result& result, bool is_first, bool is_last)
+  bool on_type(const fsp::work::pacs8_txn& txn, std::string_view raw_msg, const fsp::doc_dscr& dscr,
+               fsp::segment_result& result, bool is_first, bool is_last)
   {
     // Our own business rule: a transaction must carry a positive amount. amount_t stores its
     // value scaled by 10^amount_scale (see parsing_util.hpp), as a plain .value member.
@@ -857,12 +1019,15 @@ public:
     return valid;
   }
 protected:
-  void on_doc_open(std::size_t doc_ndx, const fsp::doc_dscr& dscr) override
-  { log().info(fmt::format("Started document {}: '{}'", doc_ndx, dscr.path())); }
+  fsp::e_void on_doc_open(std::size_t doc_ndx, const fsp::doc_dscr& dscr) override
+  {
+    log().info(fmt::format("Started document {}: '{}'", doc_ndx, dscr.path()));
+    return {};
+  }
 
-  void on_run_end(const fsp::doc_set_counter&           counters,
-                  const fsp::doc_set_dscr&              ds_dscr,
-                  std::span<const fsp::pipeline_hooks*> worker_clones) override
+  fsp::e_void on_run_end(const fsp::doc_set_counter&           counters,
+                         const fsp::doc_set_dscr&              ds_dscr,
+                         std::span<const fsp::pipeline_hooks*> worker_clones) override
   {
     std::size_t total_ok = segments_ok, total_error = segments_error;
     for (const auto* clone : worker_clones)
@@ -872,11 +1037,12 @@ protected:
       total_error += c->segments_error;
     }
     log().info(fmt::format("Run finished: {} ok, {} failed", total_ok, total_error));
+    return {};
   }
 };
 ```
 
-### 4. The main program
+### 4.4. The main program
 
 ```cpp
 // main.cpp
@@ -952,7 +1118,7 @@ Compare this against the real, buildable version this is based on: `src/test/wor
 schema, with a second class for the message header), `src/test/pacs8_cb.hpp`/`pacs8_cb.cpp` (the
 full callback, with every hook overridden), and `src/test/pacs8-cb.cpp` (the main program).
 
-## A note on the class hierarchy
+## 5. A note on the class hierarchy
 
 Everything above is written against `fsp::typed_semantic_check<YourClass, ^^YourNamespace>` --
 the base every example in this document actually derives from, and the one you should use too.
@@ -960,22 +1126,22 @@ It sits between two lower-level pieces you won't normally touch directly, but th
 knowing about if you ever need to go past `on_type()`:
 
 - **`fsp::pipeline_hooks`** -- the actual base class every hook object is, underneath. Its
-  own extension point for "check this segment" is `on_semantic_check(const xml_segment& segment,
-segment_result& result, bool is_first, bool is_last)`: one single virtual call for *any* segment
-  type, given to you as the generic, name-indexed `segment_result` -- no per-schema-class dispatch
-  at all. `typed_semantic_check` implements `on_semantic_check()` once and turns it into the
-  `on_type()` overloads you actually write.
+  own extension point for "check this segment" is `on_seg_sem_check(const xml_segment& segment,
+const doc_dscr& dscr, segment_result& result, bool is_first, bool is_last)`: one single virtual
+  call for *any* segment type, given to you as the generic, name-indexed `segment_result` -- no
+  per-schema-class dispatch at all. `typed_semantic_check` implements `on_seg_sem_check()` once
+  and turns it into the `on_type()` overloads you actually write.
 - **`fsp::materialize_variant<^^YourNamespace>(result.seg_type(), result)`** -- the call
-  `typed_semantic_check`'s own `on_semantic_check()` makes internally to turn that generic
+  `typed_semantic_check`'s own `on_seg_sem_check()` makes internally to turn that generic
   `segment_result` into a `std::variant` of your schema classes, then `std::visit()`s it straight
   into the matching `on_type()` overload. `result.seg_type()` is the integer index (in
   declaration order) of which schema class this segment is -- already recorded when the segment
   was cut, not something you set yourself.
 
-You would only override `on_semantic_check()` directly (deriving from
+You would only override `on_seg_sem_check()` directly (deriving from
 `fsp::pipeline_hooks_crtp<YourClass>` instead of `typed_semantic_check`) if per-schema-class
 dispatch genuinely doesn't fit what you need -- e.g. a single validation rule that reads generic,
 name-indexed values without caring which schema class they came from. For the overwhelming
 majority of callers, `on_type()` is simpler, is compile-time-checked for missing schema classes
-(see [method purpose and parameter semantics](#method-purpose-and-parameter-semantics) above), and
+(see [method purpose and parameter semantics](#21-method-purpose-and-parameter-semantics) above), and
 is what every example in this document uses.

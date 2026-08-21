@@ -62,6 +62,17 @@ endif()
 
 set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "Debug" "Release" "Profile" "Coverage")
 
+# ThreadSanitizer, for detecting genuine data races (e.g. the pipeline::record_segments_stored()/
+# doc_counters::add_segments_stored() concurrent-access pattern) that ASan/UBSan/LeakSan alone
+# cannot catch. NOT a fifth CMAKE_BUILD_TYPE: the logger CPM dependency's own CMakeLists.txt hard-
+# requires a config/log.<build type>.conf file in ITS source tree for whatever CMAKE_BUILD_TYPE is
+# set (Debug/Release/Profile/Coverage only) and FATAL_ERRORs on anything else -- fsp has no control
+# over that file (it lives in the logger package, not here). So this stays CMAKE_BUILD_TYPE=Debug
+# (satisfying logger) and instead swaps Debug's own COMMON_DEBUG_FLAGS/COMMON_LINK_FLAGS sanitizer
+# set for -fsanitize=thread when explicitly requested: cmake -B build/tsan -DCMAKE_BUILD_TYPE=Debug
+# -DFSP_ENABLE_TSAN=ON.
+option(FSP_ENABLE_TSAN "Replace Debug's ASan+UBSan+LeakSan with ThreadSanitizer (mutually exclusive with ASan)" OFF)
+
 # --- 2. Common compilation and linking parameters ---
 if(MSVC)
     set(COMMON_RELEASE_FLAGS "/W4" "/WX" "/O2")
@@ -78,15 +89,32 @@ else()
         # "-fcontracts"
         # "-fcontract-evaluation-semantic=ignore"
     )
-    set(COMMON_DEBUG_FLAGS
-        ${COMMON_FLAGS}
-        "-g" "-O0" "-gdwarf-4"
-        "-fsanitize=address,undefined,leak"
-        "-fno-omit-frame-pointer"
-        "-freflection"
-        # "-fcontracts"
-        # "-fcontract-evaluation-semantic=observe"
-    )
+    # FSP_ENABLE_TSAN (see its own doc comment above) swaps ASan+UBSan+LeakSan for
+    # ThreadSanitizer -- mutually exclusive instrumentation, so exactly one or the other, never
+    # both. -O1 (not -O0) is TSan's own recommended minimum -- unoptimized code can produce
+    # spurious races TSan's own docs warn about; ASan/UBSan/LeakSan have no such requirement, so
+    # the plain -O0 path is untouched.
+    if(FSP_ENABLE_TSAN)
+        set(COMMON_DEBUG_FLAGS
+            ${COMMON_FLAGS}
+            "-g" "-O1" "-gdwarf-4"
+            "-fsanitize=thread"
+            "-fno-omit-frame-pointer"
+            "-freflection"
+        )
+        set(COMMON_LINK_FLAGS "-fsanitize=thread")
+    else()
+        set(COMMON_DEBUG_FLAGS
+            ${COMMON_FLAGS}
+            "-g" "-O0" "-gdwarf-4"
+            "-fsanitize=address,undefined,leak"
+            "-fno-omit-frame-pointer"
+            "-freflection"
+            # "-fcontracts"
+            # "-fcontract-evaluation-semantic=observe"
+        )
+        set(COMMON_LINK_FLAGS "-fsanitize=address,undefined,leak")
+    endif()
     set(COMMON_PROFILE_FLAGS
         ${COMMON_FLAGS}
         "-O3" "-DNDEBUG"
@@ -97,7 +125,6 @@ else()
         # "-fcontracts"
         # "-fcontract-evaluation-semantic=ignore"
     )
-    set(COMMON_LINK_FLAGS "-fsanitize=address,undefined,leak")
     set(COMMON_PROFILE_LINK_FLAGS "")
     # No sanitizers here: ASan/UBSan instrumentation inflates gcov's branch counts with
     # paths that only exist for the sanitizer's own checks, so a Coverage build measures
@@ -235,6 +262,9 @@ function(add_fsp_target TARGET_NAME TYPE)
         # executable that links it still needs every object file's gcov instrumentation.
         target_link_options(${TARGET_NAME} PRIVATE ${COMMON_COVERAGE_LINK_FLAGS})
     else()
+        # Debug, with or without FSP_ENABLE_TSAN (see its own doc comment above -- swaps
+        # COMMON_DEBUG_FLAGS/COMMON_LINK_FLAGS' own sanitizer set, everything else about this
+        # branch is unchanged).
         target_compile_options(${TARGET_NAME} PRIVATE ${COMMON_DEBUG_FLAGS})
         if(NOT TYPE STREQUAL "STATIC")  # Only for executable and shared library
             target_link_options(${TARGET_NAME} PRIVATE ${COMMON_LINK_FLAGS})
@@ -540,6 +570,7 @@ if(BUILD_TESTING AND FSP_BUILD_TESTS)
         ${PROJECT_SOURCE_DIR}/src/test/test_exporter.cpp
         ${PROJECT_SOURCE_DIR}/src/test/test_pipeline_stages.cpp
         ${PROJECT_SOURCE_DIR}/src/test/test_run_doc_data.cpp
+        ${PROJECT_SOURCE_DIR}/src/test/test_doc_status_t.cpp
         ${PROJECT_SOURCE_DIR}/src/test/test_value_set_t.cpp
         ${PROJECT_SOURCE_DIR}/src/common/xercesc_helpers/x_str.cpp
         ${PROJECT_SOURCE_DIR}/src/common/xercesc_helpers/xerces_mgr.cpp

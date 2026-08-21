@@ -3,6 +3,7 @@
 #include "pipeline.hpp"
 #include "segment_result.hpp"
 #include "xpath_helpers.hpp"
+#include <algorithm>
 #include <chrono>
 #include <fmt/format.h>
 // #include <magic_enum.hpp>
@@ -482,14 +483,22 @@ namespace fsp
 
     if (auto res = process_segment(seg))
     {
-      const bool semantically_ok = pipeline_.record_segment_done(seg, *res, hooks_);
+      const bool semantically_ok = pipeline_.check_segment_semantics(seg, *res, hooks_);
       // Both loc_res_ok_/loc_res_nak_ (the existing route into pipeline_.results()/errors(), see
       // xml_worker::flush_results()) and pool_.result_at(idx) (for a later on_block_safe_store()/
       // on_failed_block_safe_store() hook) need their own copy of *res -- hence the copy into the pool
       // before *res is moved into record_ok()/record_nak() below.
       pool_.result_at(idx) = *res;
+      // record_ok()/record_nak() below can flush this segment straight into storage
+      // (on_block_safe_store()/on_failed_block_safe_store(), once ok_block_flush_size_/
+      // nak_block_flush_size_ is reached) -- deliberately BEFORE pipeline_::finish_segment(), which
+      // is what can trigger hooks.on_doc_safe_close() for this segment's own document. Flushing
+      // first guarantees a document's last segment is durably stored before on_doc_close() ever
+      // sees that document as finished (see pipeline::check_segment_semantics()'s own doc comment
+      // for why the old, single-call record_segment_done() could not give that guarantee).
       if (semantically_ok) record_ok(idx, seg, std::move(*res));
       else record_nak(idx, seg, std::move(*res), error_info::semantic("on_seg_sem_check", "segment failed semantic validation"));
+      pipeline_.finish_segment(static_cast<std::size_t>(seg.doc_ndx()), semantically_ok, hooks_);
     }
     else
     {
@@ -525,16 +534,55 @@ namespace fsp
     if (nak_block_indices_.size() >= nak_block_flush_size_) flush_nak_block();
   }
 
+  // Both flush_ok_block()/flush_nak_block() below share the same shape: call the batch storage
+  // hook, and -- ONLY if it reports success -- fold this batch's indices into each represented
+  // document's own "segments stored" count (see pipeline::record_segments_stored()'s own doc
+  // comment for why this must be grouped by doc_ndx rather than treated as one flat batch count:
+  // a single batch can freely mix segments from several different documents, since a P-role
+  // thread processes whatever segment is next ready, regardless of which document it belongs to).
+  // A batch whose own store call failed must NOT count its segments as stored -- see
+  // on_block_safe_store()'s own doc comment in pipeline_hooks.hpp for why that hook's error is
+  // propagated here rather than merely logged, unlike every other _safe_ hook.
+  void xml_worker::record_segments_stored_by_doc(std::span<const std::size_t> indices)
+  {
+    // by_doc accumulates "how many of THIS batch's segments belong to doc_ndx" -- a plain,
+    // thread-local vector<pair<...>> is fine here (no sharing across threads): most batches touch
+    // only a handful of distinct documents, so a linear scan-and-bump is cheaper than a map for
+    // realistic ok_block_flush_size_/nak_block_flush_size_ values.
+    std::vector<std::pair<std::size_t, std::size_t>> by_doc; // (doc_ndx, count)
+    for (const std::size_t idx : indices)
+    {
+      const auto doc_ndx = static_cast<std::size_t>(pool_.segment_at(idx).doc_ndx());
+      auto       it      = std::ranges::find_if(by_doc, [doc_ndx](const auto& p) { return p.first == doc_ndx; });
+      if (it == by_doc.end()) by_doc.emplace_back(doc_ndx, 1);
+      else ++it->second;
+    }
+    for (const auto& [doc_ndx, count] : by_doc) pipeline_.record_segments_stored(doc_ndx, count, hooks_);
+  }
+
   void xml_worker::flush_ok_block()
   {
-    if (! ok_block_indices_.empty()) hooks_.on_block_safe_store(ok_block_indices_, pool_, ds_dscr_);
+    if (! ok_block_indices_.empty())
+    {
+      if (auto res = hooks_.on_block_safe_store(ok_block_indices_, pool_, ds_dscr_); res) record_segments_stored_by_doc(ok_block_indices_);
+      else if (log_error_)
+        log_.error(
+          fmt::format("on_block_store() failed for a batch of {} segment(s): {}", ok_block_indices_.size(), res.error().to_string()));
+    }
     pool_.release_slots(ok_block_indices_);
     ok_block_indices_.clear();
   }
 
   void xml_worker::flush_nak_block()
   {
-    if (! nak_block_indices_.empty()) hooks_.on_failed_block_safe_store(nak_block_indices_, nak_block_errors_, pool_, ds_dscr_);
+    if (! nak_block_indices_.empty())
+    {
+      if (auto res = hooks_.on_failed_block_safe_store(nak_block_indices_, nak_block_errors_, pool_, ds_dscr_); res)
+        record_segments_stored_by_doc(nak_block_indices_);
+      else if (log_error_)
+        log_.error(fmt::format(
+          "on_failed_block_store() failed for a batch of {} segment(s): {}", nak_block_indices_.size(), res.error().to_string()));
+    }
     pool_.release_slots(nak_block_indices_);
     nak_block_indices_.clear();
     nak_block_errors_.clear();

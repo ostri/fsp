@@ -11,12 +11,12 @@
 namespace fsp
 {
   /**
-   * @brief Three-way verdict for one of doc_status_t's three tracked facts (syntax/validation/
-   * semantic) -- distinct from a plain bool so "nobody has reported on this yet" (unknown) can
-   * never be confused with "reported, and it's bad" (invalid). unknown is the ONLY valid initial
-   * state: every doc_status_t field starts here and is written at most once, by set_syntax()/
-   * set_valid()/set_semantic() respectively (see their own doc comments) -- there is no path back
-   * from valid/invalid to unknown.
+   * @brief Three-way verdict for one of doc_status_t's four tracked facts (syntax/validation/
+   * semantic/stored) -- distinct from a plain bool so "nobody has reported on this yet" (unknown)
+   * can never be confused with "reported, and it's bad" (invalid). unknown is the ONLY valid
+   * initial state: every doc_status_t field starts here and is written at most once, by
+   * set_syntax()/set_valid()/set_semantic()/set_stored() respectively (see their own doc comments)
+   * -- there is no path back from valid/invalid to unknown.
    */
   enum class three_state : std::uint8_t
   {
@@ -26,11 +26,17 @@ namespace fsp
   };
 
   /**
-   * @brief Self-contained, mutex-protected final syntax/validation/semantic verdict for one
-   * document -- owns BOTH the three individual three_state facts (syntax_/valid_/semantic_) AND
-   * the "have all three been reported yet, and who gets to act on that" completion logic
-   * (done_/closing_/is_finished()/try_start_closing()), replacing the old doc_status_t (a bare
-   * 3-bool struct) plus doc_counters' own second-stage CAS latch that used to gate on_doc_close().
+   * @brief Self-contained, mutex-protected final syntax/validation/semantic/stored verdict for one
+   * document -- owns BOTH the four individual three_state facts (syntax_/valid_/semantic_/
+   * stored_) AND the "have all four been reported yet, and who gets to act on that" completion
+   * logic (done_/closing_/is_finished()/try_start_closing()), replacing the old doc_status_t (a
+   * bare 3-bool struct) plus doc_counters' own second-stage CAS latch that used to gate
+   * on_doc_close(). stored_ is a fourth, later addition (see set_stored()'s own doc comment) --
+   * unlike the original three, it has no failure state of its own (there is no "storage failed"
+   * verdict fsp-core reports here; on_doc_stored() firing at all IS the fact) and is therefore not
+   * surfaced in status()/ok()'s aggregate the way syntax_/valid_/semantic_ are -- it exists purely
+   * to gate WHEN on_doc_close() may fire, not to influence WHETHER the document's own verdict is
+   * positive.
    *
    * Why one mutex instead of the earlier design's separate atomics (one per field) plus
    * hand-rolled acquire/release ordering between a completion counter and those fields: the
@@ -70,6 +76,7 @@ namespace fsp
       syntax_   = o.syntax_;
       valid_    = o.valid_;
       semantic_ = o.semantic_;
+      stored_   = o.stored_;
       done_     = o.done_;
       closing_  = o.closing_;
       return *this;
@@ -108,12 +115,25 @@ namespace fsp
      * try_start_closing() pattern as set_syntax()/set_valid() above; same return-value meaning.
      */
     [[nodiscard]] bool set_semantic(bool ok) noexcept { return set_field(semantic_, ok); }
+    /**
+     * @brief Reported by whichever worker's flush_ok_block()/flush_nak_block() call is the one
+     * that pushes this document's own "segments stored" count (see doc_counters' stored_ member)
+     * up to its known total (see pipeline::record_segments_stored()) -- exactly once per document.
+     * Unlike set_syntax()/set_valid()/set_semantic() above, there is no ok parameter: storage
+     * completeness has no failure verdict of its own to report (a segment that genuinely failed to
+     * be written would surface as an on_block_store()/on_failed_block_store() error propagated
+     * from xml_worker::flush_ok_block()/flush_nak_block() itself, well before this point -- see
+     * pipeline_hooks.hpp's on_block_safe_store()'s own doc comment), so this call always marks
+     * stored_ three_state::valid. Same try_start_closing()-attempt-under-the-same-lock pattern as
+     * set_syntax()/set_valid()/set_semantic(); same return-value meaning.
+     */
+    [[nodiscard]] bool set_stored() noexcept { return set_field(stored_, true); }
 
     /**
-     * @brief True once every one of the three facts this object tracks is either known (all
-     * three reported, whatever their individual verdicts) or the outcome is already decided
+     * @brief True once every one of the four facts this object tracks is either known (all
+     * four reported, whatever their individual verdicts) or the outcome is already decided
      * beyond doubt (ANY one of them came back invalid -- see set_field()'s own doc comment on why
-     * a single invalid report short-circuits waiting on the other two). Monotonic: once true,
+     * a single invalid report short-circuits waiting on the others). Monotonic: once true,
      * stays true for this object's lifetime.
      */
     [[nodiscard]] bool is_finished() const noexcept
@@ -147,10 +167,13 @@ namespace fsp
     }
 
     /**
-     * @brief Aggregate verdict across all three tracked facts: valid iff syntax_/valid_/
-     * semantic_ are ALL three::valid; invalid iff AT LEAST ONE of them is three_state::invalid;
-     * three_state::unknown otherwise (i.e. at least one fact still unreported and none of the
-     * reported ones failed yet). In practice, callers only ever observe this from inside
+     * @brief Aggregate verdict across the three VERDICT-bearing facts (syntax_/valid_/semantic_):
+     * valid iff all three are three_state::valid; invalid iff AT LEAST ONE of them is
+     * three_state::invalid; three_state::unknown otherwise (i.e. at least one fact still
+     * unreported and none of the reported ones failed yet). Deliberately does NOT consider stored_
+     * -- storage-completeness is a GATE on when on_doc_close() may fire (see try_start_closing()),
+     * not a fourth pass/fail dimension of the document's own verdict (see stored_'s own doc
+     * comment on the class above). In practice, callers only ever observe this from inside
      * hooks.on_doc_close(), which fsp-core only calls once is_finished() is already true -- so
      * three_state::unknown should never actually be seen there, but this method doesn't special-
      * case that away (it's a well-defined answer for a not-yet-finished object too, e.g. for
@@ -174,10 +197,12 @@ namespace fsp
 
     /**
      * @brief Partial status getters -- for a cb's on_doc_close() override that wants to know
-     * WHICH of the three facts specifically failed, not just that the aggregate status() is
+     * WHICH of the tracked facts specifically failed, not just that the aggregate status() is
      * three_state::invalid (e.g. to log/route differently for a syntax problem vs. a doc-level
      * semantic one). Each simply returns that one field's current three_state under the lock; no
-     * aggregation applied.
+     * aggregation applied. stored_status() is included for symmetry/diagnostics even though
+     * status()/ok() above never consult it (see stored_'s own doc comment on the class above) --
+     * it can only ever read three_state::unknown or three_state::valid, never invalid.
      */
     [[nodiscard]] three_state syntax_status() const noexcept
     {
@@ -194,8 +219,13 @@ namespace fsp
       const std::scoped_lock lock(mtx_);
       return semantic_;
     }
+    [[nodiscard]] three_state stored_status() const noexcept
+    {
+      const std::scoped_lock lock(mtx_);
+      return stored_;
+    }
   private:
-    // Plain, lock-free aggregate holding a snapshot of the five fields below -- exists solely so
+    // Plain, lock-free aggregate holding a snapshot of the six fields below -- exists solely so
     // the move ctor above can lock o's mutex, read its fields into one of these (see snapshot()),
     // and THEN move-construct *this from it in the member-initializer list, satisfying
     // cppcoreguidelines-prefer-member-initializer without ever reading o's fields unlocked.
@@ -204,6 +234,7 @@ namespace fsp
       three_state syntax_;
       three_state valid_;
       three_state semantic_;
+      three_state stored_;
       int         done_;
       bool        closing_;
     };
@@ -211,7 +242,8 @@ namespace fsp
     [[nodiscard]] static fields snapshot(doc_status_t& o) noexcept
     {
       const std::scoped_lock lock(o.mtx_);
-      return {.syntax_ = o.syntax_, .valid_ = o.valid_, .semantic_ = o.semantic_, .done_ = o.done_, .closing_ = o.closing_};
+      return {
+        .syntax_ = o.syntax_, .valid_ = o.valid_, .semantic_ = o.semantic_, .stored_ = o.stored_, .done_ = o.done_, .closing_ = o.closing_};
     }
     // Private, snapshot-based delegate target for the move ctor -- mtx_ itself is deliberately
     // NOT part of fields (std::mutex isn't copyable/movable), so it default-constructs here as a
@@ -221,31 +253,36 @@ namespace fsp
     : syntax_(f.syntax_)
     , valid_(f.valid_)
     , semantic_(f.semantic_)
+    , stored_(f.stored_)
     , done_(f.done_)
     , closing_(f.closing_)
     {
     }
 
-    // done_ reaches this value exactly when the object is finished: either all three facts were
-    // individually reported (each set_*() call increments done_ by 1 on a valid verdict, so three
-    // valid reports sum to 3), or a single invalid report jumps done_ straight to 3 (see
-    // set_field()'s own doc comment) -- both cases compare equal against this same threshold.
-    static constexpr int k_done_threshold = 3;
+    // done_ reaches this value exactly when the object is finished: either all four facts were
+    // individually reported (each set_*() call increments done_ by 1 on a valid verdict, so four
+    // valid reports sum to 4), or a single invalid report jumps done_ straight to 4 (see
+    // set_field()'s own doc comment) -- both cases compare equal against this same threshold. Note
+    // stored_ can only ever contribute a valid report (see set_stored()'s own doc comment), so in
+    // practice only syntax_/valid_/semantic_ can ever trigger the invalid short-circuit below.
+    static constexpr int k_done_threshold = 4;
 
     /**
-     * @brief Shared body for set_syntax()/set_valid()/set_semantic() -- updates field (one of
-     * syntax_/valid_/semantic_) from three_state::unknown to three_state::valid or
+     * @brief Shared body for set_syntax()/set_valid()/set_semantic()/set_stored() -- updates field
+     * (one of syntax_/valid_/semantic_/stored_) from three_state::unknown to three_state::valid or
      * three_state::invalid depending on ok, adjusts done_, and (still under the same lock)
      * attempts try_start_closing()'s decision. On ok=true: field becomes valid, done_ +=1 (one
-     * more of the three facts is now known-good). On ok=false: field becomes invalid, done_ is
-     * set to k_done_threshold (3) OUTRIGHT rather than incremented -- this is the "short-circuit"
+     * more of the four facts is now known-good). On ok=false: field becomes invalid, done_ is
+     * set to k_done_threshold (4) OUTRIGHT rather than incremented -- this is the "short-circuit"
      * that lets is_finished()/try_start_closing() fire as soon as ANY single fact is known bad,
-     * without waiting for the other two to be reported at all (mirrors the design discussion's
+     * without waiting for the others to be reported at all (mirrors the design discussion's
      * round-1 point 7 / "discard already-doomed documents ASAP": once one fact is invalid, the
      * document's overall verdict is already decided -- status() will report invalid regardless of
      * what the still-unreported fact(s) would have said, so there is nothing to gain by waiting
      * for them and every reason not to hold up on_doc_close() until a fact that can no longer
-     * change the outcome eventually reports in).
+     * change the outcome eventually reports in). set_stored() never passes ok=false (see its own
+     * doc comment), so this short-circuit is, in practice, only ever reachable via syntax_/valid_/
+     * semantic_.
      * @return whatever try_start_closing()'s own critical section decided for this call -- see
      * its doc comment.
      */
@@ -264,17 +301,21 @@ namespace fsp
       }
     }
 
-    // --- the three tracked facts -- each written exactly once, by set_syntax()/set_valid()/
-    // set_semantic() respectively (see their own doc comments for which fsp-core role writes
-    // which: C for syntax_, V (or C in folded mode) for valid_, the worker orchestrating
-    // on_doc_sem_check() for semantic_). All three start unknown and only ever move to valid or
-    // invalid, never back. ---
+    // --- the four tracked facts -- each written exactly once, by set_syntax()/set_valid()/
+    // set_semantic()/set_stored() respectively (see their own doc comments for which fsp-core role
+    // writes which: C for syntax_, V (or C in folded mode) for valid_, the worker orchestrating
+    // on_doc_sem_check() for semantic_, whichever worker's flush_ok_block()/flush_nak_block() call
+    // crosses this document's segment-stored total for stored_ -- see
+    // pipeline::record_segments_stored()). All four start unknown and only ever move to valid or
+    // invalid, never back (stored_ in practice only ever reaches valid, never invalid -- see
+    // set_stored()'s own doc comment). ---
     three_state syntax_{three_state::unknown};   //< set by set_syntax(), reported by C
     three_state valid_{three_state::unknown};    //< set by set_valid(), reported by V (or C, folded mode)
     three_state semantic_{three_state::unknown}; //< set by set_semantic(), reported by the on_doc_sem_check() orchestrator
+    three_state stored_{three_state::unknown};   //< set by set_stored(), reported by pipeline::record_segments_stored()
     // Count of "this fact's outcome can no longer change the final verdict" -- reaches
-    // k_done_threshold (3) either via three individual valid reports (one increment each) or a
-    // single invalid report (jumps straight to 3, see set_field()). Guarded by mtx_ together with
+    // k_done_threshold (4) either via four individual valid reports (one increment each) or a
+    // single invalid report (jumps straight to 4, see set_field()). Guarded by mtx_ together with
     // closing_ so is_finished()/try_start_closing() never observe one without the other.
     int done_ = 0;
     // One-shot latch: true once try_start_closing() has handed out its single "true" answer.
@@ -283,7 +324,7 @@ namespace fsp
     // later CAS the way the old two-stage design did it.
     bool closing_ = false;
     mutable std::mutex
-      mtx_; //< guards every one of the five members above; see class's own doc comment on why one mutex, not per-field atomics
+      mtx_; //< guards every one of the six members above; see class's own doc comment on why one mutex, not per-field atomics
   };
 
   class doc_dscr
@@ -357,7 +398,13 @@ namespace fsp
     // and getting its bool verdict back -- a cb never calls this directly, see
     // doc_status_t::set_semantic()'s own doc comment. Same return-value meaning as
     // set_syntax_result()/set_validation_result() above.
-    [[nodiscard]] bool              set_semantic_result(bool ok) noexcept { return status_.set_semantic(ok); }
+    [[nodiscard]] bool set_semantic_result(bool ok) noexcept { return status_.set_semantic(ok); }
+    // Reported by pipeline::record_segments_stored() once this document's own "segments stored"
+    // count (see doc_counters' stored_ member) reaches its known total -- a cb never calls this
+    // directly, see doc_status_t::set_stored()'s own doc comment on why it takes no ok parameter.
+    // Same return-value meaning as set_syntax_result()/set_validation_result()/
+    // set_semantic_result() above.
+    [[nodiscard]] bool              set_stored_result() noexcept { return status_.set_stored(); }
     [[nodiscard]] const error_info& error() const noexcept;
     /**
      * @brief The caller-assigned output document id (see pipeline_hooks::get_doc_id()) --

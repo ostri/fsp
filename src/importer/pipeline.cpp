@@ -1,6 +1,7 @@
 #include "pipeline.hpp"
 #include "pipeline_worker.hpp"
 #include <thread>
+#include <tuple> // std::ignore -- see the on_*_safe_*() call sites below
 #include <fmt/format.h>
 
 namespace fsp
@@ -51,16 +52,20 @@ namespace fsp
     if (completed) maybe_finish_seg_processing(doc_ndx, hooks);
   }
 
-  bool pipeline::record_segment_done(const xml_segment& segment, segment_result& result, pipeline_hooks& hooks)
+  bool pipeline::check_segment_semantics(const xml_segment& segment, segment_result& result, pipeline_hooks& hooks)
   {
-    const auto doc_ndx         = static_cast<std::size_t>(result.doc_ndx());
-    auto&      counters        = (*doc_counters_)[doc_ndx];
-    const auto pos             = counters.begin_segment(result.seg_id());
-    const bool semantically_ok = hooks.on_seg_sem_safe_check(segment, ds_dscr_[doc_ndx], result, pos.is_first, pos.is_last);
-    const bool completed       = counters.end_segment(semantically_ok);
+    const auto doc_ndx  = static_cast<std::size_t>(result.doc_ndx());
+    auto&      counters = (*doc_counters_)[doc_ndx];
+    const auto pos      = counters.begin_segment(result.seg_id());
+    return hooks.on_seg_sem_safe_check(segment, ds_dscr_[doc_ndx], result, pos.is_first, pos.is_last);
+  }
+
+  void pipeline::finish_segment(std::size_t doc_ndx, bool semantically_ok, pipeline_hooks& hooks)
+  {
+    auto&      counters  = (*doc_counters_)[doc_ndx];
+    const bool completed = counters.end_segment(semantically_ok);
     if (completed) log_doc_done(doc_ndx);
     if (completed) maybe_finish_seg_processing(doc_ndx, hooks);
-    return semantically_ok;
   }
 
   void pipeline::record_segment_failed(std::size_t doc_ndx, std::size_t seg_id, pipeline_hooks& hooks)
@@ -154,7 +159,9 @@ namespace fsp
       last_reader = (--remaining == 0);
     }
     if (! last_reader) return;
-    hooks.on_doc_safe_finish(doc_ndx);
+    // Errors are already logged by on_doc_safe_finish() itself -- see its own doc comment for why
+    // this deliberately swallows rather than propagates.
+    std::ignore = hooks.on_doc_safe_finish(doc_ndx);
     const std::scoped_lock lock(doc_data_pool_mutex_);
     auto&                  slot = doc_data_active_[doc_ndx]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
     doc_data_free_.push_back(slot);
@@ -177,6 +184,20 @@ namespace fsp
     if (ds_dscr_[doc_ndx].set_validation_result(ok, std::move(err))) finish_doc_close(doc_ndx, hooks);
   }
 
+  void pipeline::record_segments_stored(std::size_t doc_ndx, std::size_t count, pipeline_hooks& hooks)
+  {
+    if (! (*doc_counters_)[doc_ndx].add_segments_stored(count)) return;
+    // This call is the one whose running total crossed doc_ndx's known segment count -- fire
+    // on_doc_safe_stored() exactly once for this document, fold its result into
+    // doc_status_t::set_stored_result() (always three_state::valid, see its own doc comment), and
+    // dispatch on_doc_safe_close() if THAT wins try_start_closing() -- same shape as
+    // maybe_finish_seg_processing()'s on_doc_safe_sem_check()/set_semantic_result() pair above.
+    // Errors from on_doc_safe_stored() are already logged by the hook itself -- see its own doc
+    // comment in pipeline_hooks.hpp for why this deliberately swallows rather than propagates.
+    std::ignore = hooks.on_doc_safe_stored(doc_ndx, ds_dscr_[doc_ndx]);
+    if (ds_dscr_[doc_ndx].set_stored_result()) finish_doc_close(doc_ndx, hooks);
+  }
+
   void pipeline::report_fatal_error(error_info err)
   {
     std::lock_guard lock(first_error_mutex_);
@@ -191,7 +212,7 @@ namespace fsp
     return out;
   }
 
-  void_result pipeline::add_documents(const std::vector<str_t>& xml_paths, cstr_t xsd_path, pipeline_hooks& hooks)
+  e_void pipeline::add_documents(const std::vector<str_t>& xml_paths, cstr_t xsd_path, pipeline_hooks& hooks)
   {
     // doc_data_active_/doc_data_pending_readers_ are sized (not reserved) here so
     // assign_doc_data() can index them directly -- every slot starts nullptr/0 (not yet assigned,
@@ -365,7 +386,9 @@ namespace fsp
         return std::unexpected(started.error());
       }
       run_data_->timing().end();
-      hooks.on_run_safe_end(doc_set_counter(0), ds_dscr_, {});
+      // Errors are already logged by on_run_safe_end() itself -- see its own doc comment for why
+      // this deliberately swallows rather than propagates.
+      std::ignore = hooks.on_run_safe_end(doc_set_counter(0), ds_dscr_, {});
       run_data_.reset();
       return doc_set_counter(0);
     }
@@ -424,7 +447,9 @@ namespace fsp
     worker_clones.reserve(worker_state->size());
     for (const auto& w : *worker_state) worker_clones.push_back(&w->hooks());
     run_data_->timing().end();
-    hooks.on_run_safe_end(*doc_counters_, ds_dscr_, worker_clones);
+    // Errors are already logged by on_run_safe_end() itself -- see its own doc comment for why
+    // this deliberately swallows rather than propagates.
+    std::ignore = hooks.on_run_safe_end(*doc_counters_, ds_dscr_, worker_clones);
     run_data_.reset();
 
     discard_invalid_doc_results();

@@ -1,5 +1,6 @@
 #include "pipeline_hooks.hpp"
 #include "pipeline.hpp" // full pipeline definition -- see run_data_impl()/doc_data_impl()'s own doc comments in pipeline_hooks.hpp for why these three are defined here, not inline in the header
+#include <fmt/format.h>
 namespace fsp
 {
   run_data_root& pipeline_hooks::run_data_impl() const
@@ -17,4 +18,7 @@ namespace fsp
   }
 
   void pipeline_hooks::doc_data_timing_stop(std::size_t doc_ndx) { doc_data_impl(doc_ndx).timing().end(); }
+
+  void pipeline_hooks::log_hook_error(cstr_t hook_name, const error_info& err) const
+  { log().error(fmt::format("{}() reported an error: {}", hook_name, err.to_string())); }
 } // namespace fsp

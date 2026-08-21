@@ -25,7 +25,7 @@ namespace fsp
   // Loads the XSD grammar into a fresh, thread-local pool, locks it, then builds a validating
   // reader restricted to that single, static grammar (fgSGXMLScanner + fgXercesDynamic=false:
   // "a scanner that supports only XSD grammars", nothing dynamically discovered, no DTDs).
-  void_result doc_validator::ensure_grammar_loaded()
+  e_void doc_validator::ensure_grammar_loaded()
   {
     if (grammar_loaded_) return {};
     try

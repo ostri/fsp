@@ -15,6 +15,7 @@
 // #include <stack>
 #include <vector>
 #include <mutex>
+#include <span>
 
 namespace fsp
 {
@@ -78,9 +79,18 @@ namespace fsp
     void record_nak(std::size_t idx, xml_segment& seg, segment_result result, error_info err);
     // Calls hooks_.on_block_safe_store()/on_failed_block_safe_store() on whatever's accumulated in
     // ok_block_indices_/nak_block_indices_ (a no-op if empty), then releases those slots back to
-    // pool_ via segment_pool::release_slots() and clears the accumulator(s) for reuse.
+    // pool_ via segment_pool::release_slots() and clears the accumulator(s) for reuse. If the
+    // store hook itself reports success, folds the batch into each represented document's own
+    // "segments stored" count via record_segments_stored_by_doc() below -- see its own doc comment
+    // and pipeline::record_segments_stored()'s.
     void flush_ok_block();
     void flush_nak_block();
+    // Shared tail of flush_ok_block()/flush_nak_block() -- groups indices (a just-flushed batch,
+    // already confirmed durably stored by the caller) by pool_.segment_at(idx).doc_ndx() and calls
+    // pipeline_.record_segments_stored(doc_ndx, count, hooks_) once per distinct document
+    // represented in the batch. See flush_ok_block()'s own doc comment for why this grouping is
+    // necessary (a single batch can mix segments from several different documents).
+    void record_segments_stored_by_doc(std::span<const std::size_t> indices);
     //     result<segment_result>               extract_xml_values(cstr_t xml_buf, const xml_segment& seg);
     //     std::expected<pp_result, err_result> process_and_prune_node( //
     //       const xpath_set&    xpaths,

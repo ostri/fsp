@@ -55,18 +55,20 @@ public:
                              bool                        is_first,
                              bool                        is_last) const;
 protected:
-  [[nodiscard]] fsp::void_result on_run_start(const fsp::doc_set_dscr& ds_dscr) override;
-  void                           on_run_end(const fsp::doc_set_counter&           counters,
-                                            const fsp::doc_set_dscr&              ds_dscr,
-                                            std::span<const fsp::pipeline_hooks*> worker_clones) override;
-  void                           on_wrk_start(int worker_id, fsp::cstr_t thread_name) override;
-  void                           on_wrk_end(int worker_id, fsp::cstr_t thread_name) override;
-  void                           on_doc_open(std::size_t doc_ndx, const fsp::doc_dscr& dscr) override;
-  void                           on_doc_cutting_finished(std::size_t doc_ndx, const fsp::doc_dscr& dscr) override;
-  [[nodiscard]] bool             on_doc_close(std::size_t              doc_ndx,
-                                              const fsp::doc_status_t& verdict,
-                                              const fsp::error_info&   err,
-                                              const fsp::doc_dscr&     dscr) override;
+  [[nodiscard]] fsp::e_void on_run_start(const fsp::doc_set_dscr& ds_dscr) override;
+  [[nodiscard]] fsp::e_void on_run_end(const fsp::doc_set_counter&           counters,
+                                       const fsp::doc_set_dscr&              ds_dscr,
+                                       std::span<const fsp::pipeline_hooks*> worker_clones) override;
+  [[nodiscard]] fsp::e_void on_wrk_start(int worker_id, fsp::cstr_t thread_name) override;
+  [[nodiscard]] fsp::e_void on_wrk_end(int worker_id, fsp::cstr_t thread_name) override;
+  [[nodiscard]] fsp::e_void on_doc_open(std::size_t doc_ndx, const fsp::doc_dscr& dscr) override;
+  [[nodiscard]] fsp::e_void on_doc_cutting_end(std::size_t doc_ndx, const fsp::doc_dscr& dscr) override;
+  [[nodiscard]] fsp::e_void on_doc_stored(std::size_t doc_ndx, const fsp::doc_dscr& dscr) override;
+  [[nodiscard]] bool        on_doc_close(std::size_t              doc_ndx,
+                                         const fsp::doc_status_t& verdict,
+                                         const fsp::error_info&   err,
+                                         const fsp::doc_dscr&     dscr) override;
+  [[nodiscard]] fsp::e_void on_doc_finish(std::size_t doc_ndx) override;
 private:
   std::size_t documents_seen = 0;
 };

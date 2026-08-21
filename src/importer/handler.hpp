@@ -45,7 +45,8 @@ namespace fsp
             const logger::Logger&         log,
             const xercesc::SAX2XMLReader* parser,
             segment_pool&                 pool,
-            const doc_set_dscr&           ds_dscr);
+            const doc_set_dscr&           ds_dscr,
+            std::vector<bool>             is_header_seg_type = {});
     // --- SAX2 ContentHandler ---
     void startPrefixMapping(const XMLCh* prefix, const XMLCh* uri) override;
     void startElement(const XMLCh* uri, const XMLCh* localname, const XMLCh* qname, const xercesc::Attributes& attrs) override;
@@ -120,31 +121,37 @@ namespace fsp
                           // methods startPrefixMapping and startElement. It is cleared after startElement
     int doc_depth_ = 0;   // depth in the document (1 = root elem.)
     // --- segment acumutate sdata ---
-    int         frag_depth_        = -1;                      //< depth inside the fragment
-    int         seg_type_          = -1;                      //< type/structure of the segment. document is split into segments.
-    std::size_t frag_start_offset_ = 0;                       //< byte offset of start of the fragment
-    std::size_t counter_           = 0;                       //< counter to obtain unique segment id within the file
-                                                              //< (reset per document in set_doc_ndx() -- this Handler
-                                                              //< is owned by one worker thread and reused across every
-                                                              //< document that thread cuts, not one Handler per document)
-    const xercesc::SAX2XMLReader* parser_;                    //< pointer to related parser; only for getSrcOffs, not owner
-    cstr_t                        doc_;                       //< xml document mapped as string view over mmap file
-    const doc_set_dscr&           ds_dscr_;                   //< structure of all documents to be processed
-    int                           doc_ndx_ = -1;              //< index of the document within the ds_dscr global structure
-    str_XMLCh_t                   ns_;                        //< current and inherited namespaces as string (for current segment)
-    str_XMLCh_t                   attr_;                      //< current tag attributes as a string (for current segment)
-    std::size_t                   element_counter_ = 0;       //< pooling counter check also "every"
-    str_XMLCh_t                   buf_;                       //< space for "make_open_tag" as XMLCh
-    segment_pool&                 pool_;                      //< segment pool
-    bool                          validating_        = false; //< see set_validating()
-    sax_error_source              last_error_source_ = sax_error_source::none; //< see last_error_source()
-    const bool                    log_trace_         = log_.active(logger::level::trace);
-    const bool                    log_debug_         = log_.active(logger::level::debug);
-    const bool                    log_info_          = log_.active(logger::level::info);
-    const bool                    log_warn_          = log_.active(logger::level::warn);
-    const bool                    log_err_           = log_.active(logger::level::error);
-    const bool                    log_crit_          = log_.active(logger::level::critical);
-    int                           max_xpath_depth_   = 0; //< max depth of all xpaths
+    int         frag_depth_        = -1;                //< depth inside the fragment
+    int         seg_type_          = -1;                //< type/structure of the segment. document is split into segments.
+    std::size_t frag_start_offset_ = 0;                 //< byte offset of start of the fragment
+    std::size_t counter_           = 0;                 //< counter to obtain unique segment id within the file
+                                                        //< (reset per document in set_doc_ndx() -- this Handler
+                                                        //< is owned by one worker thread and reused across every
+                                                        //< document that thread cuts, not one Handler per document)
+    const xercesc::SAX2XMLReader* parser_;              //< pointer to related parser; only for getSrcOffs, not owner
+    cstr_t                        doc_;                 //< xml document mapped as string view over mmap file
+    const doc_set_dscr&           ds_dscr_;             //< structure of all documents to be processed
+    int                           doc_ndx_ = -1;        //< index of the document within the ds_dscr global structure
+    str_XMLCh_t                   ns_;                  //< current and inherited namespaces as string (for current segment)
+    str_XMLCh_t                   attr_;                //< current tag attributes as a string (for current segment)
+    std::size_t                   element_counter_ = 0; //< pooling counter check also "every"
+    str_XMLCh_t                   buf_;                 //< space for "make_open_tag" as XMLCh
+    segment_pool&                 pool_;                //< segment pool
+    // Indexed by seg_type() (== subtree_type()) -- true means importer_config::header_seg_types
+    // named this schema class, so endElement() routes segments of that type into
+    // pool_.push_ready_header() instead of pool_.push_ready() (see its own doc comment). Empty by
+    // default (header_seg_types left unset), in which case index-out-of-range never happens
+    // because endElement() only ever indexes this when it's non-empty -- see its own check.
+    std::vector<bool> is_header_seg_type_;
+    bool              validating_        = false;                  //< see set_validating()
+    sax_error_source  last_error_source_ = sax_error_source::none; //< see last_error_source()
+    const bool        log_trace_         = log_.active(logger::level::trace);
+    const bool        log_debug_         = log_.active(logger::level::debug);
+    const bool        log_info_          = log_.active(logger::level::info);
+    const bool        log_warn_          = log_.active(logger::level::warn);
+    const bool        log_err_           = log_.active(logger::level::error);
+    const bool        log_crit_          = log_.active(logger::level::critical);
+    int               max_xpath_depth_   = 0; //< max depth of all xpaths
   };
   /////////////////////////////////////////////////////////////////////////////////////////////////
   inline std::size_t Handler::segments_found() const noexcept { return counter_; }

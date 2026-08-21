@@ -2,6 +2,7 @@
 #include "pipeline.hpp"
 #include <fmt/format.h>
 #include <thread>
+#include <tuple> // std::ignore -- see the on_*_safe_*() call sites below
 
 namespace fsp
 {
@@ -32,7 +33,7 @@ namespace fsp
     validator_ = std::make_unique<doc_validator>(log_, pipeline_.ds_dscr());
   }
 
-  void_result pipeline_worker::init() { return cutter_->init(); }
+  e_void pipeline_worker::init() { return cutter_->init(); }
 
   void pipeline_worker::do_cut(std::size_t doc_ndx)
   {
@@ -74,7 +75,9 @@ namespace fsp
       return;
     }
     pipeline_.record_doc_open(doc_ndx);
-    hooks_->on_doc_safe_open(doc_ndx, pipeline_.ds_dscr()[doc_ndx]);
+    // Errors are already logged by on_doc_safe_open() itself before returning -- see its own doc
+    // comment for why this deliberately swallows (rather than propagates) a failing on_doc_open().
+    std::ignore = hooks_->on_doc_safe_open(doc_ndx, pipeline_.ds_dscr()[doc_ndx]);
     // Published AFTER on_doc_safe_open() has returned, BEFORE any further work on this document -
     // do_validate() (below) checks this before validating, so a V pass racing ahead of this C
     // pass on another thread never reports a result (and possibly wins try_start_closing(),
@@ -93,7 +96,9 @@ namespace fsp
     // on_doc_close()) still needs cut_finished_ to become true for THIS document, or that hook
     // would never fire for a syntactically-invalid document.
     pipeline_.record_doc_close(doc_ndx, cutter_->segments_found(), *hooks_);
-    hooks_->on_doc_safe_cutting_finished(doc_ndx, pipeline_.ds_dscr()[doc_ndx]);
+    // Errors are already logged by on_doc_safe_cutting_end() itself -- see on_doc_safe_open()'s own
+    // doc comment above for why this deliberately swallows rather than propagates.
+    std::ignore = hooks_->on_doc_safe_cutting_end(doc_ndx, pipeline_.ds_dscr()[doc_ndx]);
     pipeline_.notify_cut_done();
   }
 
@@ -144,11 +149,46 @@ namespace fsp
     }
   }
 
+  // Header segments (see importer_config::header_seg_types) win within P itself -- own shard
+  // first, then a non-blocking sweep of the OTHER header shards, all BEFORE this thread ever
+  // looks at an ordinary ready queue. Checked on every single call (i.e. every work-fetch, not
+  // just at thread start-up), so a header segment can never be starved behind an unbounded pile
+  // of ordinary ones (see docs/importer_usage.md's own "Header segments are processed first"
+  // section). A no-op sweep (empty queues) when header_seg_types was never set.
+  bool pipeline_worker::try_process_ready_segment(std::size_t own_shard, std::size_t num_shards)
+  {
+    auto& pool = pipeline_.pool();
+    for (std::size_t i = 0; i < num_shards; ++i)
+    {
+      const std::size_t shard = (own_shard + i) % num_shards;
+      if (pool.ready_queue_size_approx_header(shard) <= 0) continue;
+      if (auto seg_ndx = pool.try_pop_ready_header(shard))
+      {
+        processor_->process_one(*seg_ndx); // records the segment's outcome (and runs the hook) internally
+        return true;
+      }
+    }
+    // Own shard first, then a non-blocking sweep of the others if it's currently empty.
+    for (std::size_t i = 0; i < num_shards; ++i)
+    {
+      const std::size_t shard = (own_shard + i) % num_shards;
+      if (pool.ready_queue_size_approx(shard) <= 0) continue;
+      if (auto seg_ndx = pool.try_pop_ready(shard))
+      {
+        processor_->process_one(*seg_ndx); // records the segment's outcome (and runs the hook) internally
+        return true;
+      }
+    }
+    return false;
+  }
+
   void pipeline_worker::operator()(const std::stop_token& st, int worker_id)
   {
     logger::Logger::make_log_name(parent_log_name_, fmt::format("pipe-wrk.{:02}", worker_id));
     const auto thread_name = logger::Logger::log_name();
-    hooks_->on_wrk_safe_start(pipeline_, worker_id, thread_name, log_);
+    // Errors are already logged by on_wrk_safe_start() itself -- see its own doc comment for why
+    // this deliberately swallows (rather than propagates/aborts) a failing on_wrk_start().
+    std::ignore                  = hooks_->on_wrk_safe_start(pipeline_, worker_id, thread_name, log_);
     auto&             pool       = pipeline_.pool();
     const std::size_t num_shards = pool.num_shards();
     // Each P-capable thread is permanently assigned one shard (worker_id % num_shards) of the
@@ -183,29 +223,28 @@ namespace fsp
 
       // 3) P is deliberately lowest priority: as few P as possible early on, so V gets a
       //    chance to flag invalid documents before we spend effort processing their segments.
-      //    Own shard first, then a non-blocking sweep of the others if it's currently empty.
-      bool processed = false;
-      for (std::size_t i = 0; i < num_shards && ! processed; ++i)
-      {
-        const std::size_t shard = (own_shard + i) % num_shards;
-        if (pool.ready_queue_size_approx(shard) <= 0) continue;
-        if (auto seg_ndx = pool.try_pop_ready(shard))
-        {
-          processor_->process_one(*seg_ndx); // records the segment's outcome (and runs the hook) internally
-          processed = true;
-        }
-      }
-      if (processed) continue;
+      //    See try_process_ready_segment()'s own doc comment for why header segments win within
+      //    P itself (importer_config::header_seg_types).
+      if (try_process_ready_segment(own_shard, num_shards)) continue;
 
-      // Neither C nor V currently show any work, and no shard had anything ready -> authoritative,
-      // blocking wait on this thread's own shard, the only queue guaranteed to still dynamically
-      // receive work from OTHER threads relevant to it. This is also the real exit condition for
-      // this thread once its own shard closes.
+      // Neither C nor V currently show any work, and no shard had anything ready (header or
+      // ordinary) -> authoritative, blocking wait -- this thread's own HEADER shard first (same
+      // priority as try_process_ready_segment()'s own sweep), falling through to its own ordinary
+      // shard only once the header queue itself has closed (see segment_pool::
+      // ready_queue_close(), which closes both together). This is also the real exit condition
+      // for this thread once its own shard closes.
       std::size_t seg_ndx = 0;
+      if (pool.pop_segment_ndx_header(own_shard, seg_ndx) == queue_status::active)
+      {
+        processor_->process_one(seg_ndx); // records the segment's outcome (and runs the hook) internally
+        continue;
+      }
       if (pool.pop_segment_ndx(own_shard, seg_ndx) != queue_status::active) break;
       processor_->process_one(seg_ndx); // records the segment's outcome (and runs the hook) internally
     }
     processor_->flush_results();
-    hooks_->on_wrk_safe_end(worker_id, thread_name);
+    // Errors are already logged by on_wrk_safe_end() itself -- see on_wrk_safe_start()'s own doc
+    // comment for why this deliberately swallows rather than propagates.
+    std::ignore = hooks_->on_wrk_safe_end(worker_id, thread_name);
   }
 } // namespace fsp
