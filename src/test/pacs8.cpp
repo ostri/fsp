@@ -62,7 +62,11 @@ int main(int argc, const char* argv[])
   if (args.files.empty()) return help(args.p_name);
   try
   {
-    const auto     no_of_cores = 16U;                 // number of paralell worker threads
+    // 0 -> pipeline::plan_run() falls back to std::thread::hardware_concurrency() (see its own
+    // doc comment in pipeline.cpp) -- a fixed number here would leave part of a bigger machine's
+    // cores idle (max_concurrent_cutters_/num_processors are both derived from whatever this ends
+    // up being, capped by hardware_concurrency() regardless), and under-provision a smaller one.
+    const auto     no_of_cores = 0U;
     auto           cfg         = fsp::importer_config{//
                                                       .targets        = fsp::proc_data_of<^^fsp::work>(),
                                                       .num_of_workers = no_of_cores,

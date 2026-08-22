@@ -30,10 +30,18 @@ namespace fsp
     // is available -- see pipeline::process_files(). Set explicitly to override that heuristic.
     std::optional<bool> cut_with_validation = std::nullopt;
     // C:P worker-thread ratio (cutter_ratio_num : cutter_ratio_den) -- num_processors is derived
-    // from the actual cutter count as cutters * cutter_ratio_den / cutter_ratio_num. Default
-    // 13:6 was found empirically fastest on the 10-doc/10M-txn benchmark (see pipeline.cpp).
+    // from the actual cutter count as cutters * cutter_ratio_den / cutter_ratio_num. Default 13:10
+    // was found empirically fastest on a 10-doc/10M-txn, 20-hw-thread benchmark (re-measured after
+    // the results_/errors_ removal and Xerces setCopyBufToStream() changes -- 13:6, the previous
+    // default, now leaves several cores idle: 41.16s/18.77GB at 13:10 vs. 51.41s/25.15GB at 13:6,
+    // both with num_of_workers left at 0/hardware_concurrency(). Oversizing further (13:13, one P
+    // thread per hardware thread) is WORSE, not better -- 50.49s/24.47GB -- more P threads than
+    // this ratio contend over segment_pool's queues/mutexes without adding real throughput, since
+    // at most max_concurrent_cutters_ (== doc_count here) documents can ever be cut concurrently
+    // regardless of P thread count. Revisit if cutter_ratio_num/hardware thread count on the
+    // target machine changes meaningfully from this benchmark's own (20 hw threads, 10 documents).
     std::size_t cutter_ratio_num = 13; // NOLINT(readability-magic-numbers)
-    std::size_t cutter_ratio_den = 6;  // NOLINT(readability-magic-numbers)
+    std::size_t cutter_ratio_den = 10; // NOLINT(readability-magic-numbers)
     // Number of independent shards segment_pool splits its ready/free queues into, to reduce
     // lock/condition_variable contention between concurrent C/P threads. Default 2 was found
     // empirically fastest against N=1,3,4 (see pipeline.cpp / segment_pool.hpp).
