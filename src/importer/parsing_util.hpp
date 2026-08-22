@@ -198,6 +198,14 @@ namespace fsp
   {
     fsp::xpath_set              targets; // NOLINT(misc-non-private-member-variables-in-classes)
     std::vector<fsp::xpath_set> xpaths;  // NOLINT(misc-non-private-member-variables-in-classes)
+    // Indexed by seg_type() (same declaration-order indexing as xpaths above): is_header[i] is
+    // true iff that schema class derives from fsp::hdr_seg_schema (see reflection.hpp's own doc
+    // comment) instead of plain fsp::seg_schema. Filled by proc_data_of() from each schema
+    // class's own static consteval is_header() -- a caller never sets this by hand. Consulted by
+    // doc_cutter::init() to build the dense, index-by-seg_type() lookup Handler's endElement()
+    // uses to route header segments into the priority queue (see docs/importer_usage.md's own
+    // "Header segments are processed first" section).
+    std::vector<bool> is_header; // NOLINT(misc-non-private-member-variables-in-classes)
 
     [[nodiscard]] str_t dump(int offs = 0) const
     { return fmt::format("{0}targets:{1}\n{0}xpaths.size:{2}", str_t(offs, ' '), targets.dump(offs), xpaths.size()); }

@@ -20,9 +20,11 @@
 // direction itself needs to be reversed (test 2: C fails before P would even get segments to
 // process), the delay is unnecessary -- C's failure is synchronous with respect to P even without
 // one, since P can only dequeue segments C has already pushed.
+#include "doc_cutter.hpp"
 #include "importer.hpp"
 #include "typed_semantic_check.hpp"
 #include "work.hpp" // IWYU pragma: keep -- ^^fsp::work needs the actual schema classes
+#include "xerces_mgr.hpp"
 #include <atomic>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
@@ -394,22 +396,21 @@ namespace
 
   fsp::importer_config make_cfg(std::string_view app_name, std::size_t num_of_workers)
   {
-    return fsp::importer_config{.targets          = fsp::proc_data_of<^^fsp::work>(),
-                                .num_of_workers   = num_of_workers,
-                                .log_config       = silent_log_cfg(app_name),
-                                .program_name     = std::string(app_name),
-                                .header_seg_types = {}};
+    return fsp::importer_config{.targets        = fsp::proc_data_of<^^fsp::work>(),
+                                .num_of_workers = num_of_workers,
+                                .log_config     = silent_log_cfg(app_name),
+                                .program_name   = std::string(app_name)};
   }
 
   // Extended knob set for the on_doc_stored()/header-priority/shard TEST_CASEs below, which need
   // to force small flush batches (ok_block_flush_size) and specific shard counts
-  // (pool_shard_count) -- see each TEST_CASE's own comment for why. header_seg_types defaults
-  // empty (the header-priority mechanism is a no-op unless a TEST_CASE explicitly opts in).
+  // (pool_shard_count) -- see each TEST_CASE's own comment for why. The header-priority mechanism
+  // itself is no longer a runtime knob here (see fsp::work::pacs8_hdr, now permanently
+  // hdr_seg_schema-derived) -- every TEST_CASE using fsp::work already exercises it.
   fsp::importer_config make_cfg_ex(std::string_view app_name,
                                    std::size_t      num_of_workers,
                                    std::size_t      pool_shard_count,
-                                   std::size_t      ok_block_flush_size,
-                                   std::vector<int> header_seg_types = {})
+                                   std::size_t      ok_block_flush_size)
   {
     return fsp::importer_config{.targets              = fsp::proc_data_of<^^fsp::work>(),
                                 .num_of_workers       = num_of_workers,
@@ -417,8 +418,7 @@ namespace
                                 .ok_block_flush_size  = ok_block_flush_size,
                                 .nak_block_flush_size = ok_block_flush_size,
                                 .log_config           = silent_log_cfg(app_name),
-                                .program_name         = std::string(app_name),
-                                .header_seg_types     = std::move(header_seg_types)};
+                                .program_name         = std::string(app_name)};
   }
 } // namespace
 
@@ -813,36 +813,17 @@ TEST_CASE("pipeline: on_doc_stored() ordering holds for multiple documents under
   CHECK(p->get_errors().empty());
 }
 
-// --- Scenario 10: importer_config::header_seg_types is a pure functional no-op when left at its
-// default (empty) -- existing behavior (Scenario 4's own happy path, re-run through make_cfg_ex()
-// instead of make_cfg() to prove the two configs are equivalent when header_seg_types is empty) --
-TEST_CASE("pipeline: empty header_seg_types (the default) changes nothing observable", "[pipeline][stages][header-priority]")
-{
-  temp_dir_guard dir;
-  const auto     doc_path = dir.write("doc.xml", multi_txn_doc(10));
-
-  auto             state = std::make_shared<shared_state>();
-  stage_test_hooks hooks(state);
-
-  auto cfg      = make_cfg_ex("test-header-empty", 4, /*pool_shard_count=*/2, /*ok_block_flush_size=*/1024);
-  auto [p, res] = fsp::importer::exec(cfg, std::vector<std::string>{doc_path}, xsd_path(), hooks);
-
-  REQUIRE(res.has_value());
-  CHECK(p->ds_dscr()[0].status().ok());
-  CHECK(p->get_results().size() == 11); // header + 10 txns
-  CHECK(p->get_errors().empty());
-}
-
-// --- Scenario 11: importer_config::header_seg_types set to pacs8_hdr's own seg_type() (0 -- see
-// work.hpp's declaration order: pacs8_hdr is declared before pacs8_txn) -- functional correctness
-// is unaffected (every segment still processed exactly once, same totals as Scenario 10), and the
-// header segment's own on_type() is observed to fire relative to the transactions -- a SOFT
-// scheduling signal, not a hard per-segment ordering guarantee (see docs/importer_usage.md's own
-// "Header segments are processed first" section: the guarantee is "never starved behind an
-// unbounded pile", not "always strictly first" under every possible thread interleaving), so this
-// asserts the header was seen at all (hdr_raw_msg non-empty) rather than a strict happens-before
-// relationship that could flake under real thread scheduling. --------------------------------------
-TEST_CASE("pipeline: header_seg_types routes the header segment through the priority queue without breaking correctness",
+// --- Scenario 10: the header-priority mechanism is a compile-time property of fsp::work now (see
+// reflection.hpp's seg_schema/hdr_seg_schema and work.hpp: pacs8_hdr permanently derives from
+// hdr_seg_schema), not a runtime opt-in -- every TEST_CASE in this file already exercises it via
+// make_cfg()/make_cfg_ex(). This one confirms functional correctness is unaffected (every segment
+// still processed exactly once) and that the header segment's own on_type() is, in fact, observed
+// to fire -- a SOFT scheduling signal, not a hard per-segment ordering guarantee (see
+// docs/importer_usage.md's own "Header segments are processed first" section: the guarantee is
+// "never starved behind an unbounded pile", not "always strictly first" under every possible
+// thread interleaving), so this asserts the header was seen at all (hdr_raw_msg non-empty) rather
+// than a strict happens-before relationship that could flake under real thread scheduling. -------
+TEST_CASE("pipeline: hdr_seg_schema routes the header segment through the priority queue without breaking correctness",
           "[pipeline][stages][header-priority]")
 {
   temp_dir_guard dir;
@@ -851,20 +832,84 @@ TEST_CASE("pipeline: header_seg_types routes the header segment through the prio
   auto             state = std::make_shared<shared_state>();
   stage_test_hooks hooks(state);
 
-  // seg_type 0 == pacs8_hdr (see work.hpp: pacs8_hdr is declared before pacs8_txn, and seg_type()
-  // is each schema class's declaration-order index -- see docs/importer_usage.md's own
-  // header_seg_types field doc comment).
-  auto cfg =
-    make_cfg_ex("test-header-priority", /*num_of_workers=*/4, /*pool_shard_count=*/2, /*ok_block_flush_size=*/3, /*header_seg_types=*/{0});
+  auto cfg      = make_cfg_ex("test-header-priority", /*num_of_workers=*/4, /*pool_shard_count=*/2, /*ok_block_flush_size=*/3);
   auto [p, res] = fsp::importer::exec(cfg, std::vector<std::string>{doc_path}, xsd_path(), hooks);
 
   REQUIRE(res.has_value());
   CHECK(p->ds_dscr()[0].status().ok());
-  CHECK(p->get_results().size() == 21); // header + 20 txns -- same total as without header_seg_types
+  CHECK(p->get_results().size() == 21); // header + 20 txns
   CHECK(p->get_errors().empty());
   {
     const std::scoped_lock lock(state->raw_msg_mutex);
     CHECK(state->hdr_raw_msg.find("GrpHdr") != fsp::str_t::npos); // the header segment was, in fact, processed
   }
+}
+
+// --- Scenario 12: white-box proof, at the doc_cutter/segment_pool level, that EVERY hdr_seg_schema
+// segment lands in the header queue and EVERY other segment lands in the ordinary queue -- Scenario
+// 11 above only shows the header was processed at all, which a bug that dropped the header/ordinary
+// distinction entirely (routing everything through ONE queue) would still pass. This test drives
+// doc_cutter directly (no pipeline_worker, no P-role threads at all) so cutting is the only thing
+// happening -- immediately after cut() returns, the two queues' contents are counted with nothing
+// else able to have drained them yet, making the assertion exact rather than best-effort. ---------
+TEST_CASE("doc_cutter: every hdr_seg_schema segment is routed into the header queue, every other "
+          "segment into the ordinary queue",
+          "[doc_cutter][header-priority]")
+{
+  const auto num_txns = GENERATE(1, 20);
+  CAPTURE(num_txns);
+
+  temp_dir_guard dir;
+  const auto     doc_path = dir.write("doc.xml", multi_txn_doc(num_txns));
+
+  static const fsp::xerces_mgr xerces_life; // process-wide Xerces init/terminate, same role as importer's own -- see importer.hpp
+
+  const auto log_cfg = silent_log_cfg("test-doc-cutter-header-routing");
+  auto       log_ptr = logger::Logger::create(log_cfg);
+  REQUIRE(log_ptr.has_value());
+
+  fsp::doc_set_dscr ds_dscr(**log_ptr, 1);
+  REQUIRE(ds_dscr.add_document(doc_path));
+  REQUIRE(ds_dscr.set_grammar(xsd_path()));
+
+  const auto cfg = fsp::importer_config{.targets        = fsp::proc_data_of<^^fsp::work>(),
+                                        .num_of_workers = 1,
+                                        .log_config     = log_cfg,
+                                        .program_name   = "test-doc-cutter-header-routing"};
+  // pacs8_hdr is seg_type 0, pacs8_txn is seg_type 1 (declaration order in work.hpp) -- confirms
+  // the compile-time side of the mechanism (reflection.hpp's seg_schema::is_header()/
+  // hdr_seg_schema, proc_data_of()) independently of the runtime routing this test goes on to
+  // check below.
+  REQUIRE(cfg.targets.is_header.size() == 2);
+  CHECK(cfg.targets.is_header[0]);       // pacs8_hdr : hdr_seg_schema
+  CHECK_FALSE(cfg.targets.is_header[1]); // pacs8_txn : seg_schema
+
+  fsp::segment_pool pool(**log_ptr, /*no_of_slots=*/static_cast<std::size_t>(num_txns) + 1, /*num_shards=*/2);
+  fsp::doc_cutter    cutter(cfg, **log_ptr, pool, ds_dscr);
+  REQUIRE(cutter.init());
+  REQUIRE(cutter.cut(0));
+
+  // Nothing has run except cutting itself (no pipeline_worker/P-role thread was ever started), so
+  // every one of this document's segments is sitting in exactly one of the two ready-queue sets
+  // right now -- draining both to plain counts is exact, not an approximation racing another
+  // thread.
+  std::size_t header_count = 0;
+  for (std::size_t shard = 0; shard < pool.num_shards(); ++shard)
+    while (auto idx = pool.try_pop_ready_header(shard))
+    {
+      CHECK(pool.segment_at(*idx).subtree_type() == 0); // every header-queue entry is, in fact, seg_type 0 (pacs8_hdr)
+      ++header_count;
+    }
+  std::size_t ordinary_count = 0;
+  for (std::size_t shard = 0; shard < pool.num_shards(); ++shard)
+    while (auto idx = pool.try_pop_ready(shard))
+    {
+      CHECK(pool.segment_at(*idx).subtree_type() == 1); // every ordinary-queue entry is, in fact, seg_type 1 (pacs8_txn)
+      ++ordinary_count;
+    }
+
+  CHECK(header_count == 1); // exactly the one GrpHdr segment, never more, never fewer
+  CHECK(ordinary_count == static_cast<std::size_t>(num_txns));
+  CHECK(cutter.segments_found() == header_count + ordinary_count); // nothing lost, nothing double-counted
 }
 // NOLINTEND(readability-magic-numbers)

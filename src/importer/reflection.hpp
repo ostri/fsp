@@ -34,6 +34,31 @@ namespace fsp
    */
   struct seg_schema
   {
+    /**
+     * @brief Whether this schema class describes a header segment -- consulted by
+     * proc_data_of() (see its own doc comment) to build proc_data::is_header, in the same
+     * declaration-order indexing as proc_data::xpaths/segment_result::seg_type(). static consteval,
+     * not a virtual/instance method: the answer is a compile-time property of the schema class
+     * itself, resolved through the `typename[:m:]::is_header()` splice call, never through a live
+     * object. hdr_seg_schema (below) overrides this to true; plain seg_schema-derived classes
+     * default to false.
+     */
+    [[nodiscard]] static consteval bool is_header() { return false; }
+  };
+
+  /**
+   * @brief Marker base for a HEADER segment schema class -- derive from this instead of plain
+   * seg_schema (e.g. `class pacs8_hdr : public fsp::hdr_seg_schema`) to mark that schema class as
+   * a document header. Adds nothing but the overridden is_header() below -- no data members, so
+   * deriving from this instead of seg_schema has no effect on the class's own size/layout, and it
+   * still satisfies every `std::is_base_of_v<seg_schema, T>` check classes_of()/proc_data_of() run
+   * (hdr_seg_schema itself derives from seg_schema). See docs/importer_usage.md's own "Marking a
+   * schema class as a header segment" section for the runtime effect this has (routing that
+   * segment type through a priority queue every P-role worker thread drains first).
+   */
+  struct hdr_seg_schema : seg_schema
+  {
+    [[nodiscard]] static consteval bool is_header() { return true; }
   };
 
   /**
@@ -292,15 +317,21 @@ namespace fsp
     constexpr auto&       ns_arr      = [:ns_member:];
 
     std::vector<xpath_set> xpaths;
+    std::vector<bool>      is_header;
     xpaths.reserve(targets_raw.count);
+    is_header.reserve(targets_raw.count);
     template for (constexpr auto m : members)
     {
       if constexpr (std::meta::is_type(m) && std::meta::has_identifier(m))
       {
-        if constexpr (std::is_base_of_v<Base, typename[:m:]>) xpaths.push_back(fsp::build(fields_of<m>(), ns_arr));
+        if constexpr (std::is_base_of_v<Base, typename[:m:]>)
+        {
+          xpaths.push_back(fsp::build(fields_of<m>(), ns_arr));
+          is_header.push_back([:m:]::is_header());
+        }
       }
     }
-    return proc_data{.targets = fsp::build(targets_raw.span(), ns_arr), .xpaths = std::move(xpaths)};
+    return proc_data{.targets = fsp::build(targets_raw.span(), ns_arr), .xpaths = std::move(xpaths), .is_header = std::move(is_header)};
   }
 
   /**

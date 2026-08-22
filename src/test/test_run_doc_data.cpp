@@ -331,11 +331,10 @@ namespace
 
   fsp::importer_config make_cfg(std::string_view app_name, std::size_t num_of_workers)
   {
-    return fsp::importer_config{.targets          = fsp::proc_data_of<^^fsp::work>(),
-                                .num_of_workers   = num_of_workers,
-                                .log_config       = silent_log_cfg(app_name),
-                                .program_name     = std::string(app_name),
-                                .header_seg_types = {}};
+    return fsp::importer_config{.targets        = fsp::proc_data_of<^^fsp::work>(),
+                                .num_of_workers = num_of_workers,
+                                .log_config     = silent_log_cfg(app_name),
+                                .program_name   = std::string(app_name)};
   }
 } // namespace
 

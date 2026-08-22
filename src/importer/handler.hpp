@@ -137,11 +137,12 @@ namespace fsp
     std::size_t                   element_counter_ = 0; //< pooling counter check also "every"
     str_XMLCh_t                   buf_;                 //< space for "make_open_tag" as XMLCh
     segment_pool&                 pool_;                //< segment pool
-    // Indexed by seg_type() (== subtree_type()) -- true means importer_config::header_seg_types
-    // named this schema class, so endElement() routes segments of that type into
-    // pool_.push_ready_header() instead of pool_.push_ready() (see its own doc comment). Empty by
-    // default (header_seg_types left unset), in which case index-out-of-range never happens
-    // because endElement() only ever indexes this when it's non-empty -- see its own check.
+    // Indexed by seg_type() (== subtree_type()) -- true means that schema class derives from
+    // fsp::hdr_seg_schema (see reflection.hpp and proc_data::is_header's own doc comments), so
+    // endElement() routes segments of that type into pool_.push_ready_header() instead of
+    // pool_.push_ready() (see its own doc comment). Empty when the reflected namespace declares no
+    // hdr_seg_schema-derived class at all, in which case index-out-of-range never happens because
+    // endElement() only ever indexes this when it's non-empty -- see its own check.
     std::vector<bool> is_header_seg_type_;
     bool              validating_        = false;                  //< see set_validating()
     sax_error_source  last_error_source_ = sax_error_source::none; //< see last_error_source()

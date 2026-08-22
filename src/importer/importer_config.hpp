@@ -48,19 +48,6 @@ namespace fsp
     std::size_t           nak_block_flush_size = 128;  // NOLINT(readability-magic-numbers)
     logger::logger_config log_config;                  // configuration of the
     str_t                 program_name;                // program name as displayed in the log file
-    // Which of targets' schema classes count as a header segment, expressed as seg_type() values
-    // (each schema class's declaration-order index within the reflected namespace targets was
-    // built from -- see proc_data_of<^^YourNamespace>()) -- e.g. a document's GrpHdr-style header,
-    // which a cb's on_type()/on_doc_sem_check() often needs to have already seen before it can
-    // meaningfully validate a transaction segment (see doc_data(doc_ndx)). Default: empty, meaning
-    // no schema class is treated as a header and segments are processed in whatever order they
-    // become ready -- exactly as if this field didn't exist. A non-empty list makes the cutter
-    // route those segments' types into a second, sharded ready queue that every P-role worker
-    // thread drains BEFORE its ordinary one, on every single work-fetch -- see
-    // docs/importer_usage.md's own "Header segments are processed first" section for the full
-    // mechanism and why it exists (avoiding every P-role thread getting stuck on transaction
-    // segments while the one header segment that would unblock them all sits unprocessed).
-    std::vector<int> header_seg_types;
     // NOLINTEND(misc-non-private-member-variables-in-classes)
     [[nodiscard]] str_t dump(int offs) const;
   };
@@ -83,8 +70,7 @@ namespace fsp
   {0}log_config.console_level: {11}
   {0}log_config.file_level: {12}
   {0}log_config.log_folder: {13}
-  {0}program_name: {14}
-  {0}header_seg_types.size(): {15})",
+  {0}program_name: {14})",
                        ind,
                        targets.dump(offs),
                        num_of_workers,
@@ -99,7 +85,6 @@ namespace fsp
                        magic_enum::enum_name(log_config.console_level),
                        magic_enum::enum_name(log_config.file_level),
                        log_config.log_folder,
-                       program_name,
-                       header_seg_types.size());
+                       program_name);
   }
 } // namespace fsp

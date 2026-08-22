@@ -104,20 +104,12 @@ namespace fsp
     if (! ps) return std::unexpected(ps.error());
     try
     {
-      // Resolves importer_config::header_seg_types (a caller-facing list of seg_type() values,
-      // see its own doc comment) into a dense, index-by-seg_type() lookup vector Handler's own
-      // endElement() can check with a single, branch-predictable bounds check per segment (see
-      // Handler::is_header_seg_type_'s own doc comment) -- built once here, not per segment.
-      // cfg_.targets.xpaths.size() is the number of schema classes in the reflected namespace
-      // targets was built from (one xpath_set per class, see proc_data's own doc comment) -- the
-      // same upper bound seg_type() itself can never reach or exceed. An out-of-range
-      // header_seg_types entry (a caller mistake) is simply ignored rather than resized into,
-      // matching how an unmatched xpath is silently a no-op elsewhere in this class.
-      std::vector<bool> is_header_seg_type(cfg_.targets.xpaths.size(), false);
-      for (const int header_type : cfg_.header_seg_types)
-        if (header_type >= 0 && static_cast<std::size_t>(header_type) < is_header_seg_type.size())
-          is_header_seg_type[static_cast<std::size_t>(header_type)] = true;
-      handler_ = make_unique<Handler>(cfg_.targets, log_, parser_.get(), seg_pool_, ds_dscr_, std::move(is_header_seg_type));
+      // cfg_.targets.is_header is already a dense, index-by-seg_type() lookup vector -- filled by
+      // proc_data_of() from each schema class's own static consteval is_header() (see
+      // reflection.hpp's seg_schema/hdr_seg_schema and proc_data's own doc comment), same
+      // declaration-order indexing as cfg_.targets.xpaths/segment_result::seg_type() -- nothing
+      // left to resolve here, just pass it straight through to Handler.
+      handler_ = make_unique<Handler>(cfg_.targets, log_, parser_.get(), seg_pool_, ds_dscr_, cfg_.targets.is_header);
       handler_->set_validating(validate_here);
       parser_->setContentHandler(handler_.get());
       parser_->setErrorHandler(handler_.get());

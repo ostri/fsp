@@ -1145,3 +1145,154 @@ name-indexed values without caring which schema class they came from. For the ov
 majority of callers, `on_type()` is simpler, is compile-time-checked for missing schema classes
 (see [method purpose and parameter semantics](#21-method-purpose-and-parameter-semantics) above), and
 is what every example in this document uses.
+
+## 6. Internals
+
+Everything above is what a caller needs. This section documents two of fsp-core's own internal
+data structures, `doc_set_dscr` and `doc_dscr` (both `#include "doc_set_dscr.hpp"`/
+`"doc_dscr.hpp"`) -- useful background if you're reading fsp-core's own source, or if a hook
+signature hands you one of these and you want to know exactly what else it offers beyond the
+handful of accessors this document already covers inline (`dscr.path()`, `verdict.ok()`, and so
+on).
+
+### 6.1. `doc_set_dscr`
+
+The whole-run collection of documents: one `doc_dscr` per XML file passed to `exec()`, plus the
+(optional) XSD grammar document. `pipeline_hooks::on_run_start()`/`on_run_end()` are handed a
+`const doc_set_dscr&`; indexing it (`ds_dscr[doc_ndx]`) is how a hook gets from a `doc_ndx` to
+that document's own `doc_dscr` outside the hooks that already receive one directly (e.g.
+`on_block_store()`, see [Batch storage hooks](#233-batch-storage-hooks) above).
+
+Non-copyable (holds a `std::vector<doc_dscr>`, and `doc_dscr` itself is non-copyable), move-only
+in a restricted sense (`operator=(doc_set_dscr&&)` is deleted -- only construction can move).
+
+**Attributes:**
+
+| Member     | Type                    | Meaning                                                                                             |
+| ---------- | ----------------------- | --------------------------------------------------------------------------------------------------- |
+| `log_`     | `const logger::Logger&` | this run's logger; must outlive the `doc_set_dscr` -- stored as a reference, never copied           |
+| `doc_set_` | `std::vector<doc_dscr>` | one entry per XML file, in the same order as the `xml_paths` vector given to `exec()`               |
+| `grammar_` | `doc_dscr`              | the XSD schema file, as its own `doc_dscr`; default-constructed (not open) when no schema was given |
+
+**Methods:**
+
+| Signature                                                                          | Semantics                                                                                                                              |
+| ---------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `explicit doc_set_dscr(const logger::Logger& logger, size_type initial_size = 16)` | constructs an empty set, reserving `initial_size` slots up front (`doc_set_.reserve()`)                                                |
+| `bool add_document(cstr_t path)`                                                   | opens `path` as a new `doc_dscr`, appends it; `false` on an empty path or if opening throws (caught and logged, not propagated)        |
+| `bool add_document(doc_dscr&& doc)`                                                | appends an already-constructed `doc_dscr` by moving it in; `false` only if the move itself throws                                      |
+| `bool set_grammar(cstr_t path)`                                                    | opens `path` as the grammar document; `false` on an empty path or a caught exception                                                   |
+| `bool set_grammar(doc_dscr&& doc)`                                                 | sets the grammar document by moving an already-constructed `doc_dscr` in                                                               |
+| `[[nodiscard]] doc_dscr& operator[](size_type pos)` / `const` overload             | indexed access, no bounds check beyond what the const overload also throws on                                                          |
+| `[[nodiscard]] doc_dscr& at(size_type pos)` / `const` overload                     | same as `operator[]`, but explicitly bounds-checked (throws `std::out_of_range`, and the non-const overload also logs the error first) |
+| `[[nodiscard]] doc_dscr& grammar() noexcept` / `const` overload                    | the grammar document's own `doc_dscr` -- check `has_grammar()` first; a default-constructed (unopened) `doc_dscr` otherwise            |
+| `[[nodiscard]] size_type size() const noexcept`                                    | number of documents in the set (not counting the grammar document)                                                                     |
+| `[[nodiscard]] bool empty() const noexcept`                                        | `size() == 0`                                                                                                                          |
+| `void clear() noexcept`                                                            | empties `doc_set_` (grammar document untouched); logs how many were dropped                                                            |
+| `void reserve(size_type new_capacity)`                                             | forwards to `doc_set_.reserve()`                                                                                                       |
+| `[[nodiscard]] bool has_grammar() const noexcept`                                  | `true` iff the grammar document is open (`static_cast<bool>(grammar_)`)                                                                |
+| `begin()`/`end()`/`cbegin()`/`cend()` (const and non-const)                        | iterate `doc_set_` directly -- a range-`for` over a `doc_set_dscr` visits every document, not the grammar                              |
+| `[[nodiscard]] const logger::Logger& log() const noexcept`                         | this run's logger                                                                                                                      |
+| `[[nodiscard]] const std::vector<doc_dscr>& doc_set() const` / non-const overload  | direct access to the underlying vector, for callers that need vector-specific operations the wrapper above doesn't expose              |
+| `[[nodiscard]] cstr_t xsd_file() const`                                            | the grammar document's own path, or `""` if `has_grammar()` is false                                                                   |
+
+### 6.2. `doc_dscr`
+
+One document's own descriptor: the memory-mapped file itself (`mmap_file`), its syntax/
+validation/semantic/stored verdict (a `doc_status_t`, see [6.3](#63-doc_status_t) below), the
+first error recorded against it (if any), and the two caller-assigned opaque ids
+(`out_doc_id()`/`agent_id()`) a hook can attach to it. This is the type every `dscr`/`doc_dscr&`
+parameter throughout [2. callback description](#2-callback-description) above refers to.
+
+Non-copyable, move-only. `close()`/destruction close the underlying `mmap_file` if still open.
+
+**Attributes:**
+
+| Member           | Type                          | Meaning                                                                                                              |
+| ---------------- | ----------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `doc_`           | `mmap_file`                   | the memory-mapped document itself -- byte access, `path()`, `string_view()`, etc. all forward to this                |
+| `status_`        | `doc_status_t`                | syntax/validation/semantic/stored verdict and completion logic, see [6.3](#63-doc_status_t) below                    |
+| `err_mutex_`     | `std::mutex`                  | guards `err_set_`/`err_` against the first-writer-wins race described under `note_error_once()` below                |
+| `err_set_`       | `bool`                        | `true` once a failure reason has been recorded (`note_error_once()` has run at least once)                           |
+| `err_`           | `error_info`                  | the recorded failure reason -- whichever of `set_syntax_result()`/`set_validation_result()` reported a failure first |
+| `out_doc_id_`    | `std::uint64_t`               | caller-assigned output document id, see `get_doc_id()`; `0` until set                                                |
+| `agent_id_`      | `std::optional<std::int16_t>` | caller-assigned agent id, see `get_doc_agent_id()`; `std::nullopt` until set                                         |
+| `open_reported_` | `mutable std::atomic<bool>`   | `true` once `on_doc_safe_open()` has returned for this document, see `mark_opened()`/`is_opened()` below             |
+
+**Methods:**
+
+| Signature                                                                                                                            | Semantics                                                                                                                                                                                                                                         |
+| ------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `doc_dscr()`                                                                                                                         | default-constructed, unopened document                                                                                                                                                                                                            |
+| `explicit doc_dscr(cstr_t path)`                                                                                                     | opens `path` as a memory-mapped file immediately                                                                                                                                                                                                  |
+| `explicit doc_dscr(mmap_file&& file)`                                                                                                | wraps an already-open `mmap_file`                                                                                                                                                                                                                 |
+| `void close() noexcept`                                                                                                              | closes the underlying `mmap_file`, if open                                                                                                                                                                                                        |
+| `[[nodiscard]] bool is_open() const noexcept`                                                                                        | forwards to `mmap_file::is_open()`                                                                                                                                                                                                                |
+| `[[nodiscard]] bool empty() const noexcept`                                                                                          | forwards to `mmap_file::empty()`                                                                                                                                                                                                                  |
+| `[[nodiscard]] size_t size() const noexcept`                                                                                         | forwards to `mmap_file::size()`                                                                                                                                                                                                                   |
+| `[[nodiscard]] const std::byte* data() const noexcept`                                                                               | forwards to `mmap_file::data()`                                                                                                                                                                                                                   |
+| `[[nodiscard]] cstr_t path() const`                                                                                                  | this document's own file path, as given to `exec()`/`add_document()`                                                                                                                                                                              |
+| `[[nodiscard]] cstr_t string_view() const`                                                                                           | the whole document's content, as a `cstr_t`                                                                                                                                                                                                       |
+| `[[nodiscard]] std::byte operator[](size_t pos) const` / `at(size_t pos) const`                                                      | byte access, unchecked / bounds-checked (`at()` throws `std::out_of_range`)                                                                                                                                                                       |
+| `begin()`/`end()`/`cbegin()`/`cend() const noexcept`                                                                                 | byte-level iteration over the mapped file                                                                                                                                                                                                         |
+| `[[nodiscard]] std::span<const std::byte> span() const noexcept`                                                                     | the whole mapped file, as a span                                                                                                                                                                                                                  |
+| `[[nodiscard]] std::span<const std::byte> subspan(size_t offset, size_t count) const`                                                | a sub-range of the mapped file                                                                                                                                                                                                                    |
+| `void prefetch(size_t offset, size_t count = mmap_file::prefetch_size) const noexcept`                                               | hints the OS to page in `[offset, offset+count)` ahead of an upcoming read                                                                                                                                                                        |
+| `[[nodiscard]] explicit operator bool() const noexcept`                                                                              | `is_open()`                                                                                                                                                                                                                                       |
+| `[[nodiscard]] const mmap_file& mmf() const noexcept` / non-const overload                                                           | direct access to the underlying `mmap_file`, for advanced use beyond the forwarding accessors above                                                                                                                                               |
+| `[[nodiscard]] doc_status_t& status() noexcept` / `const` overload                                                                   | the live `doc_status_t` itself (a reference, not a snapshot -- `doc_status_t` is non-copyable), see [6.3](#63-doc_status_t) below                                                                                                                 |
+| `[[nodiscard]] bool failed() const noexcept`                                                                                         | `true` once syntax or validation is already known invalid (semantic_ deliberately excluded -- see its own doc comment); the C/P "already known invalid, skip this segment" precondition                                                           |
+| `[[nodiscard]] bool rejected() const noexcept`                                                                                       | `true` once ANY of syntax/validation/semantic is known invalid (semantic_ included, unlike `failed()`); the flush-time "drop this segment, its document is already doomed" predicate                                                              |
+| `[[nodiscard]] bool set_syntax_result(bool ok, bool folded_validation, error_info err = {}) noexcept`                                | reported by C once cutting finishes; `folded_validation` selects whether this call alone also sets validation (see its own doc comment for the folded-vs-separate-V rule); returns `true` iff this call must go on to call `hooks.on_doc_close()` |
+| `[[nodiscard]] bool set_validation_result(bool ok, error_info err = {}) noexcept`                                                    | reported by V (a separate validation pass, only when not folded); same return-value meaning as `set_syntax_result()`                                                                                                                              |
+| `[[nodiscard]] bool set_semantic_result(bool ok) noexcept`                                                                           | reported by the worker that wins the "all segments processed" completion check, right after `on_doc_sem_check()` returns; same return-value meaning                                                                                               |
+| `[[nodiscard]] bool set_stored_result() noexcept`                                                                                    | reported by `pipeline::record_segments_stored()` once this document's stored-segment count reaches its known total; same return-value meaning; see `doc_status_t::set_stored()` for why it takes no `ok` parameter                                |
+| `[[nodiscard]] const error_info& error() const noexcept`                                                                             | the first-recorded failure reason, or a default-constructed (empty) `error_info` if none was ever recorded                                                                                                                                        |
+| `[[nodiscard]] std::uint64_t out_doc_id() const noexcept` / `void set_out_doc_id(std::uint64_t id) noexcept`                         | caller-assigned output document id, see `get_doc_id()` above                                                                                                                                                                                      |
+| `[[nodiscard]] std::optional<std::int16_t> agent_id() const noexcept` / `void set_agent_id(std::optional<std::int16_t> id) noexcept` | caller-assigned agent id, see `get_doc_agent_id()` above                                                                                                                                                                                          |
+| `void mark_opened() const noexcept`                                                                                                  | records that `on_doc_safe_open()` has returned for this document (called once, by `pipeline_worker::do_cut()`)                                                                                                                                    |
+| `[[nodiscard]] bool is_opened() const noexcept`                                                                                      | `true` once `mark_opened()` has run; guards against V racing ahead of C and observing a document that hasn't been opened yet (see its own doc comment)                                                                                            |
+
+### 6.3. `doc_status_t`
+
+The mutex-protected, four-fact completion gate behind `doc_dscr::status()` -- owns the
+syntax/validation/semantic/stored verdicts (each a [`three_state`](#three_state) below) AND the
+"have all four been reported, and who gets to act on that" logic in one place, guarded by a
+single `std::mutex` so no cross-field memory-ordering has to be reasoned about by any caller. See
+[Document lifecycle, in order](#22-document-lifecycle-in-order) and [Knowing every segment has
+been stored, before `on_doc_close()`](#232-knowing-every-segment-has-been-stored-before-on_doc_close)
+above for how the four facts map onto the hooks a caller actually sees fire.
+
+Move-only (via a lock-then-snapshot pattern in the move constructor, since reading another
+instance's fields must happen under that instance's own lock); not copyable.
+
+<a id="three_state"></a>`three_state` (`enum class three_state : std::uint8_t`) is the three-way
+verdict each of the four facts is stored as: `unknown` (not yet reported -- the only valid initial
+state), `valid` (reported, positive), `invalid` (reported, negative) -- there is no path back from
+`valid`/`invalid` to `unknown`.
+
+**Attributes:**
+
+| Member      | Type                 | Meaning                                                                                                                                                                                           |
+| ----------- | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `syntax_`   | `three_state`        | set by `set_syntax()`; reported by C (the cutter)                                                                                                                                                 |
+| `valid_`    | `three_state`        | set by `set_valid()`; reported by V, or by C in folded `cut_with_validation=true` mode                                                                                                            |
+| `semantic_` | `three_state`        | set by `set_semantic()`; reported by the worker orchestrating `on_doc_sem_check()`                                                                                                                |
+| `stored_`   | `three_state`        | set by `set_stored()`; reported by `pipeline::record_segments_stored()` -- can only ever reach `valid`, never `invalid` (no failure verdict of its own, see `set_stored()` below)                 |
+| `done_`     | `int`                | count of facts whose outcome can no longer change the final verdict; reaches `k_done_threshold` (4) via either four individual valid reports or one invalid report short-circuiting straight to 4 |
+| `closing_`  | `bool`               | one-shot latch: `true` once `try_start_closing()` has handed out its single `true` answer                                                                                                         |
+| `mtx_`      | `mutable std::mutex` | guards all six members above                                                                                                                                                                      |
+
+**Methods:**
+
+| Signature                                                                                                                              | Semantics                                                                                                                                                                                            |
+| -------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `[[nodiscard]] bool set_syntax(bool ok) noexcept`                                                                                      | records the syntax verdict, exactly once; returns `true` iff THIS call must go on to call `hooks.on_doc_close()`                                                                                     |
+| `[[nodiscard]] bool set_valid(bool ok) noexcept`                                                                                       | records the validation verdict, exactly once (only called when not folded into `set_syntax()`); same return-value meaning                                                                            |
+| `[[nodiscard]] bool set_semantic(bool ok) noexcept`                                                                                    | records `on_doc_sem_check()`'s own bool verdict, exactly once; same return-value meaning                                                                                                             |
+| `[[nodiscard]] bool set_stored() noexcept`                                                                                             | records that this document's segments have all been written out, exactly once; no `ok` parameter -- always marks `stored_` `valid` (see the member table above); same return-value meaning           |
+| `[[nodiscard]] bool is_finished() const noexcept`                                                                                      | `true` once `done_ >= k_done_threshold`, i.e. all four facts are known or the outcome is already decided by a single invalid report; monotonic                                                       |
+| `[[nodiscard]] bool try_start_closing() noexcept`                                                                                      | the one-shot "who calls `hooks.on_doc_close()`" decision; returns `true` to exactly one caller, ever, for a given instance -- every `set_*()` call above invokes this internally under the same lock |
+| `[[nodiscard]] three_state status() const noexcept`                                                                                    | aggregate across `syntax_`/`valid_`/`semantic_` only (never `stored_`): `invalid` if any of the three is invalid, `valid` iff all three are valid, `unknown` otherwise                               |
+| `[[nodiscard]] bool ok() const noexcept`                                                                                               | `status() == three_state::valid`                                                                                                                                                                     |
+| `[[nodiscard]] three_state syntax_status() const noexcept` / `valid_status()` / `semantic_status()` / `stored_status() const noexcept` | the individual field's current `three_state`, unaggregated                                                                                                                                           |
