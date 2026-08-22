@@ -6,6 +6,7 @@
 #include <iostream>
 #include <logger/logger.hpp>
 #include <logger/logger_config.hpp>
+#include <optional>
 #include <vector>
 namespace
 {
@@ -16,6 +17,24 @@ namespace
     fmt::print(msg, prog_name);
     return 1;
   }
+
+  // pipeline_hooks::get_doc_agent_id()'s own truly-unoverridden default returns 0 (fsp-core's own
+  // "unresolved agent" convention -- see its own doc comment in pipeline_hooks.hpp) -- exec()
+  // called with no hooks argument at all uses default_pipeline_hooks, which never overrides it, so
+  // every document would be rejected before any cut/validate work. This program has no real agent
+  // dictionary to resolve against and isn't demonstrating that mechanism (see "complex example" in
+  // docs/importer_usage.md, and ach_hook::get_doc_agent_id() in the ach repository, for a real
+  // BIC4-based resolution), so this minimal hook overrides only that one method, with a fixed,
+  // non-zero id, to keep this the smallest program that actually processes its documents. Derives
+  // from fsp::pipeline_hooks_crtp<Derived> directly (not fsp::typed_semantic_check<Derived,
+  // ^^fsp::work>, unlike pacs8_cb.hpp) -- typed_semantic_check requires one on_type() overload per
+  // fsp::work schema class (a compile-time static_assert), which this program has no use for at
+  // all: it never inspects segment contents, only the summary counts exec() itself returns.
+  class agent_id_hooks : public fsp::pipeline_hooks_crtp<agent_id_hooks>
+  {
+  protected:
+    [[nodiscard]] std::optional<std::int16_t> get_doc_agent_id(fsp::cstr_t /*path*/) override { return 1; }
+  };
 
   // log.conf (see add_log_config() in CMakeLists.txt, which picks and copies whichever ONE of
   // config/log.debug.json / config/log.release.json matches this build's own CMAKE_BUILD_TYPE)
@@ -43,13 +62,14 @@ int main(int argc, const char* argv[])
   if (args.files.empty()) return help(args.p_name);
   try
   {
-    const auto no_of_cores = 16U;                 // number of paralell worker threads
-    auto       cfg         = fsp::importer_config{//
-                                                  .targets        = fsp::proc_data_of<^^fsp::work>(),
-                                                  .num_of_workers = no_of_cores,
-                                                  .log_config     = load_program_logger_config(args.bare_name),
-                                                  .program_name   = args.bare_name};
-    auto [p, res]          = fsp::importer::exec(cfg, args.files, args.xsd_file);
+    const auto     no_of_cores = 16U;                 // number of paralell worker threads
+    auto           cfg         = fsp::importer_config{//
+                                                      .targets        = fsp::proc_data_of<^^fsp::work>(),
+                                                      .num_of_workers = no_of_cores,
+                                                      .log_config     = load_program_logger_config(args.bare_name),
+                                                      .program_name   = args.bare_name};
+    agent_id_hooks hooks;
+    auto [p, res] = fsp::importer::exec(cfg, args.files, args.xsd_file, hooks);
     if (! res)
     {
       fmt::print("Processing failed: '{}'\n", res.error().to_string());

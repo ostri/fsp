@@ -26,6 +26,29 @@ namespace fsp
   };
 
   /**
+   * @brief Which specific error class rejected a document -- a finer-grained, orthogonal
+   * complement to doc_status_t's own syntax_/valid_/semantic_ three_state facts, not a
+   * replacement for them. status()/ok() and the individual _status() getters are computed purely
+   * from the three three_state facts, exactly as before this enum existed; error_mask() (see
+   * doc_status_t below) is an independent, additional record of WHICH class of failure a caller
+   * (typically a hook wanting to log/route differently, or a future on_remove_stored_data() call
+   * site) can ask about, without needing three_state's own valid/invalid/unknown distinction --
+   * a bit here is either set (this class of error definitely happened) or not (it didn't, or
+   * hasn't been determined not to have -- same ambiguity status()==three_state::unknown already
+   * carries for the aggregate, not something this mask needs to re-encode itself). See
+   * docs/importer_usage.md's own "Document errors" section for the full UA/SE/VE/HE/TE taxonomy
+   * this mirrors.
+   */
+  enum class error_class : std::uint8_t
+  {
+    ua = 0x01, //< unknown agent -- pipeline_hooks::get_doc_agent_id() resolved to 0
+    se = 0x02, //< syntax error -- the document is not XML-well-formed
+    ve = 0x04, //< validation error -- the document failed XSD validation
+    he = 0x08, //< header semantic error -- on_type() returned false for the header segment
+    te = 0x10, //< transaction semantic error -- on_type() returned false for a non-header segment
+  };
+
+  /**
    * @brief Self-contained, mutex-protected final syntax/validation/semantic/stored verdict for one
    * document -- owns BOTH the four individual three_state facts (syntax_/valid_/semantic_/
    * stored_) AND the "have all four been reported yet, and who gets to act on that" completion
@@ -79,6 +102,11 @@ namespace fsp
       stored_   = o.stored_;
       done_     = o.done_;
       closing_  = o.closing_;
+      // error_mask_/rejected_flag_ are their own atomics, outside mtx_'s own critical section
+      // (see their own doc comments) -- copied here too, same "source exclusively owned, not yet
+      // shared" precondition as the rest of this move assignment, so a relaxed load/store is fine.
+      error_mask_.store(o.error_mask_.load(std::memory_order_relaxed), std::memory_order_relaxed);
+      rejected_flag_.store(o.rejected_flag_.load(std::memory_order_relaxed), std::memory_order_relaxed);
       return *this;
     }
     doc_status_t(const doc_status_t&)            = delete;
@@ -224,6 +252,46 @@ namespace fsp
       const std::scoped_lock lock(mtx_);
       return stored_;
     }
+
+    /**
+     * @brief Records that this document was rejected for reason cls -- OR's cls's own bit into
+     * error_mask_ (see error_class's own doc comment for why this is additional information, not
+     * a replacement for the three_state facts above). Callers may call this more than once for
+     * the same document (e.g. a document that is both syntactically invalid AND, independently,
+     * resolves to an unknown agent) -- unlike set_syntax()/set_valid()/set_semantic(), which are
+     * each exactly-once-per-document, error_mask_ can accumulate more than one bit over a
+     * document's lifetime. Lock-free: error_mask_ is its own atomic, independent of mtx_ (nothing
+     * reads error_mask_ together with syntax_/valid_/semantic_/stored_ as one consistent
+     * snapshot, so there is no cross-field ordering to protect here the way set_field() has to for
+     * those four).
+     * @return true iff THIS call is the one that moved error_mask_ from empty (0) to non-empty --
+     * i.e. the first time this document has EVER been marked with any error class at all. Same
+     * "exactly one winner" shape as try_start_closing(), but simpler: fetch_or()'s own return
+     * value already tells the caller everything needed (was error_mask_ zero right before this
+     * call's own bit landed), no separate lock or latch required. A caller (pipeline.cpp) uses
+     * this to fire on_remove_stored_data_safe() exactly once per document -- see its own doc
+     * comment in pipeline_hooks.hpp.
+     */
+    [[nodiscard]] bool mark_error(error_class cls) noexcept
+    { return error_mask_.fetch_or(static_cast<std::uint8_t>(cls), std::memory_order_relaxed) == 0; }
+    /// @brief The raw accumulated bitmask -- see error_class's own doc comment for the bit layout.
+    [[nodiscard]] std::uint8_t error_mask() const noexcept { return error_mask_.load(std::memory_order_relaxed); }
+    /// @brief Convenience over error_mask(): true iff cls's own bit has been recorded via mark_error().
+    [[nodiscard]] bool has_error(error_class cls) const noexcept
+    { return (error_mask() & static_cast<std::uint8_t>(cls)) != 0; }
+
+    /**
+     * @brief Cheap, lock-free equivalent of status() == three_state::invalid -- see
+     * doc_dscr::rejected()'s own doc comment for why this exists and where it's used (a
+     * per-segment hot-path check, at 10M-segment scale, that would otherwise pay status()'s own
+     * mtx_ lock on every single call just to answer a question that is "no" the overwhelming
+     * majority of the time). Set (relaxed store, one-way: never reset) from inside set_field()
+     * itself, in the SAME call that first drives one of syntax_/valid_/semantic_ to invalid -- so
+     * this is never observably stale relative to status() for a caller that only needs the
+     * one-bit answer, just cheaper to read. status() itself is untouched and remains the
+     * authority for callers that need the full three-way three_state (e.g. on_doc_close()).
+     */
+    [[nodiscard]] bool rejected() const noexcept { return rejected_flag_.load(std::memory_order_relaxed); }
   private:
     // Plain, lock-free aggregate holding a snapshot of the six fields below -- exists solely so
     // the move ctor above can lock o's mutex, read its fields into one of these (see snapshot()),
@@ -231,19 +299,30 @@ namespace fsp
     // cppcoreguidelines-prefer-member-initializer without ever reading o's fields unlocked.
     struct fields
     {
-      three_state syntax_;
-      three_state valid_;
-      three_state semantic_;
-      three_state stored_;
-      int         done_;
-      bool        closing_;
+      three_state   syntax_;
+      three_state   valid_;
+      three_state   semantic_;
+      three_state   stored_;
+      int           done_;
+      bool          closing_;
+      std::uint8_t  error_mask_;   //< snapshot of the atomic error_mask_ (see its own doc comment)
+      bool          rejected_flag_; //< snapshot of the atomic rejected_flag_ (see its own doc comment)
     };
     // Builds a fields snapshot of o under o's own lock -- see the move ctor's own doc comment.
+    // error_mask_/rejected_flag_ are their own atomics, not guarded by mtx_ (see their own doc
+    // comments) -- read here with a relaxed load, same "source exclusively owned, not yet shared"
+    // precondition the move ctor itself already documents.
     [[nodiscard]] static fields snapshot(doc_status_t& o) noexcept
     {
       const std::scoped_lock lock(o.mtx_);
-      return {
-        .syntax_ = o.syntax_, .valid_ = o.valid_, .semantic_ = o.semantic_, .stored_ = o.stored_, .done_ = o.done_, .closing_ = o.closing_};
+      return {.syntax_         = o.syntax_,
+              .valid_          = o.valid_,
+              .semantic_       = o.semantic_,
+              .stored_         = o.stored_,
+              .done_           = o.done_,
+              .closing_        = o.closing_,
+              .error_mask_     = o.error_mask_.load(std::memory_order_relaxed),
+              .rejected_flag_  = o.rejected_flag_.load(std::memory_order_relaxed)};
     }
     // Private, snapshot-based delegate target for the move ctor -- mtx_ itself is deliberately
     // NOT part of fields (std::mutex isn't copyable/movable), so it default-constructs here as a
@@ -256,6 +335,8 @@ namespace fsp
     , stored_(f.stored_)
     , done_(f.done_)
     , closing_(f.closing_)
+    , error_mask_(f.error_mask_)
+    , rejected_flag_(f.rejected_flag_)
     {
     }
 
@@ -292,6 +373,10 @@ namespace fsp
         const std::scoped_lock lock(mtx_);
         field = ok ? three_state::valid : three_state::invalid;
         done_ = ok ? done_ + 1 : k_done_threshold;
+        // rejected()'s own fast path -- see its doc comment. Set here, under the same lock, the
+        // FIRST time any of the three verdict-bearing facts turns invalid -- one-way (never reset
+        // back to false), so a later valid report on a DIFFERENT field cannot un-set it.
+        if (! ok) rejected_flag_.store(true, std::memory_order_relaxed);
         if (done_ >= k_done_threshold && ! closing_)
         {
           closing_ = true;
@@ -323,6 +408,13 @@ namespace fsp
     // in the SAME critical section as the done_ >= k_done_threshold check, not as a separate,
     // later CAS the way the old two-stage design did it.
     bool closing_ = false;
+    // Deliberately its own atomic, NOT one of the six fields guarded by mtx_ above -- see
+    // mark_error()'s own doc comment for why this needs no cross-field ordering with
+    // syntax_/valid_/semantic_/stored_/done_/closing_.
+    std::atomic<std::uint8_t> error_mask_{0}; //< see error_class's own doc comment for the bit layout
+    // Deliberately its own atomic too -- see rejected()'s own doc comment for why this is a
+    // separate, lock-free fast path rather than a seventh field folded into mtx_'s own snapshot.
+    std::atomic<bool> rejected_flag_{false};
     mutable std::mutex
       mtx_; //< guards every one of the six members above; see class's own doc comment on why one mutex, not per-field atomics
   };
@@ -391,7 +483,20 @@ namespace fsp
     // schema (see e.g. ach's own docs/ach-operation/negative-tests.md) may not want segments of a
     // rejected document persisted at all. See xml_worker::flush_ok_block()'s own doc comment for
     // where this is actually used.
-    [[nodiscard]] bool rejected() const noexcept { return status_.status() == three_state::invalid; }
+    //
+    // Reads doc_status_t::rejected() (a lock-free atomic flag), NOT status().status() -- the two
+    // are always equivalent (see doc_status_t::rejected()'s own doc comment on when the flag is
+    // set), but this call site is xml_worker::process_one()'s own per-segment hot path, at
+    // 10M-segment scale, where status()'s std::scoped_lock would otherwise be paid on every single
+    // segment just to answer a question that is "no" the overwhelming majority of the time.
+    [[nodiscard]] bool rejected() const noexcept { return status_.rejected(); }
+    // Thin forwarders to status_'s own mark_error()/error_mask()/has_error() -- see their doc
+    // comments on doc_status_t. Kept here too, same "convenience wrapper over status_" pattern as
+    // set_semantic_result()/set_stored_result() above, so call sites don't need to spell out
+    // .status().mark_error(...) themselves.
+    [[nodiscard]] bool          mark_error(error_class cls) noexcept { return status_.mark_error(cls); }
+    [[nodiscard]] std::uint8_t  error_mask() const noexcept { return status_.error_mask(); }
+    [[nodiscard]] bool          has_error(error_class cls) const noexcept { return status_.has_error(cls); }
     // Reported by C (the cutter) once cutting finishes. folded_validation is
     // importer_config::cut_with_validation's effective value for this run (see pipeline_worker.cpp) --
     // when true, C is the SOLE authority for both syntax and validation (success sets both valid,
@@ -436,8 +541,14 @@ namespace fsp
      * get_doc_agent_id() implementation derives it from (e.g. a BIC4 prefix in the document's own
      * filename today; a public key or some other document property later) -- fsp itself never
      * inspects or interprets this value, only carries it (same "opaque payload, domain-neutral
-     * pipeline" contract as out_doc_id() above). std::nullopt if get_doc_agent_id() didn't resolve
-     * one (its default body always returns std::nullopt -- see pipeline_hooks.hpp).
+     * pipeline" contract as out_doc_id() above), except for one convention it DOES act on: 0 means
+     * "unresolved agent" (pipeline_worker::do_cut()/do_validate() reject such a document before any
+     * cut/validate work -- see their own doc comments). An unoverridden get_doc_agent_id() returns 0
+     * (see pipeline_hooks.hpp's own doc comment on why that, not std::nullopt, is the safe default),
+     * so agent_id() is 0 -- not unset -- unless a hook override resolves a real, non-zero id.
+     * std::nullopt itself is reserved for a hook that overrides this and, on its own terms, cannot
+     * decide the agent for a particular path at all -- distinct from "decided: unresolved" (0); the
+     * agent_id()==0 rejection above does not fire for an unset (nullopt) agent_id().
      *
      * Same happens-before/thread-safety argument as out_doc_id(): plain, non-atomic, written
      * exactly once, from the main thread, in pipeline::add_documents(), before this doc_dscr is

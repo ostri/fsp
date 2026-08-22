@@ -57,6 +57,13 @@ namespace fsp
     if (pipeline_.ds_dscr()[doc_ndx].agent_id() == 0)
     {
       log_.warn(fmt::format("Doc {}: agent_id()==0 (unresolved agent) -- cut skipped.", doc_ndx));
+      // Recorded explicitly here, as error_class::ua, rather than left for report_syntax_result()
+      // below to infer from ok=false -- report_syntax_result() has no way to tell a UA rejection
+      // apart from a genuine SE (syntax) one, and the two are deliberately distinct error classes
+      // (see docs/importer_usage.md's own "Document errors" section). no_headers=false: an
+      // unresolved agent invalidates the whole document, header included.
+      if (auto res = pipeline_.report_error_class(doc_ndx, error_class::ua, false, *hooks_); ! res)
+        log_.error(fmt::format("on_remove_stored_data() failed for doc {} (UA): {}", doc_ndx, res.error().to_string()));
       pipeline_.report_syntax_result(
         doc_ndx,
         false,
@@ -85,6 +92,13 @@ namespace fsp
     // doc_dscr::mark_opened()'s own doc comment for the full race this closes.
     pipeline_.ds_dscr()[doc_ndx].mark_opened();
     auto res = cutter_->cut(doc_ndx);
+    // error_class::se, recorded explicitly here rather than inferred inside report_syntax_result()
+    // -- see the agent_id()==0 branch above for why that call alone can't tell a UA rejection
+    // apart from a genuine syntax (SE) one. no_headers=false: an ill-formed document invalidates
+    // everything cut from it so far, header included.
+    if (! res.has_value())
+      if (auto rm_res = pipeline_.report_error_class(doc_ndx, error_class::se, false, *hooks_); ! rm_res)
+        log_.error(fmt::format("on_remove_stored_data() failed for doc {} (SE): {}", doc_ndx, rm_res.error().to_string()));
     // A malformed document is a per-document failure, not a fatal one: mark it invalid so any
     // already-cut segments of this document get discarded by P, then keep going. May itself
     // dispatch hooks.on_doc_safe_close() right here, if this call wins doc_status_t::try_start_closing().
@@ -143,8 +157,19 @@ namespace fsp
       // throw the SAME xercesc::SAXParseException type -- last_error_source() (set by WHICH
       // callback actually fired) is what distinguishes a schema violation from a well-formedness
       // one here, see point 15/16 of the design discussion this implements.
-      const auto err_code = validator_->last_error_source() == sax_error_source::well_formed ? processor_error::parse_failed
-                                                                                             : processor_error::xsd_validation_failed;
+      const bool is_well_formed_error = validator_->last_error_source() == sax_error_source::well_formed;
+      const auto err_code             = is_well_formed_error ? processor_error::parse_failed : processor_error::xsd_validation_failed;
+      // error_class::se for a well-formedness failure (V caught what is really a syntax problem,
+      // not a schema one), error_class::ve for a genuine XSD violation -- same distinction
+      // err_code itself already makes, recorded explicitly for the same reason as the two call
+      // sites above (report_validation_result() alone can't infer which class this is).
+      // no_headers=false either way: both invalidate the whole document, header included.
+      if (auto rm_res = pipeline_.report_error_class(doc_ndx, is_well_formed_error ? error_class::se : error_class::ve, false, *hooks_);
+          ! rm_res)
+        log_.error(fmt::format("on_remove_stored_data() failed for doc {} ({}): {}",
+                               doc_ndx,
+                               is_well_formed_error ? "SE" : "VE",
+                               rm_res.error().to_string()));
       pipeline_.report_validation_result(doc_ndx, false, *hooks_, error_info{err_code, validator_->last_error_message(), "", 0});
     }
   }

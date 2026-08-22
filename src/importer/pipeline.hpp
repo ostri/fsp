@@ -73,6 +73,16 @@ namespace fsp
     // shape as report_syntax_result()/report_validation_result() above.
     void record_segments_stored(std::size_t doc_ndx, std::size_t count, pipeline_hooks& hooks);
     void report_fatal_error(error_info err);
+    // Records doc_ndx's own error_class bit (see doc_status_t::mark_error()) and, if this is the
+    // FIRST error class ever recorded for this document (mark_error()'s own return value), fires
+    // hooks.on_remove_stored_data_safe() -- see that hook's own doc comment in pipeline_hooks.hpp
+    // for the no_headers argument's meaning and why fsp itself can't tell a cb WHICH rows to
+    // remove, only THAT (and how broadly) it should. Called from every call site that can reject a
+    // document (do_cut()'s agent_id()==0 and cut() failure branches, do_validate()'s validation
+    // failure branch, check_segment_semantics()'s header/non-header semantic failure branches) --
+    // centralized here so that "fire the rollback hook exactly once, on the first rejection" isn't
+    // reimplemented at each of those call sites.
+    [[nodiscard]] e_void report_error_class(std::size_t doc_ndx, error_class cls, bool no_headers, pipeline_hooks& hooks);
     // Per-document C+P end-to-end timing and semantic outcome counts (sparse info logs, for
     // benchmarking, and the running total dumped at the end of process_files()). May itself
     // trigger the "all segments processed" completion (see doc_counters::maybe_seg_processing_complete())

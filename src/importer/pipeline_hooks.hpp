@@ -135,10 +135,22 @@ namespace fsp
      * @param path the document's own path, exactly as passed to process_files() -- same string a
      * concrete hook would otherwise have to re-derive from doc_dscr::path() later, at every call
      * site that wants it, if this hook didn't exist.
-     * @return an opaque, caller-chosen id, or std::nullopt if this run's hooks don't resolve one
-     * (the default, no-op body) -- doc_dscr::agent_id() then stays std::nullopt for that document.
+     * @return an opaque, caller-chosen id, or std::nullopt if this run's hooks genuinely can't
+     * express an answer at all (rare -- see below). The default (no-op, unoverridden) body
+     * deliberately returns 0, NOT std::nullopt: 0 is fsp-core's own "unresolved agent" convention
+     * (pipeline_worker::do_cut()/do_validate() reject a document whose agent_id()==0, before any
+     * cut/validate work, see their own doc comments) -- a hook that never overrides this therefore
+     * has every document rejected on that convention as a SAFE, fail-closed default, rather than
+     * silently processing documents from an agent nobody actually resolved (the old default, when
+     * this returned std::nullopt, was fail-OPEN: an unoverridden hook let every document through
+     * unchecked, which is the wrong default for a security-relevant gate). A concrete override that
+     * wants a document accepted must therefore return a non-zero id explicitly. std::nullopt itself
+     * is still a legitimate return value for a hook that overrides this and, on its own terms,
+     * cannot decide the agent at all for a particular path (as opposed to "decided: unresolved",
+     * which is 0) -- doc_dscr::agent_id() then genuinely stays unset for that document, and the
+     * agent_id()==0 rejection above does NOT fire for it (unset is not the same as 0).
      */
-    [[nodiscard]] virtual std::optional<std::int16_t> get_doc_agent_id([[maybe_unused]] cstr_t path) { return std::nullopt; }
+    [[nodiscard]] virtual std::optional<std::int16_t> get_doc_agent_id([[maybe_unused]] cstr_t path) { return 0; }
 
     /**
      * @brief Makes this hooks instance's own concrete run-level shared-data instance (see
@@ -359,6 +371,33 @@ namespace fsp
                                                             segment_pool&                pool,
                                                             const doc_set_dscr&          ds_dscr) final
     { return on_failed_block_store(indices, errors, pool, ds_dscr); }
+
+    /**
+     * @brief Called once, the moment out_doc_id is FIRST determined rejected (see
+     * doc_dscr::rejected()) with at least one already-stored write to undo -- i.e. some of its
+     * segments may already have reached on_block_safe_store()/on_failed_block_safe_store() before
+     * the rejection became known (see docs/importer_usage.md's own "Document errors" section for
+     * the full UA/SE/VE/HE/TE background this implements). Telling a cb WHICH of its own writes to
+     * undo is entirely this hook's own job -- fsp does not track, and does not hand back, any
+     * per-segment key for what a cb already wrote in on_block_store()/on_failed_block_store()
+     * (indices there are pool slots, already recycled by the time this fires); a cb that wants to
+     * honor this call needs its own index from out_doc_id() (and, if it distinguishes headers at
+     * all, from is_header on its own stored rows) to the rows it wrote, built at write time.
+     * @param out_doc_id same id on_block_store()/on_failed_block_store() resolved via
+     * ds_dscr[...].out_doc_id() for this document's own segments -- the key a cb's own bookkeeping
+     * should already be indexed by.
+     * @param no_headers false for UA/SE/VE (the whole document is unusable, undo everything);
+     * true for HE specifically (the header segment's own data is not what needs removing -- every
+     * OTHER segment this document contributed does, since a header semantic failure invalidates
+     * the transactions that depend on it, not the header record itself). TE alone never reaches
+     * this call (see the class-wide doc comment on on_seg_sem_safe_check(): a single non-header
+     * segment failing does not, by itself, reject the whole document the way UA/SE/VE/HE do).
+     * @return on_remove_stored_data()'s own result, UNCHANGED -- same reasoning as
+     * on_block_safe_store()'s own doc comment: a failed rollback leaves invalid data sitting in
+     * permanent storage, which the caller of exec() needs to know about, not just a logged line.
+     */
+    [[nodiscard]] virtual e_void on_remove_stored_data_safe(std::uint64_t out_doc_id, bool no_headers) final
+    { return on_remove_stored_data(out_doc_id, no_headers); }
   protected:
     /**
      * @brief This run's logger -- valid inside every override point below (on_run_start()/
@@ -463,6 +502,12 @@ namespace fsp
                                                        [[maybe_unused]] std::span<const error_info>  errors,
                                                        [[maybe_unused]] segment_pool&                pool,
                                                        [[maybe_unused]] const doc_set_dscr&          ds_dscr)
+    { return {}; }
+    /// @brief Override point for on_remove_stored_data_safe() -- see the class's own doc comment. log() is valid inside this call.
+    /// Unlike most other override points above, this error is NOT swallowed by its _safe_ wrapper -- see on_block_safe_store()'s own
+    /// doc comment for why. No-op by default: a cb that never writes eagerly to storage it can't cheaply roll back some other way
+    /// (e.g. writes only once a document is fully known-good) has nothing to override here.
+    [[nodiscard]] virtual e_void on_remove_stored_data([[maybe_unused]] std::uint64_t out_doc_id, [[maybe_unused]] bool no_headers)
     { return {}; }
 
     /**

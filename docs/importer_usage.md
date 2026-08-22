@@ -16,6 +16,52 @@ point of view, using it comes down to three steps:
 3. Read the result: either a summary of counts, or (if you want more control) a set of callback
    methods that get called live while documents are being processed.
 
+## Table of contents
+
+1. [API description](#1-api-description)
+   1. [`fsp::importer::exec()`](#11-fspimporterexec)
+   2. [`importer_config`](#12-importer_config)
+      1. [`cut_with_validation`](#121-cut_with_validation)
+      2. [`ok_block_flush_size` / `nak_block_flush_size`](#122-ok_block_flush_size--nak_block_flush_size)
+      3. [`cutter_ratio_num` / `cutter_ratio_den`](#123-cutter_ratio_num--cutter_ratio_den)
+      4. [`pool_shard_count`](#124-pool_shard_count)
+   3. [Getting your data out](#13-getting-your-data-out)
+      1. [Attribute paths and field types](#131-attribute-paths-and-field-types)
+      2. [Marking a schema class as a header segment](#132-marking-a-schema-class-as-a-header-segment)
+2. [Callback description](#2-callback-description)
+   1. [Method purpose and parameter semantics](#21-method-purpose-and-parameter-semantics)
+   2. [Document lifecycle, in order](#22-document-lifecycle-in-order)
+   3. [Segment processing order](#23-segment-processing-order)
+      1. [Header segments are processed first](#231-header-segments-are-processed-first)
+      2. [Knowing every segment has been stored, before `on_doc_close()`](#232-knowing-every-segment-has-been-stored-before-on_doc_close)
+      3. [Batch storage hooks](#233-batch-storage-hooks)
+   4. [Callback interface](#24-callback-interface)
+   5. [Run-level and document-level shared data](#25-run-level-and-document-level-shared-data)
+   6. [Callback example](#26-callback-example)
+3. [Simple example](#3-simple-example)
+4. [Complex example](#4-complex-example)
+   1. [The namespace: how the document is cut](#41-the-namespace-how-the-document-is-cut)
+   2. [The class members: what `on_type()` gets](#42-the-class-members-what-on_type-gets)
+   3. [The callback](#43-the-callback)
+   4. [The main program](#44-the-main-program)
+5. [A note on the class hierarchy](#5-a-note-on-the-class-hierarchy)
+6. [Document errors](#6-document-errors)
+   - [What is implemented vs. what remains a proposal](#60-what-is-implemented-vs-what-remains-a-proposal)
+   1. [Error classes](#61-error-classes)
+   2. [Error detection](#62-error-detection)
+   3. [Error notification](#63-error-notification)
+   4. [Error cleanup -- cached data](#64-error-cleanup----cached-data)
+   5. [Error cleanup -- permanent storage](#65-error-cleanup----permanent-storage)
+   6. [Error cleanup -- ongoing](#66-error-cleanup----ongoing)
+7. [Internals](#7-internals)
+   1. [Waiting queues](#71-waiting-queues)
+      1. [The instruction queue (design proposal -- not yet implemented)](#711-the-instruction-queue-design-proposal----not-yet-implemented)
+      2. [Queues that exist today](#712-queues-that-exist-today)
+   2. [Document related structures](#72-document-related-structures)
+      1. [`doc_set_dscr`](#721-doc_set_dscr)
+      2. [`doc_dscr`](#722-doc_dscr)
+      3. [`doc_status_t`](#723-doc_status_t)
+
 ## 1. API description
 
 Everything a caller needs lives in two headers: `importer.hpp` (the entry point) and
@@ -99,7 +145,6 @@ struct importer_config
   std::size_t            cutter_ratio_num = 13;       // advanced tuning, leave at default
   std::size_t            cutter_ratio_den = 6;        // advanced tuning, leave at default
   std::size_t            pool_shard_count = 2;        // advanced tuning, leave at default
-  std::vector<int>       header_seg_types;            // see "Header segments are processed first" below, default: empty
 };
 ```
 
@@ -170,20 +215,6 @@ processing threads, at the cost of some memory/bookkeeping overhead per shard. T
 was found empirically fastest when tested against 1, 3, and 4 shards -- only change this if your
 own measurements show otherwise for your workload.
 
-#### 1.2.5. `header_seg_types`
-
-Which of your `targets` schema classes count as a header segment, expressed as `seg_type()`
-values -- the same integer `result.seg_type()` returns for a processed segment, i.e. each schema
-class's declaration-order index within the namespace you passed to `proc_data_of<^^YourNamespace>
-()` (see [Getting your data out](#13-getting-your-data-out) below and
-[`fsp::materialize_variant<^^YourNamespace>()`](#5-a-note-on-the-class-hierarchy) above for where
-that index comes from). Defaults to empty -- no schema class is treated as a header, and the
-importer processes segments in whatever order they become ready, exactly as if this field didn't
-exist. Listing one or more indices here enables the header-priority queue described in
-[Header segments are processed first](#231-header-segments-are-processed-first) below; a document
-format with no real header concept (or one where processing order genuinely doesn't matter) simply
-leaves this empty.
-
 ### 1.3. Getting your data out
 
 `targets` tells the importer which pieces of an XML document you care about, and what to name
@@ -193,7 +224,7 @@ expression, in a namespace of your own choosing:
 ```cpp
 namespace fsp::work
 {
-  class [[= "/x:Document/FIToFICstmrCdtTrf/x:GrpHdr"]] pacs8_hdr : public fsp::seg_schema
+  class [[= "/x:Document/FIToFICstmrCdtTrf/x:GrpHdr"]] pacs8_hdr : public fsp::hdr_seg_schema
   {
   public:
     [[= "x:GrpHdr/MsgId"]]           str_t     msg_id;
@@ -222,8 +253,12 @@ The two levels of annotation answer two different questions:
 - **Member-level annotation** (`[[= "x:GrpHdr/MsgId"]]` above a field) -- answers "which values
   do I want out of that segment?" It is an XPath relative to the segment's own root (not the whole
   document), and it is what actually gets extracted and handed back to you, inside a
-  `fsp::segment_result&` (see [method purpose and parameter semantics](#21-method-purpose-and-parameter-semantics)
+  `fsp::segment_result&` (see [Method purpose and parameter semantics](#21-method-purpose-and-parameter-semantics)
   below), when that segment is processed.
+- **Base class** (`public fsp::seg_schema` vs. `public fsp::hdr_seg_schema` above `pacs8_hdr`) --
+  answers "is this a header segment?" See
+  [Marking a schema class as a header segment](#132-marking-a-schema-class-as-a-header-segment)
+  below for what that distinction actually does.
 
 Any `prefix:` you use inside these paths (e.g. the `x:` in `x:GrpHdr/MsgId`) is resolved against
 a prefix -> namespace URI table your own namespace must declare, named exactly `ns`:
@@ -331,7 +366,7 @@ unless you specifically expect to exceed `max_values` occurrences.
 called automatically during extraction instead of a plain string-to-value conversion. On success
 the field holds `X`; on failure it holds an index into the owning `segment_result::errors()` (see
 that parameter's own description in
-[method purpose and parameter semantics](#21-method-purpose-and-parameter-semantics) above) -- this
+[Method purpose and parameter semantics](#21-method-purpose-and-parameter-semantics) above) -- this
 is what lets a field validate itself (an IBAN's checksum, an amount's allowed range, a BIC against
 a reference table, ...) entirely inside the schema class, with no extra code in your callback:
 
@@ -393,7 +428,7 @@ using bic_code_t = fsp::value_set_t<bic_codes_tag>;
 Before any segment is processed, populate the set from your own delimiter-separated buffer, via
 `bic_code_t::init(packed_values, delimiter)` -- typically from your own `pipeline_hooks::on_run_init()`
 or `on_run_start()` override (both guaranteed to run on the main thread, strictly before any worker
-thread starts, see [method purpose and parameter semantics](#21-method-purpose-and-parameter-semantics)
+thread starts, see [Method purpose and parameter semantics](#21-method-purpose-and-parameter-semantics)
 above). Prefer `on_run_init()` if the setup can fail (e.g. it reads a database) -- returning an
 error from it stops the run before `on_run_start()`/any document is ever cut:
 
@@ -411,7 +446,46 @@ happen, i.e. for the whole run. Every `parse()` call after `init()` -- there can
 per matching field across every worker thread -- is then just an O(1) hash-set lookup, never
 touching your raw data again.
 
-## 2. callback description
+#### 1.3.2. Marking a schema class as a header segment
+
+`fsp::seg_schema` (the marker base every schema class derives from, see
+[Getting your data out](#13-getting-your-data-out) above) declares one method beyond being a plain
+marker: `static consteval bool is_header()`, which it defines to always return `false`.
+`fsp::hdr_seg_schema` is a second marker base, itself derived from `fsp::seg_schema`, that
+overrides `is_header()` to return `true` instead -- deriving a schema class from `hdr_seg_schema`
+in place of plain `seg_schema` is the whole mechanism for marking that class's segments as headers:
+
+```cpp
+// A plain segment -- seg_schema::is_header() answers false for it.
+class [[= "/Document/x:FIToFICstmrCdtTrf/x:CdtTrfTxInf"]] pacs8_txn : public fsp::seg_schema { /* ... */ };
+
+// A header segment -- hdr_seg_schema::is_header() answers true for it instead.
+class [[= "/x:Document/FIToFICstmrCdtTrf/x:GrpHdr"]] pacs8_hdr : public fsp::hdr_seg_schema { /* ... */ };
+```
+
+`hdr_seg_schema` adds no data members of its own -- it exists purely to carry a different
+`is_header()` answer, so switching a class from `seg_schema` to `hdr_seg_schema` (or back) has no
+effect on that class's own size/layout, and a `hdr_seg_schema`-derived class still satisfies every
+`std::is_base_of_v<seg_schema, T>` check `classes_of()`/`proc_data_of()` run internally (since
+`hdr_seg_schema` itself derives from `seg_schema`) -- it is picked up as an ordinary schema class in
+every respect except this one flag.
+
+`is_header()` being `static consteval` (not a virtual, not an instance method) means the answer is
+a property of the schema class itself, known entirely at compile time -- there is nothing to
+construct, and no way for it to differ between two segments of the same schema class.
+`proc_data_of<^^YourNamespace>()` (see above) reads every schema class's own `is_header()` while it
+walks your namespace and records the answers into `proc_data::is_header`, a `std::vector<bool>`
+indexed the same way `proc_data::xpaths` already is (declaration order, i.e. the same index
+`segment_result::seg_type()` returns for a processed segment) -- this is what `cfg.targets` (built
+by that same call) carries into `exec()`, with nothing left for you to configure separately.
+Marking one or more
+schema classes with `hdr_seg_schema` enables the header-priority queue described in
+[Header segments are processed first](#231-header-segments-are-processed-first) below; a document
+format with no real header concept (or one where processing order genuinely doesn't matter) simply
+never uses `hdr_seg_schema` at all -- every schema class stays a plain `seg_schema`, and that whole
+mechanism is a no-op.
+
+## 2. Callback description
 
 If you only need the summary counts (`res->total_docs()` etc.) and the full lists from
 `get_results()`/`get_errors()`, you don't need a callback at all -- just omit the `hooks`
@@ -420,7 +494,7 @@ happening *while* the import is still running: log progress, apply your own busi
 validation rules, or stream results out to a database as they're produced instead of waiting for
 the whole run to finish.
 
-### 2.1. method purpose and parameter semantics
+### 2.1. Method purpose and parameter semantics
 
 To use callbacks, derive your own class from `fsp::typed_semantic_check<YourClass, ^^YourNamespace>`
 (not from `pipeline_hooks` directly -- this base takes care of some bookkeeping for you, see
@@ -503,7 +577,7 @@ Most document formats (SEPA pain/pacs messages included) have one or more header
 `GrpHdr`) that logically precede a much larger number of transaction segments -- and it's common
 for a cb's own business logic to need the header's data (via `doc_data(doc_ndx)`) before it can
 meaningfully validate a transaction (see [Run-level and document-level shared
-data](#24-run-level-and-document-level-shared-data) below for the `doc_data()` mechanism itself). If
+data](#25-run-level-and-document-level-shared-data) below for the `doc_data()` mechanism itself). If
 header and transaction segments sat in the same ready queue with no distinction, every P-role
 thread could end up busy on transaction segments -- from this document or others -- while the one
 header segment that would unblock them all sits further back in the queue, never picked up because
@@ -512,10 +586,12 @@ nothing prioritizes it.
 fsp-core avoids that with a second, parallel set of ready queues reserved for header segments only
 (sharded the same way as the ordinary ready queues, for the same contention reasons). A cutter
 routes each segment into the header queue or the ordinary queue as it produces it, based on whether
-the segment's own `seg_type()` appears in `importer_config::header_seg_types` (see
-[`header_seg_types`](#125-header_seg_types) above) -- if that list is left at its default, empty
-value, every segment goes into the ordinary queue and this whole mechanism is a no-op. Every P-role
-worker thread, each time it looks for work, checks the header queues (its own shard, then a sweep
+that segment's own schema class derives from `fsp::hdr_seg_schema` rather than plain
+`fsp::seg_schema` (see
+[Marking a schema class as a header segment](#132-marking-a-schema-class-as-a-header-segment)
+above) -- if your namespace declares no `hdr_seg_schema`-derived class at all, every segment goes
+into the ordinary queue and this whole mechanism is a no-op. Every P-role worker thread, each time
+it looks for work, checks the header queues (its own shard, then a sweep
 of the others) *before* it ever looks at the ordinary ready queues; only once no header segment is
 waiting anywhere does it fall through to ordinary segments, exactly as today. Because this check
 happens on every single work-fetch, not just at thread start-up, a header segment can never be
@@ -558,6 +634,35 @@ document's segments has actually left `on_block_store()`/`on_failed_block_store(
 of the four facts happens to become true last. You never need to track or count anything yourself
 to get this guarantee.
 
+#### 2.3.3. Batch storage hooks
+
+`on_block_store()`/`on_failed_block_store()` exist for one specific job: writing large
+numbers of results out to your own storage (a file, a database, a message queue) without doing it
+one segment at a time. Instead of being called per-segment, they are called once a batch has
+piled up -- controlled by `importer_config::ok_block_flush_size` (default 1024) and
+`nak_block_flush_size` (default 128, since failed segments are usually much rarer) -- or once at
+the very end of a worker thread's run, with whatever is left over. You receive the pool slot
+indices for that batch and read the actual data back out via the `segment_pool&`/`doc_set_dscr&`
+parameters you're given. Most callers don't need these two hooks at all; ignore them unless you're
+streaming output to external storage while the import is still running.
+
+A single batch can freely mix segments belonging to different documents (a P-role worker thread
+processes whatever segment comes next, regardless of which document it belongs to), and one
+document's segments can be spread across several batches, even across several worker threads.
+fsp-core tracks, per document, how many of its segments have actually left one of these two hooks,
+against the same total the cutter already knows -- once that count reaches the total, `on_doc_
+stored()` (see [Document lifecycle, in order](#22-document-lifecycle-in-order) above) fires for that
+document, exactly once. You never need to do this counting yourself.
+
+### 2.4. Callback interface
+
+The full catalog of `pipeline_hooks` override points -- every method a `typed_semantic_check`-
+derived callback can override, in one place. The "when" step numbers below (1 through 7) match
+[Document lifecycle, in order](#22-document-lifecycle-in-order) above; hooks with no step number
+either run once per run/worker/document-id rather than as part of that per-document sequence, or
+are the batch storage hooks covered separately in
+[Batch storage hooks](#233-batch-storage-hooks) above.
+
 - **`[[nodiscard]] e_void on_run_init()`**
   - when: once, before `on_run_start()`, can fail
   - usage: fallible one-time setup a package-level cb owns (e.g. read a database into `run_data()`); an error here skips `on_run_start()` and stops the run before any document is cut
@@ -585,7 +690,7 @@ to get this guarantee.
   - usage: resolve an opaque per-document id (e.g. from the file name) once, up front
   - parameters:
     - `path` : `cstr_t` -- the document's own path, exactly as passed to `exec()`
-  - returns: your own opaque id, or `std::nullopt` if you don't resolve one (the default); stored as `doc_dscr::agent_id()`, readable back from any later hook that gets a `doc_dscr`
+  - returns: your own opaque id; stored as `doc_dscr::agent_id()`, readable back from any later hook that gets a `doc_dscr`. `0` is fsp-core's own "unresolved agent" convention -- `pipeline_worker::do_cut()`/`do_validate()` reject such a document (before any cut/validate work) whenever `agent_id() == 0`. **The default (an unoverridden hook) returns `0`, not `std::nullopt`** -- a hook that never overrides this therefore has every document rejected, as a fail-closed default (a hook that genuinely wants every document processed unconditionally must override this and return a non-zero id explicitly, e.g. `return 1;`). `std::nullopt` is still a legitimate return value for a hook that overrides this and, for a specific `path`, cannot decide the agent at all -- distinct from "decided: unresolved" (`0`) -- and `agent_id() == 0` does **not** fire for an unset (`nullopt`) `agent_id()`.
 - **`e_void on_wrk_start(int worker_id, cstr_t thread_name)`** / **`e_void on_wrk_end(int worker_id, cstr_t thread_name)`**
   - when: once per worker thread, when it starts / when it finishes
   - usage: per-thread setup/cleanup, e.g. open/close a database connection
@@ -683,27 +788,7 @@ business rule of its own, its `on_type()` overload still needs to exist, just re
 unconditionally, so that decision is visible in your own source instead of inferred from an
 absence.
 
-#### 2.3.3. Batch storage hooks
-
-`on_block_store()`/`on_failed_block_store()` exist for one specific job: writing large
-numbers of results out to your own storage (a file, a database, a message queue) without doing it
-one segment at a time. Instead of being called per-segment, they are called once a batch has
-piled up -- controlled by `importer_config::ok_block_flush_size` (default 1024) and
-`nak_block_flush_size` (default 128, since failed segments are usually much rarer) -- or once at
-the very end of a worker thread's run, with whatever is left over. You receive the pool slot
-indices for that batch and read the actual data back out via the `segment_pool&`/`doc_set_dscr&`
-parameters you're given. Most callers don't need these two hooks at all; ignore them unless you're
-streaming output to external storage while the import is still running.
-
-A single batch can freely mix segments belonging to different documents (a P-role worker thread
-processes whatever segment comes next, regardless of which document it belongs to), and one
-document's segments can be spread across several batches, even across several worker threads.
-fsp-core tracks, per document, how many of its segments have actually left one of these two hooks,
-against the same total the cutter already knows -- once that count reaches the total, `on_doc_
-stored()` (see [Document lifecycle, in order](#22-document-lifecycle-in-order) above) fires for that
-document, exactly once. You never need to do this counting yourself.
-
-### 2.4. Run-level and document-level shared data
+### 2.5. Run-level and document-level shared data
 
 Besides your own plain member variables (safe per-thread, see the threading note above),
 `typed_semantic_check`/`pipeline_hooks_crtp` give you two more places to keep state, each with a
@@ -812,7 +897,7 @@ constructed and unlocks it automatically when the guard goes out of scope, so th
 `lock()`/`unlock()` pair to remember or get wrong. Access the locked data through the guard with
 `->`/`*`, same as a smart pointer.
 
-### 2.5. calback example
+### 2.6. Callback example
 
 Here is a complete, minimal callback class that counts documents and segments, and applies a
 simple validation rule. The callback below reads `txn.amount`, so first, here is the `fsp::work`
@@ -893,7 +978,7 @@ auto [p, res] = fsp::importer::exec(cfg, xml_paths, xsd_path, hooks);
 For a full working example with every hook overridden, see `src/test/pacs8_cb.hpp`/
 `pacs8_cb.cpp` and `src/test/pacs8-cb.cpp` in this repository.
 
-## 3. simple example
+## 3. Simple example
 
 This is the smallest complete program that imports a set of XML files and prints a summary --
 no callback needed. See `src/test/pacs8.cpp` for the full, buildable version this is based on.
@@ -946,7 +1031,7 @@ That's it: describe your target elements once (`work.hpp`), call `exec()`, check
 a callback class only once you need to react to individual documents/segments while the run is
 still in progress.
 
-## 4. complex example
+## 4. Complex example
 
 This example puts everything from this document together into one working program, based on
 this repository's own `pacs8`/`pacs8-cb` demo (`src/test/work.hpp`, `pacs8_cb.hpp`/`.cpp`,
@@ -984,7 +1069,7 @@ namespace fsp::work
 50000>>` -- a field type with its own built-in range check, applied automatically during
 extraction, before `on_type()` even runs, and reported through `result.errors()` on failure (see
 `result`'s own parameter description in
-[method purpose and parameter semantics](#21-method-purpose-and-parameter-semantics) above). Plain
+[Method purpose and parameter semantics](#21-method-purpose-and-parameter-semantics) above). Plain
 `amount_t` here keeps this example focused on the callback itself.)
 
 ### 4.2. The class members: what `on_type()` gets
@@ -1143,19 +1228,225 @@ You would only override `on_seg_sem_check()` directly (deriving from
 dispatch genuinely doesn't fit what you need -- e.g. a single validation rule that reads generic,
 name-indexed values without caring which schema class they came from. For the overwhelming
 majority of callers, `on_type()` is simpler, is compile-time-checked for missing schema classes
-(see [method purpose and parameter semantics](#21-method-purpose-and-parameter-semantics) above), and
+(see [Method purpose and parameter semantics](#21-method-purpose-and-parameter-semantics) above), and
 is what every example in this document uses.
 
-## 6. Internals
+## 6. Document errors
 
-Everything above is what a caller needs. This section documents two of fsp-core's own internal
-data structures, `doc_set_dscr` and `doc_dscr` (both `#include "doc_set_dscr.hpp"`/
-`"doc_dscr.hpp"`) -- useful background if you're reading fsp-core's own source, or if a hook
+> **Parts of this section are implemented; the rest remains a design proposal.** See
+> [6.0](#60-what-is-implemented-vs-what-remains-a-proposal) immediately below for exactly which is
+> which. `doc_status_t` (see [7.2.3](#723-doc_status_t)) still carries its original four
+> `three_state` facts (syntax/valid/semantic/stored) with one aggregate `ok()`/`status()`
+> verdict, UNCHANGED -- the UA/SE/VE/HE/TE taxonomy below is implemented as an ADDITIONAL,
+> orthogonal `error_class` bitmask alongside those four facts, not a replacement for them, and not
+> the five-way bitmask-as-primary-state design 6.1 originally sketched. The per-document
+> instruction queues (6.3/6.4) and the HE-specific "non-header only" narrowing of in-flight
+> skipping (6.6) remain unimplemented proposals.
+
+### 6.0. What is implemented vs. what remains a proposal
+
+**Implemented:**
+
+- **`fsp::error_class`** (`doc_dscr.hpp`) -- an `enum class : std::uint8_t` with one bit per class
+  (`ua`/`se`/`ve`/`he`/`te`). `doc_status_t::mark_error(error_class)` OR's a bit in; `error_mask()`/
+  `has_error(error_class)` read it back. Purely additive: `status()`/`ok()`/`syntax_status()`/etc.
+  are computed exactly as before this existed, from the original four `three_state` facts only --
+  `error_mask_` is a second, independent record of WHICH class(es) of error a document was marked
+  with, not a new source of truth for whether it passed. A document can accumulate more than one
+  bit over its lifetime (e.g. a failed transaction segment recorded as `te`, followed later by the
+  header itself also failing as `he`).
+- **UA/SE/VE marking** -- `pipeline_worker::do_cut()`/`do_validate()` call `pipeline::report_error_class()`
+  (which wraps `mark_error()`) at each of their own three rejection sites: `agent_id()==0` (`ua`), a
+  well-formedness failure from either C or V (`se`), a genuine XSD schema violation from V (`ve`).
+  See [pipeline_worker.cpp](../src/importer/pipeline_worker.cpp).
+- **HE/TE marking** -- `pipeline::check_segment_semantics()` looks up the FAILING segment's own
+  `subtree_type()` against `cfg_.targets.is_header` (the same vector `hdr_seg_schema`-derived
+  classes compile into, see [1.3.2](#132-marking-a-schema-class-as-a-header-segment)) the moment
+  `on_type()` returns `false`, and marks `he` or `te` accordingly. This fires independently of
+  `doc_status_t::semantic_` itself -- `semantic_` is set separately, once, from
+  `on_doc_sem_check()`'s own document-wide verdict (see [2.3](#23-segment-processing-order)) -- so
+  `has_error(error_class::he)` can already be `true` while `semantic_status()` is still `unknown`
+  or even `valid`, if the cb's own `on_doc_sem_check()` doesn't itself factor the segment failure
+  in. A lone `te` does not, by itself, reject the document (see [pipeline_hooks.hpp](../src/importer/pipeline_hooks.hpp)'s
+  own doc comment on `on_remove_stored_data_safe()` for why).
+- **`on_remove_stored_data(out_doc_id, no_headers)`** (see [2.4](#24-callback-interface)) -- a real
+  hook, called via `pipeline::report_error_class()` the FIRST time any `error_class` bit is ever
+  recorded for a document (`mark_error()`'s own return value distinguishes "first bit" from
+  "another bit on an already-marked document"), so it fires **at most once per document**, for
+  UA/SE/VE/HE (never for a lone TE). `no_headers` is `false` for UA/SE/VE (the whole document is
+  unusable), `true` for HE (only the header record itself is not what needs removing). fsp does
+  not track which of a cb's own writes belong to `out_doc_id` -- that indexing, and how the cb
+  interprets `no_headers`, is entirely the cb's own responsibility, the same way `on_block_store()`'s
+  own writes already are. A failed rollback (returned as an error) is logged and the run continues
+  -- same "log and move on" handling as a failed `on_block_store()` call, not a fatal, run-stopping
+  error (see [xml_worker.cpp](../src/importer/xml_worker.cpp)'s `flush_ok_block()`).
+- **`doc_dscr::rejected()`'s lock-free fast path** -- `doc_status_t::rejected()` is now a plain
+  `std::atomic<bool>` (relaxed load), set (also relaxed, one-way, never reset) from inside
+  `set_field()` the moment any of `syntax_`/`valid_`/`semantic_` first turns invalid, instead of
+  computing `status() == three_state::invalid` on every call. `status()` itself, and every other
+  reader of the four `three_state` facts, is unchanged -- only this one, per-segment hot-path
+  question moved off `status()`'s own `std::scoped_lock`. See `xml_worker::process_one()`'s own
+  `rejected()` call for where this matters at scale (checked once per segment, so a mutex there
+  would be paid millions of times per run for a question that is "no" the overwhelming majority of
+  the time).
+- **Tests** -- direct, pipeline-free coverage of `error_class`/`mark_error()`/`error_mask()`/
+  `has_error()`/`rejected()` in `test_doc_status_t.cpp`; end-to-end pipeline coverage (UA, SE, VE,
+  HE, TE, and a multi-class-on-one-document case, each asserting both the resulting `error_mask()`
+  and whether/how `on_remove_stored_data_safe()` fired) in `test_pipeline_stages.cpp`.
+
+**Still a proposal, not implemented:**
+
+- The original **five-class bitmask-as-primary-state** design 6.1 first sketched (`|= UA` etc. as
+  the document's OWN state, not an addition alongside `doc_status_t`'s four facts). What's
+  implemented instead keeps `doc_status_t`'s four-fact model as the sole source of truth for
+  pass/fail, with `error_class` purely as an additional annotation -- see "Implemented" above.
+- Any **instruction queue** (the "(1)"/"(2)" queues in 6.3/6.4) that pushes a live signal to other
+  threads the moment an error is detected. `xml_worker::process_one()`'s existing poll
+  (`rejected()`, checked per segment) remains the only cleanup-triggering mechanism; C
+  (`do_cut()`)/V (`do_validate()`) still only check `agent_id()`/`failed()` against the ONE
+  document they are about to start on, not a per-role "clean up before next assignment" checkpoint
+  -- see 6.0's earlier gap-analysis discussion for the full reasoning on why a push queue was not
+  judged worth its added complexity over the existing poll.
+- The **HE-specific "non-header segments only" narrowing** of in-flight skipping (6.6). Today,
+  `xml_worker::process_one()`'s `rejected()` check is document-wide: once ANY error class rejects a
+  document (including HE), every remaining segment of that document is skipped uniformly -- there
+  is no code path that still processes a document's remaining HEADER segment(s) while skipping only
+  its non-header ones. (`on_remove_stored_data()`'s own `no_headers=true` for HE only tells a cb
+  what to remove from storage it ALREADY wrote before the rejection was known -- it does not change
+  which in-flight segments C/V/P still process afterward.)
+- **Per-error-class differentiated skip rules for V/C/P** (6.6's `{UA, SE, VE(?), HE}` vs.
+  `{UA, SE, VE}` sets) beyond the single, uniform `rejected()` boolean.
+
+FSP is intended for fast SEPA/XML processing, but errors are part of the real-world workload it has
+to handle. The system is capable of detecting several classes of error; how that's reflected for a
+specific use case is up to the application programmer.
+
+### 6.1. Error classes
+
+1. **UA** -- unknown agent: the document arrived through an unknown agent that cannot be trusted.
+   Stop processing as soon as possible.
+2. **SE** -- syntax error: the document is not XML-compliant. Nothing about it can be assumed, so
+   it should be dropped immediately rather than spend further resources on it.
+3. **VE** -- validation error: the document failed XSD validation. Same category of error as a
+   syntax error, with the same consequences.
+4. **HE** -- header semantic error: the header is what shapes the whole document.
+5. **TE** -- transaction semantic error.
+
+### 6.2. Error detection
+
+1. **UA** -- detected by `pipeline_hooks::get_doc_agent_id(cstr_t path)`, so what counts as
+   "unknown agent" is an application-programmer decision. Detected on the main thread.
+2. **SE** -- detected by the cutter (C thread/worker) -- a SAX error.
+3. **VE** -- detected by the validator (V thread/worker) or by the cutter (C thread/worker) -- an
+   XSD error.
+4. **HE** -- detected by the segment semantic check (`on_type()`) -- checked by the pipeline after
+   `on_type()` finishes and its `true`/`false` result is available. A `false` result on the header
+   segment makes it HE.
+5. **TE** -- detected by the segment semantic check (`on_type()`) -- checked by the pipeline after
+   `on_type()` finishes and its `true`/`false` result is available. A `false` result on a
+   non-header segment makes it TE.
+
+### 6.3. Error notification
+
+1. **UA** -- detected by the main thread.
+   1. No need to notify other threads.
+   2. Document state: `|= UA`.
+2. **SE** -- detected by the cutter.
+   1. Signal other threads (instruction queue (1)) to drop processing of the document with a
+      syntax error.
+   2. Document state: `|= SE`.
+3. **VE** -- detected by the cutter or the validator.
+   1. Signal other threads (instruction queue (1)) to drop processing of the document with a
+      validation error.
+   2. Document state: `|= VE`.
+4. **HE** -- detected by the pipeline, after the header segment type comes back with a `false`
+   result.
+   1. Signal other threads (instruction queue (2)) to drop processing of the document's
+      non-header segments.
+   2. Document state: `|= HE`.
+5. **TE** -- detected by the pipeline, after a non-header segment type comes back with a `false`
+   result.
+   1. No need to notify other threads.
+   2. Document state: `|= TE`.
+
+### 6.4. Error cleanup -- cached data
+
+A thread needs to clean up its own cached data that hasn't yet been written to permanent storage.
+Each thread receives instructions via its own instruction queue:
+
+- `1` -- clear the document's data (all segments).
+- `2` -- clear the document's non-header data (only non-header segments).
+
+### 6.5. Error cleanup -- permanent storage
+
+Call the `on_remove_stored_data(doc_id, type)` callback (`type` being `all` or `non-header`). This
+hook is called by the pipeline/thread that detected the error.
+
+### 6.6. Error cleanup -- ongoing
+
+After the initial cleanup, some segments belonging to erroneous documents may still be in flight --
+threads need to check each segment before processing it and skip it if necessary:
+
+- **Validator** -- skips documents with `{UA, SE, VE(?), HE}`.
+- **Cutter** -- skips documents with `{UA, SE, VE(?), HE}`.
+- **Processor (P thread)**:
+  - skips non-header segments belonging to documents with `{UA, SE, VE, HE}`;
+  - skips all segments belonging to documents with `{UA, SE, VE}`.
+
+## 7. Internals
+
+Everything above is what a caller needs. This section documents internal
+data structures. Useful background if you're reading fsp-core's own source, or if a hook
 signature hands you one of these and you want to know exactly what else it offers beyond the
 handful of accessors this document already covers inline (`dscr.path()`, `verdict.ok()`, and so
 on).
 
-### 6.1. `doc_set_dscr`
+### 7.1. Waiting queues
+
+The pipeline coordinates its C(cutter)/V(validator)/P(processor) worker threads through a set of
+`lock_queue<T>` instances (`lock_queue.hpp`) -- a mutex + condition-variable queue with blocking
+`pop()`, non-blocking `try_pop()`, and a `finished`/`aborted` shutdown state every queue in this
+section shares (see `lock_queue.hpp`'s own doc comments for the full API). This subsection lists
+every queue actually instantiated in the pipeline today.
+
+#### 7.1.1. The instruction queue (design proposal -- not yet implemented)
+
+> As with the still-unimplemented parts of [6. Document errors](#6-document-errors) above (see its
+> own [6.0](#60-what-is-implemented-vs-what-remains-a-proposal)), this subsection describes a
+> possible future mechanism, not something that exists in the code. None of the queues in
+> [7.1.2](#712-queues-that-exist-today) below carry instruction-queue-shaped entries
+> (`sender`/`i_type`/`data`) -- this is kept here only because it's the cross-thread notification
+> mechanism section 6's own still-unimplemented parts would depend on.
+
+The instruction queue is a way to propagate instructions from one thread to every other thread. It
+would be made of N queues, where N is the number of worker threads the importer runs. If thread `i`
+wants to instruct the other threads, it would fill the instruction into every instruction queue
+except its own (the `i`-th one).
+
+Proposed queue entry shape:
+
+- `sender` (`uint16_t`) -- id of the sending thread.
+- `i_type` (`uint8_t`) -- instruction type/code: `1` = clear document data, `2` = clear document
+  non-header data.
+- `data` (`uint32_t`) -- data associated with the instruction; its meaning depends on `i_type`.
+
+#### 7.1.2. Queues that exist today
+
+| Attribute                       | Type                                                  | Semantics                                                                                                                                                                                                                                              |
+| -------------------------------- | ------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pipeline::c_queue_`             | `lock_queue<std::size_t>`                               | Document indices waiting to be cut (C). One instance, shared by every worker thread; `try_pop_cut()`/`pipeline_worker::do_cut()` drain it, `pipeline::seed_queues()` fills it once at run start. |
+| `pipeline::v_queue_`             | `lock_queue<std::size_t>`                               | Document indices waiting to be validated (V), only used in separate-pass mode (see [`cut_with_validation`](#121-cut_with_validation)). One instance, shared by every worker thread; `try_pop_validate()`/`pipeline_worker::do_validate()` drain it. |
+| `segment_pool::ready_queues_`    | `std::vector<lock_queue<std::size_t>>` (one per shard) | Ordinary (non-header) segment slot indices ready for a P-role thread to process, produced by the cutter's `Handler::endElement()` via `push_ready()`. Sharded by `importer_config::pool_shard_count` to cut lock contention between concurrent C/P threads (see [`pool_shard_count`](#124-pool_shard_count)); a thread tries its own shard first, then sweeps the others. |
+| `segment_pool::header_ready_queues_` | `std::vector<lock_queue<std::size_t>>` (one per shard) | Same role as `ready_queues_`, but only for segments whose schema class derives from `hdr_seg_schema` (see [1.3.2](#132-marking-a-schema-class-as-a-header-segment)). Every P-role thread drains this set first, before ever looking at `ready_queues_`, so a header segment can never be starved behind an unbounded pile of ordinary ones (see [2.3.1](#231-header-segments-are-processed-first)). |
+| `segment_pool::free_queues_`     | `std::vector<lock_queue<std::size_t>>` (one per shard) | Pool slot indices no longer in use, ready to be handed back out by `acquire_slot()`. A P-role thread pushes a slot back here (`release_slots()`) once it's fully done with a segment (past any storage hook); the cutter pops from here before ever growing the pool's own high-water mark. |
+
+`segment_pool.hpp` also declares a `using ndx_queue = lock_queue<std::size_t>;` alias and
+`xml_worker.hpp` a `using segment_queue = lock_queue<xml_segment>;` one -- neither backs an actual
+member of any class; they're unused type aliases, not additional queues.
+
+### 7.2. Document related structures
+
+#### 7.2.1. `doc_set_dscr`
 
 The whole-run collection of documents: one `doc_dscr` per XML file passed to `exec()`, plus the
 (optional) XSD grammar document. `pipeline_hooks::on_run_start()`/`on_run_end()` are handed a
@@ -1196,10 +1487,10 @@ in a restricted sense (`operator=(doc_set_dscr&&)` is deleted -- only constructi
 | `[[nodiscard]] const std::vector<doc_dscr>& doc_set() const` / non-const overload  | direct access to the underlying vector, for callers that need vector-specific operations the wrapper above doesn't expose              |
 | `[[nodiscard]] cstr_t xsd_file() const`                                            | the grammar document's own path, or `""` if `has_grammar()` is false                                                                   |
 
-### 6.2. `doc_dscr`
+#### 7.2.2. `doc_dscr`
 
 One document's own descriptor: the memory-mapped file itself (`mmap_file`), its syntax/
-validation/semantic/stored verdict (a `doc_status_t`, see [6.3](#63-doc_status_t) below), the
+validation/semantic/stored verdict (a `doc_status_t`, see [7.2.3](#723-doc_status_t) below), the
 first error recorded against it (if any), and the two caller-assigned opaque ids
 (`out_doc_id()`/`agent_id()`) a hook can attach to it. This is the type every `dscr`/`doc_dscr&`
 parameter throughout [2. callback description](#2-callback-description) above refers to.
@@ -1211,12 +1502,12 @@ Non-copyable, move-only. `close()`/destruction close the underlying `mmap_file` 
 | Member           | Type                          | Meaning                                                                                                              |
 | ---------------- | ----------------------------- | -------------------------------------------------------------------------------------------------------------------- |
 | `doc_`           | `mmap_file`                   | the memory-mapped document itself -- byte access, `path()`, `string_view()`, etc. all forward to this                |
-| `status_`        | `doc_status_t`                | syntax/validation/semantic/stored verdict and completion logic, see [6.3](#63-doc_status_t) below                    |
+| `status_`        | `doc_status_t`                | syntax/validation/semantic/stored verdict and completion logic, see [7.2.3](#723-doc_status_t) below                    |
 | `err_mutex_`     | `std::mutex`                  | guards `err_set_`/`err_` against the first-writer-wins race described under `note_error_once()` below                |
 | `err_set_`       | `bool`                        | `true` once a failure reason has been recorded (`note_error_once()` has run at least once)                           |
 | `err_`           | `error_info`                  | the recorded failure reason -- whichever of `set_syntax_result()`/`set_validation_result()` reported a failure first |
 | `out_doc_id_`    | `std::uint64_t`               | caller-assigned output document id, see `get_doc_id()`; `0` until set                                                |
-| `agent_id_`      | `std::optional<std::int16_t>` | caller-assigned agent id, see `get_doc_agent_id()`; `std::nullopt` until set                                         |
+| `agent_id_`      | `std::optional<std::int16_t>` | caller-assigned agent id, see `get_doc_agent_id()`; set exactly once, in `pipeline::add_documents()`, to whatever that call returned -- `0` unless the hook overrides it (see `get_doc_agent_id()`'s own doc comment) |
 | `open_reported_` | `mutable std::atomic<bool>`   | `true` once `on_doc_safe_open()` has returned for this document, see `mark_opened()`/`is_opened()` below             |
 
 **Methods:**
@@ -1240,7 +1531,7 @@ Non-copyable, move-only. `close()`/destruction close the underlying `mmap_file` 
 | `void prefetch(size_t offset, size_t count = mmap_file::prefetch_size) const noexcept`                                               | hints the OS to page in `[offset, offset+count)` ahead of an upcoming read                                                                                                                                                                        |
 | `[[nodiscard]] explicit operator bool() const noexcept`                                                                              | `is_open()`                                                                                                                                                                                                                                       |
 | `[[nodiscard]] const mmap_file& mmf() const noexcept` / non-const overload                                                           | direct access to the underlying `mmap_file`, for advanced use beyond the forwarding accessors above                                                                                                                                               |
-| `[[nodiscard]] doc_status_t& status() noexcept` / `const` overload                                                                   | the live `doc_status_t` itself (a reference, not a snapshot -- `doc_status_t` is non-copyable), see [6.3](#63-doc_status_t) below                                                                                                                 |
+| `[[nodiscard]] doc_status_t& status() noexcept` / `const` overload                                                                   | the live `doc_status_t` itself (a reference, not a snapshot -- `doc_status_t` is non-copyable), see [7.2.3](#723-doc_status_t) below                                                                                                                 |
 | `[[nodiscard]] bool failed() const noexcept`                                                                                         | `true` once syntax or validation is already known invalid (semantic_ deliberately excluded -- see its own doc comment); the C/P "already known invalid, skip this segment" precondition                                                           |
 | `[[nodiscard]] bool rejected() const noexcept`                                                                                       | `true` once ANY of syntax/validation/semantic is known invalid (semantic_ included, unlike `failed()`); the flush-time "drop this segment, its document is already doomed" predicate                                                              |
 | `[[nodiscard]] bool set_syntax_result(bool ok, bool folded_validation, error_info err = {}) noexcept`                                | reported by C once cutting finishes; `folded_validation` selects whether this call alone also sets validation (see its own doc comment for the folded-vs-separate-V rule); returns `true` iff this call must go on to call `hooks.on_doc_close()` |
@@ -1253,7 +1544,7 @@ Non-copyable, move-only. `close()`/destruction close the underlying `mmap_file` 
 | `void mark_opened() const noexcept`                                                                                                  | records that `on_doc_safe_open()` has returned for this document (called once, by `pipeline_worker::do_cut()`)                                                                                                                                    |
 | `[[nodiscard]] bool is_opened() const noexcept`                                                                                      | `true` once `mark_opened()` has run; guards against V racing ahead of C and observing a document that hasn't been opened yet (see its own doc comment)                                                                                            |
 
-### 6.3. `doc_status_t`
+#### 7.2.3. `doc_status_t`
 
 The mutex-protected, four-fact completion gate behind `doc_dscr::status()` -- owns the
 syntax/validation/semantic/stored verdicts (each a [`three_state`](#three_state) below) AND the

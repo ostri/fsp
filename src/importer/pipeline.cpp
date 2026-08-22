@@ -57,7 +57,43 @@ namespace fsp
     const auto doc_ndx  = static_cast<std::size_t>(result.doc_ndx());
     auto&      counters = (*doc_counters_)[doc_ndx];
     const auto pos      = counters.begin_segment(result.seg_id());
-    return hooks.on_seg_sem_safe_check(segment, ds_dscr_[doc_ndx], result, pos.is_first, pos.is_last);
+    const bool ok       = hooks.on_seg_sem_safe_check(segment, ds_dscr_[doc_ndx], result, pos.is_first, pos.is_last);
+    // error_class::he/te -- recorded here, not inside doc_status_t::set_semantic() (which only
+    // ever sees the document-wide on_doc_sem_check() verdict, never an individual segment's own
+    // outcome), since this is the one place that has BOTH the failing segment's own header/
+    // non-header identity (segment.subtree_type(), looked up against cfg_.targets.is_header --
+    // the same vector hdr_seg_schema compiles into, see parsing_util.hpp's own doc comment on
+    // proc_data::is_header) AND its semantic verdict, at the same time. A document can accumulate
+    // BOTH bits over its lifetime (e.g. one non-header segment already failed as TE before the
+    // header segment itself later fails as HE too) -- see doc_status_t::mark_error()'s own doc
+    // comment on why that's fine. no_headers=true only for HE (a header semantic failure -- see
+    // on_remove_stored_data_safe()'s own doc comment on why TE alone never reaches here at all:
+    // a single failed non-header segment does not, by itself, reject the whole document).
+    if (! ok)
+    {
+      const bool is_header_segment = cfg_.targets.is_header[static_cast<std::size_t>(segment.subtree_type())]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- subtree_type() is always a valid index into is_header, set by doc_cutter at cut time
+      // Not propagated as a fatal, run-stopping error (see report_fatal_error()) -- same "log and
+      // move on" handling as on_block_safe_store()'s own error (see xml_worker::flush_ok_block()):
+      // a rollback failing for one document's storage is that document's own problem, not a reason
+      // to abort every other document still in flight.
+      if (is_header_segment)
+      {
+        if (auto res = report_error_class(doc_ndx, error_class::he, true, hooks); ! res)
+          log_.error(fmt::format("on_remove_stored_data() failed for doc {} (HE): {}", doc_ndx, res.error().to_string()));
+      }
+      else
+      {
+        // TE alone never triggers on_remove_stored_data_safe() -- see error_class::te's own doc
+        // comment: a single failed non-header segment does not reject the whole document, so
+        // there is nothing to roll back yet (mark_error() below still records the bit, for
+        // status()-adjacent diagnostics, but intentionally does not go through
+        // report_error_class(), which fires the rollback hook). Its own bool return (whether this
+        // was the first error class ever recorded) is of no use here -- report_error_class() is
+        // the one call site that acts on it.
+        std::ignore = ds_dscr_[doc_ndx].mark_error(error_class::te);
+      }
+    }
+    return ok;
   }
 
   void pipeline::finish_segment(std::size_t doc_ndx, bool semantically_ok, pipeline_hooks& hooks)
@@ -166,6 +202,12 @@ namespace fsp
     auto&                  slot = doc_data_active_[doc_ndx]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
     doc_data_free_.push_back(slot);
     slot = nullptr;
+  }
+
+  e_void pipeline::report_error_class(std::size_t doc_ndx, error_class cls, bool no_headers, pipeline_hooks& hooks)
+  {
+    if (! ds_dscr_[doc_ndx].mark_error(cls)) return {}; // not the first error class recorded for this document -- already fired below
+    return hooks.on_remove_stored_data_safe(ds_dscr_[doc_ndx].out_doc_id(), no_headers);
   }
 
   void pipeline::report_syntax_result(std::size_t doc_ndx, bool ok, pipeline_hooks& hooks, error_info err)

@@ -235,6 +235,16 @@ namespace
     std::atomic<std::int16_t> hdr_agent_id_value{0};
     std::atomic<bool>         txn_agent_id_has_value{false};
     std::atomic<std::int16_t> txn_agent_id_value{0};
+    // What on_type(hdr,...)/on_type(txn,...) below should return -- true (the default) for every
+    // existing scenario in this file; a HE/TE-class TEST_CASE flips one of these to false to force
+    // that specific segment kind's own semantic check to fail.
+    std::atomic<bool> hdr_verdict{true};
+    std::atomic<bool> txn_verdict{true};
+    // on_remove_stored_data_safe()'s own (out_doc_id, no_headers) arguments, captured the same way
+    // doc_close_err_message is above -- checked by the error_class-related TEST_CASEs below.
+    std::atomic<int>  remove_stored_data_calls{0};
+    std::atomic<std::uint64_t> remove_stored_data_out_doc_id{0};
+    std::atomic<bool>          remove_stored_data_no_headers{false};
     std::mutex                doc_close_err_mutex;   // guards doc_close_err_message (plain string, not lock-free)
     fsp::str_t                doc_close_err_message; // last on_doc_close()'s own err.message(), verbatim
     // --- on_doc_stored()/on_doc_close() ordering + per-document accounting (see the on_doc_stored
@@ -308,7 +318,7 @@ namespace
         state_->hdr_agent_id_has_value.store(true, std::memory_order_relaxed);
       }
       on_any_segment();
-      return true;
+      return state_->hdr_verdict.load(std::memory_order_relaxed);
     }
     [[nodiscard]] bool on_type(const fsp::work::pacs8_txn& /*txn*/,
                                std::string_view     raw_msg,
@@ -327,7 +337,7 @@ namespace
         state_->txn_agent_id_has_value.store(true, std::memory_order_relaxed);
       }
       on_any_segment();
-      return true;
+      return state_->txn_verdict.load(std::memory_order_relaxed);
     }
   protected:
     bool on_doc_sem_check(std::size_t doc_ndx) override
@@ -380,6 +390,17 @@ namespace
     // calls this hook and stores its result into doc_dscr::agent_id() BEFORE any worker thread
     // starts (same call site/ordering as get_doc_id(), see pipeline_hooks.hpp's own doc comment).
     [[nodiscard]] std::optional<std::int16_t> get_doc_agent_id(fsp::cstr_t /*path*/) override { return resolved_agent_id_; }
+    // Records the (out_doc_id, no_headers) pipeline::report_error_class() resolved -- see
+    // pipeline_hooks.hpp's own doc comment on on_remove_stored_data_safe() for the full contract.
+    // A single-document TEST_CASE only ever expects this to fire once (see doc_status_t::
+    // mark_error()'s own "first error class only" doc comment), so no per-document indexing here.
+    [[nodiscard]] fsp::e_void on_remove_stored_data(std::uint64_t out_doc_id, bool no_headers) override
+    {
+      state_->remove_stored_data_calls.fetch_add(1, std::memory_order_relaxed);
+      state_->remove_stored_data_out_doc_id.store(out_doc_id, std::memory_order_relaxed);
+      state_->remove_stored_data_no_headers.store(no_headers, std::memory_order_relaxed);
+      return {};
+    }
   private:
     // Common tail for both on_type() overloads above -- const because on_type() itself is const
     // (typed_semantic_check's own contract), but state_ is a shared_ptr to shared, atomically
@@ -392,6 +413,29 @@ namespace
     }
     std::shared_ptr<shared_state> state_;
     std::optional<std::int16_t>   resolved_agent_id_; // what get_doc_agent_id() resolves every document's path to
+  };
+
+  // Minimal hooks class that does NOT override get_doc_agent_id() at all -- unlike stage_test_hooks
+  // above (which always overrides it, even to explicitly return std::nullopt), this is the only way
+  // to exercise pipeline_hooks::get_doc_agent_id()'s own, truly-unoverridden default body (see its
+  // own doc comment in pipeline_hooks.hpp on why that default is 0, not std::nullopt).
+  class no_agent_override_hooks : public fsp::typed_semantic_check<no_agent_override_hooks, ^^fsp::work>
+  {
+  public:
+    [[nodiscard]] bool on_type(const fsp::work::pacs8_hdr& /*hdr*/,
+                               std::string_view /*raw_msg*/,
+                               const fsp::doc_dscr& /*dscr*/,
+                               fsp::segment_result& /*result*/,
+                               bool /*is_first*/,
+                               bool /*is_last*/) const
+    { return true; }
+    [[nodiscard]] bool on_type(const fsp::work::pacs8_txn& /*txn*/,
+                               std::string_view /*raw_msg*/,
+                               const fsp::doc_dscr& /*dscr*/,
+                               fsp::segment_result& /*result*/,
+                               bool /*is_first*/,
+                               bool /*is_last*/) const
+    { return true; }
   };
 
   fsp::importer_config make_cfg(std::string_view app_name, std::size_t num_of_workers)
@@ -448,6 +492,12 @@ TEST_CASE("pipeline: V failing before P finishes discards the document's segment
   CHECK(status.syntax_status() == fsp::three_state::invalid); // schema failure drags syntax invalid too (point 14)
   CHECK(status.valid_status() == fsp::three_state::invalid);
   CHECK(status.semantic_status() == fsp::three_state::valid); // on_doc_sem_check() default verdict (true) still ran
+  // A genuine XSD schema violation (duplicated InstgAgt, see well_formed_schema_invalid_doc()) is
+  // error_class::ve, not error_class::se -- the document IS well-formed XML, just schema-invalid.
+  CHECK(ds_dscr[0].has_error(fsp::error_class::ve));
+  CHECK_FALSE(ds_dscr[0].has_error(fsp::error_class::se));
+  CHECK(state->remove_stored_data_calls.load() == 1);
+  CHECK_FALSE(state->remove_stored_data_no_headers.load());
 
   // The document's segments were discarded (pipeline::discard_invalid_doc_results() +
   // xml_worker::process_one()'s own "document invalid, skip" path) -- neither results() nor
@@ -495,12 +545,22 @@ TEST_CASE("pipeline: C failing on ill-formed XML discards segments and still clo
   // which of C/V happens to be the one that reports it first.
   const auto code = ds_dscr[0].error().code();
   CHECK((code == fsp::processor_error::parse_failed || code == fsp::processor_error::xsd_validation_failed));
+  // error_class::se, from whichever of C/V actually reports this well-formedness problem first --
+  // see the SE/VE branches in pipeline_worker.cpp's do_cut()/do_validate() for why this is always
+  // se here, never ve (both branches classify a well-formedness failure as se, an XSD schema
+  // violation as ve -- this fixture is ill-formed, not merely schema-invalid).
+  CHECK(ds_dscr[0].has_error(fsp::error_class::se));
+  CHECK_FALSE(ds_dscr[0].has_error(fsp::error_class::ve));
+  CHECK_FALSE(ds_dscr[0].has_error(fsp::error_class::ua));
 
   CHECK(p->get_results().empty());
   // on_doc_close() fires exactly once even though the document never produced a single
   // successfully-cut segment.
   CHECK(state->doc_close_calls.load() == 1);
   CHECK_FALSE(state->doc_close_seen_syntax_ok.load());
+  // on_remove_stored_data_safe() fired exactly once, no_headers=false.
+  CHECK(state->remove_stored_data_calls.load() == 1);
+  CHECK_FALSE(state->remove_stored_data_no_headers.load());
 }
 
 // --- Scenario 3: C+P agree the doc-level semantics are wrong while V is still delayed ----------
@@ -571,25 +631,67 @@ TEST_CASE("pipeline: happy path calls on_doc_close exactly once, after syntax+va
   CHECK(p->get_errors().empty());
 }
 
-// --- Scenario 5: get_doc_agent_id()'s default body -- doc_dscr::agent_id() stays nullopt --------
-TEST_CASE("pipeline: get_doc_agent_id()'s default (no override) leaves doc_dscr::agent_id() unset", "[pipeline][stages][agent-id]")
+// --- Scenario 4b: direct, pipeline-free unit check that fsp::pipeline_hooks::get_doc_agent_id()'s
+// own base-class body -- called straight on a plain fsp::no_op_hooks instance, no exec()/cutting/
+// validation involved at all -- returns 0, not std::nullopt (see pipeline_hooks.hpp's own doc
+// comment on why 0, the fail-closed default, replaced the old std::nullopt one). Scenario 5 below
+// is the integration-level counterpart (proves the SAME default rejects a document end-to-end via
+// the real pipeline) -- this one isolates just the virtual call itself. ---------------------------
+TEST_CASE("pipeline_hooks: get_doc_agent_id()'s own base-class default body returns 0", "[pipeline_hooks][agent-id]")
+{
+  fsp::no_op_hooks hooks;
+  const auto       result = hooks.get_doc_agent_id("irrelevant/path.xml");
+  REQUIRE(result.has_value());
+  CHECK(*result == 0);
+}
+
+// --- Scenario 5: get_doc_agent_id()'s truly-unoverridden default body returns 0 (fsp-core's own
+// "unresolved agent" convention), NOT std::nullopt -- a hook that never touches this override point
+// at all therefore has every document rejected before any cut/validate work, as a fail-closed
+// default (see pipeline_hooks.hpp's own doc comment on why this default changed from std::nullopt).
+// Needs no_agent_override_hooks, not stage_test_hooks -- see its own doc comment on why. -----------
+TEST_CASE("pipeline: get_doc_agent_id()'s truly-unoverridden default (0) rejects the document", "[pipeline][stages][agent-id]")
+{
+  temp_dir_guard dir;
+  const auto     doc_path = dir.write("doc.xml", well_formed_valid_doc());
+
+  no_agent_override_hooks hooks;
+
+  auto cfg      = make_cfg("test-agent-id-unoverridden-default", 1);
+  auto [p, res] = fsp::importer::exec(cfg, std::vector<std::string>{doc_path}, xsd_path(), hooks);
+
+  REQUIRE(res.has_value());
+  const auto& ds_dscr = p->ds_dscr();
+  REQUIRE(ds_dscr[0].agent_id().has_value());
+  CHECK(*ds_dscr[0].agent_id() == 0);
+  CHECK_FALSE(ds_dscr[0].status().ok()); // rejected on the agent_id()==0 convention, same as Scenario 6b below
+}
+
+// --- Scenario 5b: a hook that DOES override get_doc_agent_id(), but explicitly returns
+// std::nullopt (as opposed to never overriding it at all, see Scenario 5 above) -- doc_dscr::
+// agent_id() stays genuinely unset, and the agent_id()==0 rejection does NOT fire for it (unset is
+// not the same as 0, see doc_dscr::agent_id()'s own doc comment) -- the document is processed
+// normally. -------------------------------------------------------------------------------------
+TEST_CASE("pipeline: get_doc_agent_id() explicitly returning std::nullopt leaves doc_dscr::agent_id() unset, "
+          "document processed normally",
+          "[pipeline][stages][agent-id]")
 {
   temp_dir_guard dir;
   const auto     doc_path = dir.write("doc.xml", well_formed_valid_doc());
 
   auto state = std::make_shared<shared_state>();
-  // No resolved_agent_id passed -- stage_test_hooks::get_doc_agent_id() itself still overrides the
-  // hook (returning std::nullopt), but that's functionally identical to inheriting
-  // pipeline_hooks::get_doc_agent_id()'s own no-op default body (see its own doc comment) -- both
-  // paths leave doc_dscr::agent_id() unset for every document.
+  // No resolved_agent_id passed -- stage_test_hooks::get_doc_agent_id() still overrides the hook,
+  // explicitly returning std::nullopt (its own default constructor argument) -- distinct from
+  // Scenario 5 above, which never overrides the hook at all.
   stage_test_hooks hooks(state);
 
-  auto cfg      = make_cfg("test-agent-id-default", 1);
+  auto cfg      = make_cfg("test-agent-id-explicit-nullopt", 1);
   auto [p, res] = fsp::importer::exec(cfg, std::vector<std::string>{doc_path}, xsd_path(), hooks);
 
   REQUIRE(res.has_value());
   const auto& ds_dscr = p->ds_dscr();
   CHECK_FALSE(ds_dscr[0].agent_id().has_value());
+  CHECK(ds_dscr[0].status().ok()); // NOT rejected -- unset agent_id() is not the same as 0
 
   // Both on_type() overloads observed the same unset state through their own dscr parameter.
   CHECK_FALSE(state->hdr_agent_id_has_value.load());
@@ -648,6 +750,12 @@ TEST_CASE("pipeline: get_doc_agent_id()'s resolved 0 rejects the document before
   REQUIRE(ds_dscr[0].agent_id().has_value());
   CHECK(*ds_dscr[0].agent_id() == 0);
   CHECK(ds_dscr[0].failed());
+  CHECK(ds_dscr[0].rejected()); // the lock-free fast path agrees with status().status()==invalid
+  CHECK(ds_dscr[0].has_error(fsp::error_class::ua));
+  CHECK_FALSE(ds_dscr[0].has_error(fsp::error_class::se));
+  CHECK_FALSE(ds_dscr[0].has_error(fsp::error_class::ve));
+  CHECK_FALSE(ds_dscr[0].has_error(fsp::error_class::he));
+  CHECK_FALSE(ds_dscr[0].has_error(fsp::error_class::te));
 
   // Exactly one terminal callback, never a cut/validate/semantic-check attempt.
   CHECK(state->doc_close_calls.load() == 1);
@@ -663,6 +771,11 @@ TEST_CASE("pipeline: get_doc_agent_id()'s resolved 0 rejects the document before
     const std::scoped_lock lock(state->doc_close_err_mutex);
     CHECK(state->doc_close_err_message.find("cut skipped") != fsp::str_t::npos);
   }
+  // on_remove_stored_data_safe() fired exactly once, no_headers=false (UA invalidates the whole
+  // document, header included -- see error_class::ua's own doc comment).
+  CHECK(state->remove_stored_data_calls.load() == 1);
+  CHECK(state->remove_stored_data_out_doc_id.load() == ds_dscr[0].out_doc_id());
+  CHECK_FALSE(state->remove_stored_data_no_headers.load());
 }
 
 // --- Scenario 6c: same as Scenario 6b, with two documents instead of one, both agent_id()==0 -
@@ -885,7 +998,7 @@ TEST_CASE("doc_cutter: every hdr_seg_schema segment is routed into the header qu
   CHECK_FALSE(cfg.targets.is_header[1]); // pacs8_txn : seg_schema
 
   fsp::segment_pool pool(**log_ptr, /*no_of_slots=*/static_cast<std::size_t>(num_txns) + 1, /*num_shards=*/2);
-  fsp::doc_cutter    cutter(cfg, **log_ptr, pool, ds_dscr);
+  fsp::doc_cutter   cutter(cfg, **log_ptr, pool, ds_dscr);
   REQUIRE(cutter.init());
   REQUIRE(cutter.cut(0));
 
@@ -911,5 +1024,119 @@ TEST_CASE("doc_cutter: every hdr_seg_schema segment is routed into the header qu
   CHECK(header_count == 1); // exactly the one GrpHdr segment, never more, never fewer
   CHECK(ordinary_count == static_cast<std::size_t>(num_txns));
   CHECK(cutter.segments_found() == header_count + ordinary_count); // nothing lost, nothing double-counted
+}
+
+// --- Scenario 13: a HEADER segment's own on_type() returning false is error_class::he, not te --
+// pipeline::check_segment_semantics() looks up the FAILING segment's own subtree_type() against
+// cfg_.targets.is_header to tell the two apart (see its own doc comment) -- this proves that
+// lookup actually reaches the right verdict for the header segment specifically, and that HE (like
+// UA/SE/VE) fires on_remove_stored_data_safe() with no_headers=true (only the header record itself
+// is not what needs removing -- see error_class::he's own doc comment). ---------------------------
+TEST_CASE("pipeline: a failing header segment's on_type() is recorded as error_class::he, "
+          "on_remove_stored_data_safe() fires with no_headers=true",
+          "[pipeline][stages][error-class][HE]")
+{
+  temp_dir_guard dir;
+  const auto     doc_path = dir.write("doc.xml", well_formed_valid_doc());
+
+  auto state         = std::make_shared<shared_state>();
+  state->hdr_verdict = false; // only the header segment's own on_type() fails
+  stage_test_hooks hooks(state);
+
+  auto cfg      = make_cfg("test-error-class-he", 2);
+  auto [p, res] = fsp::importer::exec(cfg, std::vector<std::string>{doc_path}, xsd_path(), hooks);
+
+  REQUIRE(res.has_value());
+  const auto& ds_dscr = p->ds_dscr();
+  CHECK(ds_dscr[0].has_error(fsp::error_class::he));
+  CHECK_FALSE(ds_dscr[0].has_error(fsp::error_class::te));
+  CHECK_FALSE(ds_dscr[0].has_error(fsp::error_class::ua));
+  CHECK_FALSE(ds_dscr[0].has_error(fsp::error_class::se));
+  CHECK_FALSE(ds_dscr[0].has_error(fsp::error_class::ve));
+  // error_mask()'s he bit is set here (per-segment, from check_segment_semantics()), independent
+  // of doc_status_t::semantic_ itself: that three_state fact is set separately, once, from
+  // on_doc_sem_check()'s own document-wide verdict (see maybe_finish_seg_processing()) -- which
+  // stage_test_hooks::on_doc_sem_check() here still defaults to true (no override in THIS test),
+  // so semantic_status()/rejected() reflect that document-wide check, not the individual segment
+  // failure error_mask() already recorded. See docs/importer_usage.md's own "Document errors"
+  // section on the two being orthogonal facts, not one derived from the other.
+  CHECK(ds_dscr[0].status().semantic_status() == fsp::three_state::valid);
+  CHECK_FALSE(ds_dscr[0].rejected());
+
+  CHECK(state->remove_stored_data_calls.load() == 1);
+  CHECK(state->remove_stored_data_out_doc_id.load() == ds_dscr[0].out_doc_id());
+  CHECK(state->remove_stored_data_no_headers.load()); // true for HE specifically
+}
+
+// --- Scenario 14: a single failing TRANSACTION (non-header) segment is error_class::te -- unlike
+// UA/SE/VE/HE above, a lone TE does NOT reject the whole document (see check_segment_semantics()'s
+// own doc comment: only the failing segment itself is recorded as semantically wrong, folded into
+// per-segment error tracking, not doc_status_t::semantic_ -- that fact is set later, once, from
+// on_doc_sem_check()'s own document-wide verdict), so on_remove_stored_data_safe() must NOT fire
+// for TE alone. --------------------------------------------------------------------------------
+TEST_CASE("pipeline: a failing non-header segment's on_type() is recorded as error_class::te, "
+          "on_remove_stored_data_safe() does NOT fire for TE alone",
+          "[pipeline][stages][error-class][TE]")
+{
+  temp_dir_guard dir;
+  const auto     doc_path = dir.write("doc.xml", well_formed_valid_doc());
+
+  auto state         = std::make_shared<shared_state>();
+  state->txn_verdict = false; // only the transaction segment's own on_type() fails
+  stage_test_hooks hooks(state);
+
+  auto cfg      = make_cfg("test-error-class-te", 2);
+  auto [p, res] = fsp::importer::exec(cfg, std::vector<std::string>{doc_path}, xsd_path(), hooks);
+
+  REQUIRE(res.has_value());
+  const auto& ds_dscr = p->ds_dscr();
+  CHECK(ds_dscr[0].has_error(fsp::error_class::te));
+  CHECK_FALSE(ds_dscr[0].has_error(fsp::error_class::he));
+  CHECK_FALSE(ds_dscr[0].has_error(fsp::error_class::ua));
+  CHECK_FALSE(ds_dscr[0].has_error(fsp::error_class::se));
+  CHECK_FALSE(ds_dscr[0].has_error(fsp::error_class::ve));
+
+  // TE alone (no on_doc_sem_check() override here, default verdict stays true) does not reject the
+  // document via doc_status_t::semantic_ -- consistent with docs/importer_usage.md's own "Document
+  // errors" section: a single failed transaction is recorded per-segment (already visible in
+  // get_errors() below), not folded into the document-wide verdict.
+  CHECK(ds_dscr[0].status().semantic_status() == fsp::three_state::valid);
+  CHECK_FALSE(ds_dscr[0].rejected());
+  CHECK(state->remove_stored_data_calls.load() == 0); // never fires for TE alone
+
+  // Functional non-regression: the failed transaction segment shows up as an error, the header as
+  // a successful result.
+  CHECK(p->get_results().size() == 1); // header only
+  CHECK(p->get_errors().size() == 1);  // the one failed transaction
+}
+
+// --- Scenario 15: a document that accumulates MULTIPLE error classes over its lifetime (here: both
+// the header AND the transaction segment fail their own on_type(), so both HE and TE end up
+// recorded) -- error_mask() must retain BOTH bits, and on_remove_stored_data_safe() must still fire
+// exactly once (mark_error()'s own "first error class only" rule -- see its doc comment): whichever
+// of the two segments P happens to process first wins that single call, the other's mark_error()
+// call still records its own bit but does not fire the hook again. --------------------------------
+TEST_CASE("pipeline: error_mask() accumulates more than one class for the same document, "
+          "on_remove_stored_data_safe() still fires exactly once",
+          "[pipeline][stages][error-class]")
+{
+  temp_dir_guard dir;
+  const auto     doc_path = dir.write("doc.xml", well_formed_valid_doc());
+
+  auto state          = std::make_shared<shared_state>();
+  state->hdr_verdict   = false; // header fails -- HE
+  state->txn_verdict   = false; // transaction fails too -- TE
+  stage_test_hooks hooks(state);
+
+  auto cfg      = make_cfg("test-error-class-multi", 1); // single worker: deterministic, sequential C->P order
+  auto [p, res] = fsp::importer::exec(cfg, std::vector<std::string>{doc_path}, xsd_path(), hooks);
+
+  REQUIRE(res.has_value());
+  const auto& ds_dscr = p->ds_dscr();
+  CHECK(ds_dscr[0].has_error(fsp::error_class::he));
+  CHECK(ds_dscr[0].has_error(fsp::error_class::te));
+  // Exactly one on_remove_stored_data_safe() call for the whole document, no matter which of the
+  // two segments' own mark_error() call happened to be the first to see an empty error_mask_.
+  CHECK(state->remove_stored_data_calls.load() == 1);
 }
 // NOLINTEND(readability-magic-numbers)

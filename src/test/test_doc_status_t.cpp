@@ -14,6 +14,7 @@
 #include <vector>
 
 using fsp::doc_status_t;
+using fsp::error_class;
 using fsp::three_state;
 
 namespace
@@ -140,5 +141,131 @@ TEST_CASE("doc_status_t: stored_status() only ever reaches unknown or valid, nev
   // set_stored() takes no ok parameter at all -- there is no code path that could ever move
   // stored_ to three_state::invalid (see set_stored()'s own doc comment: storage-completeness has
   // no failure verdict of its own to report).
+}
+
+// --- error_class / error_mask() -- see error_class's own doc comment: an additional, orthogonal
+// record of WHICH class(es) of error a document was rejected for, alongside (not instead of) the
+// four three_state facts above. -----------------------------------------------------------------
+
+TEST_CASE("doc_status_t: error_mask() starts empty and mark_error() OR's in exactly the bit asked for", "[doc_status_t][error_class]")
+{
+  doc_status_t status;
+  CHECK(status.error_mask() == 0);
+  CHECK_FALSE(status.has_error(error_class::ua));
+  CHECK_FALSE(status.has_error(error_class::se));
+  CHECK_FALSE(status.has_error(error_class::ve));
+  CHECK_FALSE(status.has_error(error_class::he));
+  CHECK_FALSE(status.has_error(error_class::te));
+
+  std::ignore = status.mark_error(error_class::ve);
+  CHECK(status.has_error(error_class::ve));
+  // No other bit was touched by that one call.
+  CHECK_FALSE(status.has_error(error_class::ua));
+  CHECK_FALSE(status.has_error(error_class::se));
+  CHECK_FALSE(status.has_error(error_class::he));
+  CHECK_FALSE(status.has_error(error_class::te));
+}
+
+TEST_CASE("doc_status_t: error_mask() accumulates more than one bit for the same document", "[doc_status_t][error_class]")
+{
+  // Unlike syntax_/valid_/semantic_/stored_ (exactly-once-per-document), error_mask_ can
+  // accumulate several classes over one document's lifetime -- e.g. a document that is both
+  // syntactically invalid AND (independently, before or after) resolves to an unknown agent.
+  doc_status_t status;
+  std::ignore = status.mark_error(error_class::ua);
+  std::ignore = status.mark_error(error_class::se);
+  CHECK(status.has_error(error_class::ua));
+  CHECK(status.has_error(error_class::se));
+  CHECK_FALSE(status.has_error(error_class::ve));
+  CHECK_FALSE(status.has_error(error_class::he));
+  CHECK_FALSE(status.has_error(error_class::te));
+}
+
+TEST_CASE("doc_status_t: mark_error() returns true only for the FIRST error class ever recorded", "[doc_status_t][error_class]")
+{
+  doc_status_t status;
+  CHECK(status.mark_error(error_class::he));        // first ever -- true
+  CHECK_FALSE(status.mark_error(error_class::te));  // mask already non-empty -- false
+  CHECK_FALSE(status.mark_error(error_class::he));  // same bit again -- still false
+  CHECK(status.has_error(error_class::he));
+  CHECK(status.has_error(error_class::te));
+}
+
+TEST_CASE("doc_status_t: error_mask()/has_error() do not influence status()/ok() or the three_state facts", "[doc_status_t][error_class]")
+{
+  // The whole point of error_class being an ADDITIONAL, orthogonal record (see its own doc
+  // comment): mark_error() alone, with no set_syntax()/set_valid()/set_semantic() call, must leave
+  // the existing four-fact model completely untouched.
+  doc_status_t status;
+  std::ignore = status.mark_error(error_class::ua);
+  std::ignore = status.mark_error(error_class::se);
+  std::ignore = status.mark_error(error_class::ve);
+  std::ignore = status.mark_error(error_class::he);
+  std::ignore = status.mark_error(error_class::te);
+  CHECK(status.syntax_status() == three_state::unknown);
+  CHECK(status.valid_status() == three_state::unknown);
+  CHECK(status.semantic_status() == three_state::unknown);
+  CHECK(status.stored_status() == three_state::unknown);
+  CHECK(status.status() == three_state::unknown);
+  CHECK_FALSE(status.ok());
+  CHECK_FALSE(status.is_finished());
+}
+
+// --- rejected() -- the lock-free fast path over status() == three_state::invalid; see its own doc
+// comment for why it exists (a per-segment hot-path check that must not pay status()'s own mtx_
+// lock on every call). The property under test: rejected() must always agree with status(), for
+// every one of the three verdict-bearing facts, in both directions (true only once invalid, never
+// true before). -----------------------------------------------------------------------------------
+
+TEST_CASE("doc_status_t: rejected() is false until any verdict-bearing fact turns invalid", "[doc_status_t][rejected]")
+{
+  doc_status_t status;
+  CHECK_FALSE(status.rejected());
+  std::ignore = status.set_syntax(true);
+  CHECK_FALSE(status.rejected());
+  std::ignore = status.set_valid(true);
+  CHECK_FALSE(status.rejected());
+  std::ignore = status.set_semantic(true);
+  CHECK_FALSE(status.rejected());
+  std::ignore = status.set_stored();
+  CHECK_FALSE(status.rejected()); // fully finished, but every fact was valid -- still not rejected
+  CHECK(status.ok());
+}
+
+TEST_CASE("doc_status_t: rejected() becomes true the moment any of syntax_/valid_/semantic_ turns invalid, "
+          "and agrees with status()",
+          "[doc_status_t][rejected]")
+{
+  const auto fail_syntax = [] {
+    doc_status_t status;
+    std::ignore = status.set_syntax(false);
+    return status.rejected();
+  };
+  const auto fail_valid = [] {
+    doc_status_t status;
+    std::ignore = status.set_valid(false);
+    return status.rejected();
+  };
+  const auto fail_semantic = [] {
+    doc_status_t status;
+    std::ignore = status.set_semantic(false);
+    return status.rejected();
+  };
+  CHECK(fail_syntax());
+  CHECK(fail_valid());
+  CHECK(fail_semantic());
+}
+
+TEST_CASE("doc_status_t: rejected() stays true once set, even if reached via a LATER fact "
+          "after earlier ones were already valid",
+          "[doc_status_t][rejected]")
+{
+  doc_status_t status;
+  std::ignore = status.set_syntax(true);
+  std::ignore = status.set_valid(true);
+  CHECK_FALSE(status.rejected());
+  std::ignore = status.set_semantic(false); // the third fact turns the document bad
+  CHECK(status.rejected());
+  CHECK(status.status() == three_state::invalid); // agrees with the mutex-guarded aggregate too
 }
 // NOLINTEND(readability-magic-numbers)

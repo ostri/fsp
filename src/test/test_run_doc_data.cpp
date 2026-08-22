@@ -240,7 +240,13 @@ namespace
       observed_->log_call("on_wrk_end");
       return {};
     }
-    [[nodiscard]] fsp::e_void on_doc_open(std::size_t doc_ndx, const fsp::doc_dscr& /*dscr*/) override
+    // pipeline_hooks::get_doc_agent_id()'s own truly-unoverridden default returns 0 (fsp-core's own
+    // "unresolved agent" convention -- see its own doc comment), which would have every document in
+    // this file's tests rejected before any cut/validate work. This suite isn't testing agent_id()
+    // at all (see test_pipeline_stages.cpp's own [agent-id] scenarios for that) -- override with a
+    // fixed, non-zero id so documents here are processed normally, same as before that default changed.
+    [[nodiscard]] std::optional<std::int16_t> get_doc_agent_id(fsp::cstr_t /*path*/) override { return 1; }
+    [[nodiscard]] fsp::e_void                 on_doc_open(std::size_t doc_ndx, const fsp::doc_dscr& /*dscr*/) override
     {
       auto guard = fsp::lock(doc_data(doc_ndx));
       REQUIRE(guard->factory_tag == k_factory_tag_doc);

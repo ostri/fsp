@@ -19,6 +19,8 @@ namespace
   // clang-format on
 } // namespace
 
+std::optional<std::int16_t> pacs8_cb::get_doc_agent_id(fsp::cstr_t /*path*/) { return 1; }
+
 fsp::e_void pacs8_cb::on_run_start(const fsp::doc_set_dscr& ds_dscr)
 {
   // No need to chain to a base body here (unlike the old on_run_start()) -- pipeline_hooks'
