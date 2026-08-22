@@ -378,32 +378,23 @@ namespace fsp
       if (t.joinable()) t.join();
   }
 
-  void pipeline::discard_invalid_doc_results()
-  {
-    // Safety net for the rare race where P processed a segment before V (or a late C failure)
-    // marked its document invalid -- priority C > V > P makes this uncommon but not impossible.
-    // Discard any result/error whose document ended up invalid.
-    auto belongs_to_invalid_doc = [this](const segment_result& r)
-    {
-      if (r.doc_ndx() < 0 || static_cast<std::size_t>(r.doc_ndx()) >= ds_dscr_.size()) return false;
-      return ds_dscr_[static_cast<std::size_t>(r.doc_ndx())].failed();
-    };
-    std::erase_if(results_, belongs_to_invalid_doc);
-    std::erase_if(errors_, belongs_to_invalid_doc);
-  }
-
   str_t pipeline::build_summary(std::size_t doc_count, double elapsed_ms, std::size_t failed_count) const
   {
     const auto pool_capacity = seg_pool_.size();
     const auto pool_peak     = seg_pool_.high_water_mark();
     const auto pool_pct      = pool_capacity > 0 ? (static_cast<double>(pool_peak) / static_cast<double>(pool_capacity)) * 100.0
                                                  : 0.0; // NOLINT(readability-magic-numbers)
+    // segments ok/err counts come from doc_counters_ (atomic bookkeeping updated as each segment
+    // is processed, see doc_set_counter.hpp), not from a results_/errors_ accumulator -- fsp-core
+    // never materializes a second copy of every segment's extracted values for the whole run; a
+    // caller consumes each segment through its own hooks (on_type()/on_block_store()/...) as it is
+    // processed instead (see docs/importer_usage.md).
     auto       msg           = fmt::format(R"(
   Processed {0} docs in {1:.3f} sec (segments ok:{2} err:{3}, docs failed:{4}) seg. peak: {5} / {6} slots ({7:.2f}%))",
                                            doc_count,
                                            elapsed_ms / 1000.0, // NOLINT(readability-magic-numbers)
-                                           results_.size(),
-                                           errors_.size(),
+                                           doc_counters_->total_segments_ok(ds_dscr_),
+                                           doc_counters_->total_segments_error(ds_dscr_),
                                            failed_count,
                                            pool_peak,
                                            pool_capacity,
@@ -494,7 +485,6 @@ namespace fsp
     std::ignore = hooks.on_run_safe_end(*doc_counters_, ds_dscr_, worker_clones);
     run_data_.reset();
 
-    discard_invalid_doc_results();
     if (first_error_)
     {
       log_.error(fmt::format("Pipeline failed with a fatal error: {}", first_error_->to_string()));
@@ -505,24 +495,8 @@ namespace fsp
     if (! failed.empty()) log_.warn(fmt::format("{} of {} document(s) failed and were skipped.", failed.size(), doc_count));
 
     auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start_time_).count();
-    stats_  = stats_t{
-      .successful_segments = results_.size(),
-      .failed_segments     = errors_.size(),
-      .processing_time_ms  = static_cast<double>(ms),
-    };
 
     log_.info(build_summary(doc_count, static_cast<double>(ms), failed.size())); // NOLINT(readability-magic-numbers)
     return std::move(*doc_counters_);
-  }
-
-  const vec_seg_result& pipeline::get_results() const
-  {
-    std::lock_guard lock(results_mutex_);
-    return results_;
-  }
-  const vec_seg_result& pipeline::get_errors() const
-  {
-    std::lock_guard lock(errors_mutex_);
-    return errors_;
   }
 } // namespace fsp

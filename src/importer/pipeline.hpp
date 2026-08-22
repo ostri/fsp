@@ -8,7 +8,6 @@
 #include <logger/logger.hpp>
 #include "segment_result.hpp"
 #include "error_info.hpp"
-#include "stats.hpp"
 #include "lock_queue.hpp"
 #include "xpath_helpers.hpp"
 #include "xml_segment.hpp"
@@ -33,9 +32,6 @@ namespace fsp
     [[nodiscard]] result<doc_set_counter> process_files(const std::vector<str_t>& xml_paths,
                                                         cstr_t                    xsd_path,
                                                         pipeline_hooks&           hooks = default_pipeline_hooks);
-    [[nodiscard]] const vec_seg_result&   get_results() const;
-    [[nodiscard]] const vec_seg_result&   get_errors() const;
-    // [[nodiscard]] stats_t                  stats() const { return stats_; }
     [[nodiscard]] std::vector<std::size_t> failed_document_indices() const;
 
     // --- API for pipeline_worker / toolkits ---
@@ -112,10 +108,6 @@ namespace fsp
     [[nodiscard]] segment_pool&          pool() noexcept { return seg_pool_; }
     [[nodiscard]] const doc_set_dscr&    ds_dscr() const noexcept { return ds_dscr_; }
     [[nodiscard]] const doc_set_counter& doc_counters() const noexcept { return *doc_counters_; }
-    [[nodiscard]] vec_seg_result&        results() noexcept { return results_; }
-    [[nodiscard]] vec_seg_result&        errors() noexcept { return errors_; }
-    [[nodiscard]] std::mutex&            results_mutex() noexcept { return results_mutex_; }
-    [[nodiscard]] std::mutex&            errors_mutex() noexcept { return errors_mutex_; }
     // This run's single run-level shared-data instance (see run_doc_data.hpp) -- constructed via
     // hooks.make_run_data_struct() right before hooks.on_run_safe_start() in process_files(),
     // destroyed right after hooks.on_run_safe_end() returns. The SAME instance for every worker
@@ -196,7 +188,6 @@ namespace fsp
     void                                                                seed_queues(std::size_t doc_count, bool run_validation);
     [[nodiscard]] result<std::vector<std::unique_ptr<pipeline_worker>>> start_workers(std::size_t num_parallel, pipeline_hooks& hooks);
     static void         run_workers(std::vector<std::unique_ptr<pipeline_worker>>& worker_state);
-    void                discard_invalid_doc_results();
     [[nodiscard]] str_t build_summary(std::size_t doc_count, double elapsed_ms, std::size_t failed_count) const;
   private:
     // NOLINTBEGIN(cppcoreguidelines-avoid-const-or-ref-data-members)
@@ -212,13 +203,8 @@ namespace fsp
     std::atomic<std::size_t> threads_cutting_{
       0}; //< used by try_reserve_cutter_slot() to enforce the "at most half the threads may cut concurrently" rule
     std::optional<doc_set_counter> doc_counters_;      //< per-document timing + outcome counts, sized to doc_count in process_files()
-    vec_seg_result                 results_;           //< all segments that were processed successfully
-    vec_seg_result                 errors_;            //< all segments that failed syntactically or semantically
-    mutable std::mutex             results_mutex_;     //< protects results_
-    mutable std::mutex             errors_mutex_;      //< protects errors_
     std::mutex                     first_error_mutex_; //< protects first_error_
     std::optional<error_info>      first_error_;       //<  the first fatal error reported by any worker thread, if any
-    stats_t                        stats_{};           //< cumulative stats for the run, updated by multiple threads
     s_clock                        start_time_ = std::chrono::steady_clock::now(); //< to compute total elapsed time for the run
     // This run's own cut_with_validation/run_validation effective values (see plan_run()) -- both
     // set once, on the main thread, before any worker starts; read (never written) by every

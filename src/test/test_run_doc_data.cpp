@@ -367,8 +367,8 @@ TEST_CASE("run_doc_data: every on_* hook fires during processing, using the fact
   REQUIRE(res.has_value());
   CHECK(res->total_docs() == 1);
   CHECK(p->ds_dscr()[0].status().ok());
-  CHECK(p->get_results().size() == 4); // 1 header + 3 transactions, all processed successfully
-  CHECK(p->get_errors().empty());
+  CHECK(res->total_segments_ok(p->ds_dscr()) == 4); // 1 header + 3 transactions, all processed successfully
+  CHECK(res->total_segments_error(p->ds_dscr()) == 0);
 
   // The factory (pipeline_hooks_crtp<Derived, RunData, DocData>::make_run_data_struct()/
   // make_doc_data_struct()) really constructed my_run_data/my_doc_data, not the plain
@@ -503,6 +503,6 @@ TEST_CASE("run_doc_data: fsp::lock() serializes concurrent on_type() writers -- 
   CHECK(observed->declared_count_seen == num_txns);
   CHECK(status.semantic_status() == fsp::three_state::valid);
   CHECK(status.ok());
-  CHECK(p->get_results().size() == num_txns + 1); // header + every transaction
+  CHECK(res->total_segments_ok(p->ds_dscr()) == num_txns + 1); // header + every transaction
 }
 // NOLINTEND(readability-magic-numbers)

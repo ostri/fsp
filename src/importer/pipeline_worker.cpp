@@ -19,10 +19,6 @@ namespace fsp
     cutter_    = std::make_unique<doc_cutter>(cfg, log_, pipeline_.pool(), pipeline_.ds_dscr());
     processor_ = std::make_unique<xml_worker>(pipeline_.pool(),
                                               pipeline_.ds_dscr(),
-                                              pipeline_.results(),
-                                              pipeline_.errors(),
-                                              pipeline_.results_mutex(),
-                                              pipeline_.errors_mutex(),
                                               log_,
                                               cfg.targets,
                                               parent_log_name_,

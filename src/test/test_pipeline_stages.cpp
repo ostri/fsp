@@ -499,15 +499,13 @@ TEST_CASE("pipeline: V failing before P finishes discards the document's segment
   CHECK(state->remove_stored_data_calls.load() == 1);
   CHECK_FALSE(state->remove_stored_data_no_headers.load());
 
-  // The document's segments were discarded (pipeline::discard_invalid_doc_results() +
-  // xml_worker::process_one()'s own "document invalid, skip" path) -- neither results() nor
-  // errors() should retain anything belonging to doc 0, even though P DID process (or start
-  // processing) at least one segment before the document was marked invalid.
-  CHECK(p->get_results().empty());
-  bool any_error_for_doc0 = false;
-  for (const auto& e : p->get_errors())
-    if (e.doc_ndx() == 0) any_error_for_doc0 = true;
-  CHECK_FALSE(any_error_for_doc0);
+  // The document's segments were discarded (xml_worker::process_one()'s own "document invalid,
+  // skip" path) -- total_segments_ok()/total_segments_error() only count a syntactically correct
+  // document's segments (see doc_set_counter::syntactically_correct()), so a rejected document
+  // contributes 0 to both regardless of how many segments P processed (or started processing)
+  // before the rejection became known.
+  CHECK(res->total_segments_ok(ds_dscr) == 0);
+  CHECK(res->total_segments_error(ds_dscr) == 0);
 
   // on_doc_close() must still fire exactly once, reflecting the failed verdict.
   CHECK(state->doc_close_calls.load() == 1);
@@ -553,7 +551,7 @@ TEST_CASE("pipeline: C failing on ill-formed XML discards segments and still clo
   CHECK_FALSE(ds_dscr[0].has_error(fsp::error_class::ve));
   CHECK_FALSE(ds_dscr[0].has_error(fsp::error_class::ua));
 
-  CHECK(p->get_results().empty());
+  CHECK(res->total_segments_ok(ds_dscr) == 0);
   // on_doc_close() fires exactly once even though the document never produced a single
   // successfully-cut segment.
   CHECK(state->doc_close_calls.load() == 1);
@@ -627,8 +625,8 @@ TEST_CASE("pipeline: happy path calls on_doc_close exactly once, after syntax+va
   CHECK(state->doc_close_seen_semantic_ok.load());
 
   // Both segments (header + one transaction) were actually processed, and none discarded.
-  CHECK(p->get_results().size() == 2);
-  CHECK(p->get_errors().empty());
+  CHECK(res->total_segments_ok(ds_dscr) == 2);
+  CHECK(res->total_segments_error(ds_dscr) == 0);
 }
 
 // --- Scenario 4b: direct, pipeline-free unit check that fsp::pipeline_hooks::get_doc_agent_id()'s
@@ -763,8 +761,8 @@ TEST_CASE("pipeline: get_doc_agent_id()'s resolved 0 rejects the document before
   CHECK_FALSE(state->doc_close_seen_validation_ok.load());
   CHECK(state->doc_sem_check_calls.load() == 0);
   CHECK(state->segments_ever_seen.load() == 0);
-  CHECK(p->get_results().empty());
-  CHECK(p->get_errors().empty());
+  CHECK(res->total_segments_ok(ds_dscr) == 0);
+  CHECK(res->total_segments_error(ds_dscr) == 0);
   {
     // do_cut() always wins for such a document (do_validate() only ever bails out silently - see
     // its own doc comment on why it cannot itself call report_validation_result() here).
@@ -876,8 +874,8 @@ TEST_CASE("pipeline: on_doc_stored() fires exactly once, strictly before on_doc_
   CHECK(stored_seq < close_seq); // storage-completeness known STRICTLY before the document closes
 
   // Functional non-regression: every segment (header + all txns) actually made it through.
-  CHECK(p->get_results().size() == static_cast<std::size_t>(num_txns + 1));
-  CHECK(p->get_errors().empty());
+  CHECK(res->total_segments_ok(p->ds_dscr()) == static_cast<std::size_t>(num_txns + 1));
+  CHECK(res->total_segments_error(p->ds_dscr()) == 0);
 }
 
 // --- Scenario 9: several documents, several worker threads, several shards at once -- confirms no
@@ -922,8 +920,8 @@ TEST_CASE("pipeline: on_doc_stored() ordering holds for multiple documents under
     CHECK(stored_seq < close_seq);
   }
 
-  CHECK(p->get_results().size() == static_cast<std::size_t>(num_docs * (txns_per_doc + 1)));
-  CHECK(p->get_errors().empty());
+  CHECK(res->total_segments_ok(p->ds_dscr()) == static_cast<std::size_t>(num_docs * (txns_per_doc + 1)));
+  CHECK(res->total_segments_error(p->ds_dscr()) == 0);
 }
 
 // --- Scenario 10: the header-priority mechanism is a compile-time property of fsp::work now (see
@@ -950,8 +948,8 @@ TEST_CASE("pipeline: hdr_seg_schema routes the header segment through the priori
 
   REQUIRE(res.has_value());
   CHECK(p->ds_dscr()[0].status().ok());
-  CHECK(p->get_results().size() == 21); // header + 20 txns
-  CHECK(p->get_errors().empty());
+  CHECK(res->total_segments_ok(p->ds_dscr()) == 21); // header + 20 txns
+  CHECK(res->total_segments_error(p->ds_dscr()) == 0);
   {
     const std::scoped_lock lock(state->raw_msg_mutex);
     CHECK(state->hdr_raw_msg.find("GrpHdr") != fsp::str_t::npos); // the header segment was, in fact, processed
@@ -1099,15 +1097,15 @@ TEST_CASE("pipeline: a failing non-header segment's on_type() is recorded as err
   // TE alone (no on_doc_sem_check() override here, default verdict stays true) does not reject the
   // document via doc_status_t::semantic_ -- consistent with docs/importer_usage.md's own "Document
   // errors" section: a single failed transaction is recorded per-segment (already visible in
-  // get_errors() below), not folded into the document-wide verdict.
+  // total_segments_error() below), not folded into the document-wide verdict.
   CHECK(ds_dscr[0].status().semantic_status() == fsp::three_state::valid);
   CHECK_FALSE(ds_dscr[0].rejected());
   CHECK(state->remove_stored_data_calls.load() == 0); // never fires for TE alone
 
-  // Functional non-regression: the failed transaction segment shows up as an error, the header as
-  // a successful result.
-  CHECK(p->get_results().size() == 1); // header only
-  CHECK(p->get_errors().size() == 1);  // the one failed transaction
+  // Functional non-regression: the failed transaction segment is counted as an error, the header
+  // as a successful segment.
+  CHECK(res->total_segments_ok(ds_dscr) == 1);    // header only
+  CHECK(res->total_segments_error(ds_dscr) == 1); // the one failed transaction
 }
 
 // --- Scenario 15: a document that accumulates MULTIPLE error classes over its lifetime (here: both

@@ -23,8 +23,6 @@ namespace fsp
     importer& operator=(const importer&) = delete;
     importer& operator=(importer&&)      = delete;
 
-    [[nodiscard]] const vec_seg_result&    get_results() const;
-    [[nodiscard]] const vec_seg_result&    get_errors() const;
     [[nodiscard]] std::vector<std::size_t> failed_document_indices() const;
     // The SAME doc_set_dscr this run cut/validated -- needed by a caller that wants to call
     // doc_set_counter's own totals methods (total_segments()/syntactically_correct_docs()/...),
@@ -37,7 +35,7 @@ namespace fsp
      * import_docs() on it, in a single call -- the constructor and import_docs() are both
      * private (see below) precisely so this is the sole entry point. Returns the importer
      * alongside the result (rather than just the result) so a caller can still inspect
-     * get_results()/get_errors()/failed_document_indices() afterwards.
+     * failed_document_indices() afterwards.
      * @note Returns std::unique_ptr<importer>, not importer by value: importer's copy/move are
      * both deleted (see the class's own deleted special members above) because impl_ holds
      * references back into this SAME instance's log_ptr_/xerces_life_ -- moving the importer
@@ -104,8 +102,6 @@ namespace fsp
 
   inline result<doc_set_counter> importer::import_docs(const std::vector<str_t>& xml_paths, cstr_t xsd_path, pipeline_hooks& hooks)
   { return impl_.process_files(xml_paths, xsd_path, hooks); }
-  inline const vec_seg_result&    importer::get_results() const { return impl_.get_results(); }
-  inline const vec_seg_result&    importer::get_errors() const { return impl_.get_errors(); }
   inline std::vector<std::size_t> importer::failed_document_indices() const { return impl_.failed_document_indices(); }
   inline const doc_set_dscr&      importer::ds_dscr() const noexcept { return impl_.ds_dscr(); }
 

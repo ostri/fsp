@@ -29,10 +29,6 @@ namespace fsp
   xml_worker::xml_worker(
     segment_pool&         pool,          // reference to segment pool
     const doc_set_dscr&   ds_dscr,       // reference to document set structure
-    vec_seg_result&       results,       // where to store correct segments
-    vec_seg_result&       errors,        // where to store non correct segmetns
-    std::mutex&           results_mutex, // mutex for managing result structure
-    std::mutex&           errors_mutex,  // mutex for managing errors structure
     const logger::Logger& log,           // reference to logger
     const proc_data&      targets, // structure that holds information about cutting points and xpaths of the values we are looking for
     str_t                 parent_log_name, // parent thread log thread name
@@ -42,10 +38,6 @@ namespace fsp
     std::size_t           nak_block_flush_size)
   : log_(log)
   , ds_dscr_(ds_dscr)
-  , results_(results)
-  , errors_(errors)
-  , results_mutex_(results_mutex)
-  , errors_mutex_(errors_mutex)
   , targets_(targets)
   , pipeline_(pl)
   , hooks_(hooks)
@@ -498,7 +490,6 @@ namespace fsp
       record_nak(
         idx,
         seg,
-        segment_result{seg.id(), seg.subtree_type(), seg.doc_ndx()},
         error_info{processor_error::syntax_error, "document invalid, segment skipped", "", static_cast<std::size_t>(seg.doc_ndx())});
       return rejected_doc_ndx;
     }
@@ -506,11 +497,9 @@ namespace fsp
     if (auto res = process_segment(seg))
     {
       const bool semantically_ok = pipeline_.check_segment_semantics(seg, *res, hooks_);
-      // Both loc_res_ok_/loc_res_nak_ (the existing route into pipeline_.results()/errors(), see
-      // xml_worker::flush_results()) and pool_.result_at(idx) (for a later on_block_safe_store()/
-      // on_failed_block_safe_store() hook) need their own copy of *res -- hence the copy into the pool
-      // before *res is moved into record_ok()/record_nak() below.
-      pool_.result_at(idx) = *res;
+      // pool_.result_at(idx) is the only place *res needs to live -- a later on_block_safe_store()/
+      // on_failed_block_safe_store() hook reads it from there.
+      pool_.result_at(idx) = std::move(*res);
       // Captured BEFORE record_ok()/record_nak() below, and used instead of a second seg.doc_ndx()
       // read afterwards: those calls can flush this segment straight into storage (see their own
       // doc comment below) and, once flushed, release idx back to segment_pool's shared
@@ -528,8 +517,8 @@ namespace fsp
       // first guarantees a document's last segment is durably stored before on_doc_close() ever
       // sees that document as finished (see pipeline::check_segment_semantics()'s own doc comment
       // for why the old, single-call record_segment_done() could not give that guarantee).
-      if (semantically_ok) record_ok(idx, seg, std::move(*res));
-      else record_nak(idx, seg, std::move(*res), error_info::semantic("on_seg_sem_check", "segment failed semantic validation"));
+      if (semantically_ok) record_ok(idx, seg);
+      else record_nak(idx, seg, error_info::semantic("on_seg_sem_check", "segment failed semantic validation"));
       pipeline_.finish_segment(static_cast<std::size_t>(captured_doc_ndx), semantically_ok, hooks_);
       return captured_doc_ndx;
     }
@@ -541,30 +530,27 @@ namespace fsp
       pipeline_.record_segment_failed(static_cast<std::size_t>(seg.doc_ndx()), seg.id(), hooks_);
       // Captured BEFORE record_nak() -- see the doc_ndx capture above for why.
       const int failed_doc_ndx = seg.doc_ndx();
-      record_nak(idx, seg, segment_result{seg.id(), seg.subtree_type(), seg.doc_ndx()}, res.error());
+      record_nak(idx, seg, res.error());
       return failed_doc_ndx;
     }
   }
 
-  // Common tail of every "this segment turned out OK" path above: marks seg valid, appends to
-  // loc_res_ok_ (see flush_results()) and to ok_block_indices_ (see flush_ok_block()), flushing
-  // the latter once ok_block_flush_size_ is reached.
-  void xml_worker::record_ok(std::size_t idx, xml_segment& seg, segment_result result)
+  // Common tail of every "this segment turned out OK" path above: marks seg valid and appends to
+  // ok_block_indices_ (see flush_ok_block()), flushing the latter once ok_block_flush_size_ is
+  // reached. The segment's own result_values already lives in pool_.result_at(idx) (copied by
+  // process_one() before this call) -- no separate accumulator keeps a second copy.
+  void xml_worker::record_ok(std::size_t idx, xml_segment& seg)
   {
     seg.set_valid(true);
-    if (loc_res_ok_.size() + 1 == loc_res_ok_.capacity()) loc_res_ok_.reserve(loc_res_ok_.size() * 2);
-    loc_res_ok_.push_back(std::move(result));
     ok_block_indices_.push_back(idx);
     if (ok_block_indices_.size() >= ok_block_flush_size_) flush_ok_block();
   }
 
   // Common tail of every "this segment failed" path above -- see record_ok()'s own doc comment,
   // mirrored for the nak side (plus nak_block_errors_, parallel to nak_block_indices_).
-  void xml_worker::record_nak(std::size_t idx, xml_segment& seg, segment_result result, error_info err)
+  void xml_worker::record_nak(std::size_t idx, xml_segment& seg, error_info err)
   {
     seg.set_valid(false);
-    if (loc_res_nak_.size() + 1 == loc_res_nak_.capacity()) loc_res_nak_.reserve(loc_res_nak_.size() * 2);
-    loc_res_nak_.push_back(std::move(result));
     nak_block_indices_.push_back(idx);
     nak_block_errors_.push_back(std::move(err));
     if (nak_block_indices_.size() >= nak_block_flush_size_) flush_nak_block();
@@ -654,23 +640,12 @@ namespace fsp
   }
 
   /**
-   * @brief moves the locally accumulated results into the shared results_/errors_, and flushes
-   * whatever remains in the ok/nak blocks (see flush_ok_block()/flush_nak_block()) -- called by
-   * pipeline_worker at thread end.
+   * @brief flushes whatever remains in the ok/nak blocks (see flush_ok_block()/flush_nak_block())
+   * -- called by pipeline_worker at thread end.
    */
   void xml_worker::flush_results()
   {
     flush_ok_block();
     flush_nak_block();
-    {
-      std::lock_guard lock(results_mutex_);
-      results_.append_range(std::move(loc_res_ok_));
-    }
-    {
-      std::lock_guard lock(errors_mutex_);
-      errors_.append_range(std::move(loc_res_nak_));
-    }
-    loc_res_ok_.clear();
-    loc_res_nak_.clear();
   }
 } // namespace fsp

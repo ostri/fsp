@@ -58,7 +58,10 @@ int main(int argc, const char* argv[])
     }
     const auto& ds_dscr = p->ds_dscr();
     assert(args.files.size() == res->total_docs());
-    assert(p->get_results().size() + p->get_errors().size() == res->total_segments(ds_dscr));
+    // pacs8_cb consumes every segment through its own on_type() overloads as it's processed (see
+    // pacs8_cb.cpp), never reads back accumulated results -- total_segments_ok()/
+    // total_segments_error() are doc_counters' own atomic bookkeeping, independent of that.
+    assert(res->total_segments_ok(ds_dscr) + res->total_segments_error(ds_dscr) == res->total_segments(ds_dscr));
 
     fmt::print("\n=== Document Statistics ===\n"
                "{:<33}{:>10}\n"

@@ -44,10 +44,10 @@ namespace fsp
     // flush_results()). Also used to pre-size the two accumulator vectors at worker construction,
     // so normal-case operation never reallocates. Two separate knobs because ok segments are
     // expected to vastly outnumber failed ones in a healthy run.
-    std::size_t           ok_block_flush_size  = 1024; // NOLINT(readability-magic-numbers)
-    std::size_t           nak_block_flush_size = 128;  // NOLINT(readability-magic-numbers)
-    logger::logger_config log_config;                  // configuration of the
-    str_t                 program_name;                // program name as displayed in the log file
+    std::size_t ok_block_flush_size  = 1024; // NOLINT(readability-magic-numbers)
+    std::size_t nak_block_flush_size = 128;  // NOLINT(readability-magic-numbers)
+    logger::logger_config  log_config;                  // configuration of the
+    str_t                  program_name;                // program name as displayed in the log file
     // NOLINTEND(misc-non-private-member-variables-in-classes)
     [[nodiscard]] str_t dump(int offs) const;
   };

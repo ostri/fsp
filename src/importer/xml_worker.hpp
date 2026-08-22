@@ -53,17 +53,13 @@ namespace fsp
     xml_worker(
       segment_pool&         pool,          // reference to segment pool
       const doc_set_dscr&   ds_dscr,       // reference to document set structure
-      vec_seg_result&       results,       // where to store correct segments
-      vec_seg_result&       errors,        // where to store non correct segmetns
-      std::mutex&           results_mutex, // mutex for managing result structure
-      std::mutex&           errors_mutex,  // mutex for managing errors structure
       const logger::Logger& log,           // reference to logger
       const proc_data&      targets, // structure that holds information about cutting points and xpaths of the values we are looking for
       str_t                 parent_log_name, // parent thread log thread name
       pipeline&             pl,              // for record_segment_done()/record_segment_failed() (doc_counters bookkeeping + hook dispatch)
       pipeline_hooks&       hooks,           // this worker thread's own hooks clone (see pipeline_worker)
-      std::size_t           ok_block_flush_size, // see importer_config::ok_block_flush_size
-      std::size_t           nak_block_flush_size // see importer_config::nak_block_flush_size
+      std::size_t           ok_block_flush_size,  // see importer_config::ok_block_flush_size
+      std::size_t           nak_block_flush_size  // see importer_config::nak_block_flush_size
     );
 
     //     // main functor method
@@ -74,10 +70,9 @@ namespace fsp
     // Former free functions, now member methods
     result<segment_result> process_segment(const xml_segment& seg);
     // Common tail shared by every process_one() outcome -- see their own doc comments in
-    // xml_worker.cpp. idx/seg refer to the same pool slot; result is moved/copied into
-    // loc_res_ok_/loc_res_nak_ (the existing route into pipeline_.results()/errors()).
-    void record_ok(std::size_t idx, xml_segment& seg, segment_result result);
-    void record_nak(std::size_t idx, xml_segment& seg, segment_result result, error_info err);
+    // xml_worker.cpp. idx/seg refer to the same pool slot.
+    void record_ok(std::size_t idx, xml_segment& seg);
+    void record_nak(std::size_t idx, xml_segment& seg, error_info err);
     // Calls hooks_.on_block_safe_store()/on_failed_block_safe_store() on whatever's accumulated in
     // ok_block_indices_/nak_block_indices_ (a no-op if empty), then releases those slots back to
     // pool_ via segment_pool::release_slots() and clears the accumulator(s) for reuse. If the
@@ -148,10 +143,6 @@ namespace fsp
     // NOLINTBEGIN(cppcoreguidelines-avoid-const-or-ref-data-members)
     const logger::Logger&        log_;           //< logger
     const doc_set_dscr&          ds_dscr_;       //< structre of all input documents
-    std::vector<segment_result>& results_;       //< result after parsing
-    std::vector<segment_result>& errors_;        //< errors after parsing
-    std::mutex&                  results_mutex_; //< mutex to lock results
-    std::mutex&                  errors_mutex_;  //< mutex to lock erros
     const proc_data&             targets_;       //< targets to be processed
     pipeline&                    pipeline_;      //< for record_segment_done()/record_segment_failed()
     pipeline_hooks&              hooks_;         //< this worker thread's own hooks clone
@@ -178,8 +169,6 @@ namespace fsp
     //     std::size_t                  segment_counter_ = 0;
     std::unique_ptr<segment_sax> sax_;  // sax parser
     segment_pool&                pool_; // segment pool
-    vec_seg_result               loc_res_ok_;
-    vec_seg_result               loc_res_nak_;
     // Pool slot indices for on_block_safe_store()/on_failed_block_safe_store() -- pre-sized to
     // ok_block_flush_size_/nak_block_flush_size_ at construction so normal-case operation never
     // reallocates (see importer_config::ok_block_flush_size's own doc comment). A slot's index
