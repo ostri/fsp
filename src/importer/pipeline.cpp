@@ -126,14 +126,27 @@ namespace fsp
   // Only ever called once doc_counters::maybe_seg_processing_complete() has just been won by the
   // caller (record_doc_close()/record_segment_done()/record_segment_failed(), see their own doc
   // comments in pipeline.hpp) -- runs the doc-level semantic check exactly once and folds its
-  // verdict into doc_status_t, independent of whether syntax/validation are known yet.
+  // verdict into doc_status_t. Segment PROCESSING itself still runs to completion independent of
+  // whether syntax/validation are already known (every segment, ok or rejected, must still be
+  // accounted for -- see doc_counters' own "all segments processed" completion condition) -- but
+  // the semantic CHECK ITSELF is skipped once the document is already known rejected
+  // (doc_dscr::rejected() -- syntax/validation invalid, or a UA/SE/VE/HE error_class already
+  // recorded, see report_error_class()): a hook's own on_doc_sem_check(doc_ndx) typically reads
+  // doc-level data a cb staged while reading segments (e.g. a header segment's own row id, to
+  // attach a finding to) that on_remove_stored_data() may already have rolled back by this point
+  // for a rejected document -- calling the hook again here would either re-derive a verdict nobody
+  // still cares about (the document is already rejected on some OTHER fact) or reference data that
+  // is no longer there. semantic_ is folded in as three_state::valid instead of actually asking the
+  // hook: the document's own aggregate status() is unaffected either way, since at least one other
+  // fact is already three_state::invalid (that's what rejected() means) and status() only needs
+  // ONE invalid fact to report invalid overall.
   void pipeline::maybe_finish_seg_processing(std::size_t doc_ndx, pipeline_hooks& hooks)
   {
-    const bool semantic_ok = hooks.on_doc_safe_sem_check(doc_ndx);
+    const bool semantic_ok = ds_dscr_[doc_ndx].rejected() || hooks.on_doc_safe_sem_check(doc_ndx);
     if (ds_dscr_[doc_ndx].set_semantic_result(semantic_ok)) finish_doc_close(doc_ndx, hooks);
     // doc_data(doc_ndx) is done being read from THIS side (on_doc_safe_sem_check() above already
-    // returned) -- see mark_doc_data_reader_done()'s own doc comment on why finish_doc_close()
-    // (called just above, possibly, or independently by report_syntax_result()/
+    // returned, or was skipped) -- see mark_doc_data_reader_done()'s own doc comment on why
+    // finish_doc_close() (called just above, possibly, or independently by report_syntax_result()/
     // report_validation_result()) is the OTHER reader that must also finish before recycling.
     mark_doc_data_reader_done(doc_ndx, hooks);
   }
