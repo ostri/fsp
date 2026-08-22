@@ -463,14 +463,33 @@ namespace fsp
   {
     xml_segment& seg = pool_.segment_at(idx);
 
-    // Bail out: the document was meanwhile found invalid (syntax or validation) -> skip the SAX
-    // extraction. Still goes through record_nak() below (as a failure) so idx is eventually
-    // released the same way every other slot is -- there is no separate release path here.
-    // doc_dscr::failed() (not status().status(), which is ALSO three_state::unknown -- not
-    // three_state::invalid -- for a document nothing has reported on yet) is the correct
-    // "known bad" predicate here.
-    if (ds_dscr_[seg.doc_ndx()].failed())
+    // Bail out: the document was meanwhile found rejected (syntax, validation, or doc-level
+    // semantic already known invalid -- doc_dscr::rejected(), NOT status().status() directly,
+    // which is ALSO three_state::unknown -- not three_state::invalid -- for a document nothing has
+    // reported on yet) -> skip the SAX extraction for THIS segment, same as before. Unlike before,
+    // also drops every OTHER segment of this same document that this thread already buffered
+    // (ok_block_indices_/nak_block_indices_) earlier, before the rejection became known -- a
+    // rejected document's segments are never going to be written anywhere a cb keeps (see e.g.
+    // ach's own write_docs_row_close(), which deletes them right back out on doc-close anyway), so
+    // dropping them here, before they ever reach a storage hook, is strictly better than writing
+    // and then deleting them. last_cleaned_doc_ndx_ remembers which document this thread's buffers
+    // were last cleaned for, so a run of several consecutive segments of the SAME rejected document
+    // (this thread hasn't reached the end of its own ready queue yet) only pays for the
+    // ok_block_indices_/nak_block_indices_ scan once -- the moment this thread processes a segment
+    // of any OTHER document (rejected or not), last_cleaned_doc_ndx_ no longer matches and the next
+    // rejected-document segment (of THAT other document, or of this one again later) triggers a
+    // fresh drop_doc() pass. This segment (idx) itself still goes through record_nak() below (as a
+    // failure) exactly as before -- it was never added to either buffer yet, so drop_doc() above
+    // cannot have touched it.
+    if (ds_dscr_[seg.doc_ndx()].rejected())
     {
+      const auto doc_ndx = static_cast<std::size_t>(seg.doc_ndx());
+      if (last_cleaned_doc_ndx_ != doc_ndx)
+      {
+        drop_doc(ok_block_indices_, doc_ndx);
+        drop_doc(nak_block_indices_, doc_ndx, &nak_block_errors_);
+        last_cleaned_doc_ndx_ = doc_ndx;
+      }
       if (log_debug_) log_.debug(fmt::format("Segment {} (doc {}): document invalid, skipped processing.", seg.id(), seg.doc_ndx()));
       pipeline_.record_segment_failed(static_cast<std::size_t>(seg.doc_ndx()), seg.id(), hooks_);
       record_nak(
@@ -558,6 +577,35 @@ namespace fsp
       else ++it->second;
     }
     for (const auto& [doc_ndx, count] : by_doc) pipeline_.record_segments_stored(doc_ndx, count, hooks_);
+  }
+
+  // See its own doc comment in xml_worker.hpp. Swap-and-pop, not a stable compact: indices/errs
+  // have no meaningful order to preserve (a block is just whatever segments happened to finish
+  // processing, in no particular sequence), so an element found to belong to doc_ndx is replaced
+  // by the CURRENT last element instead of shifting every element after it down by one -- lo only
+  // advances past an element once it is confirmed to belong elsewhere, hi only ever shrinks, so
+  // each element is inspected at most once.
+  void xml_worker::drop_doc(std::vector<std::size_t>& indices, std::size_t doc_ndx, std::vector<error_info>* errs)
+  {
+    std::size_t lo = 0;
+    std::size_t hi = indices.size(); // one past the last still-live element
+    while (lo < hi)
+    {
+      const auto idx = indices[lo];
+      if (static_cast<std::size_t>(pool_.segment_at(idx).doc_ndx()) != doc_ndx)
+      {
+        ++lo;
+        continue;
+      }
+      pool_.release_slots(std::span{&idx, 1});
+      --hi;
+      indices[lo] = indices[hi];
+      if (errs != nullptr) (*errs)[lo] = std::move((*errs)[hi]);
+      // lo deliberately NOT advanced -- the element just moved into indices[lo] (from the old
+      // indices[hi]) has not been inspected yet.
+    }
+    indices.resize(hi);
+    if (errs != nullptr) errs->resize(hi);
   }
 
   void xml_worker::flush_ok_block()

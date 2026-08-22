@@ -377,6 +377,21 @@ namespace fsp
     // failing doesn't retroactively make earlier-cut segments worth discarding).
     [[nodiscard]] bool failed() const noexcept
     { return status_.syntax_status() == three_state::invalid || status_.valid_status() == three_state::invalid; }
+    // True once status().status() == three_state::invalid, i.e. ANY of syntax/validation/semantic
+    // is already known bad -- unlike failed() above, semantic_ DOES count here. Not usable for
+    // failed()'s own "skip the work" precondition (a not-yet-processed segment's document can't
+    // possibly have a semantic verdict yet -- on_doc_sem_check() only runs once every segment is
+    // already accounted for, see doc_counters::maybe_seg_processing_complete()), but exactly the
+    // predicate a P-role thread's flush_ok_block()/flush_nak_block() needs for the OPPOSITE
+    // direction: a segment that already finished processing (is sitting in ok_block_indices_/
+    // nak_block_indices_, not yet flushed) whose own document has SINCE been rejected -- on
+    // whichever fact, including a semantic one discovered only after this segment's own
+    // processing completed -- is worth dropping before it it ever reaches storage, since
+    // hooks.on_doc_close() will reject the whole document anyway and a cb's own docs/msgs/orders
+    // schema (see e.g. ach's own docs/ach-operation/negative-tests.md) may not want segments of a
+    // rejected document persisted at all. See xml_worker::flush_ok_block()'s own doc comment for
+    // where this is actually used.
+    [[nodiscard]] bool rejected() const noexcept { return status_.status() == three_state::invalid; }
     // Reported by C (the cutter) once cutting finishes. folded_validation is
     // importer_config::cut_with_validation's effective value for this run (see pipeline_worker.cpp) --
     // when true, C is the SOLE authority for both syntax and validation (success sets both valid,
