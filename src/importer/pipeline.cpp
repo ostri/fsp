@@ -155,7 +155,7 @@ namespace fsp
   {
     const auto& dscr    = ds_dscr_[doc_ndx];
     const auto& verdict = dscr.status();
-    const bool  ok      = hooks.on_doc_safe_close(doc_ndx, verdict, dscr.error(), dscr);
+    const bool  ok = hooks.on_doc_safe_close(doc_ndx, verdict, dscr.error(), dscr, (*doc_counters_)[doc_ndx].stored_count());
     log_.debug(fmt::format("Doc {}: on_doc_close verdict={} (syntax={} validation={} semantic={}).",
                            doc_ndx,
                            ok,

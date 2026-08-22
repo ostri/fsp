@@ -281,7 +281,8 @@ namespace
     bool on_doc_close(std::size_t /*doc_ndx*/,
                       const fsp::doc_status_t& /*verdict*/,
                       const fsp::error_info& /*err*/,
-                      const fsp::doc_dscr& /*dscr*/) override
+                      const fsp::doc_dscr& /*dscr*/,
+                      std::size_t /*segments_stored*/) override
     {
       observed_->log_call("on_doc_close");
       return true;

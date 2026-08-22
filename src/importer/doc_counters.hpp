@@ -65,6 +65,15 @@ namespace fsp
     [[nodiscard]] std::size_t error() const noexcept;
     [[nodiscard]] std::size_t total() const noexcept; // ok() + error(), never stored separately
     [[nodiscard]] bool        cut_finished() const noexcept;
+    // How many of this document's segments have actually left on_block_store()/
+    // on_failed_block_store() so far - see add_segments_stored()'s own doc comment (stored_ itself).
+    // Distinct from total() (ok()+error(), "semantically checked") - a segment can be counted by
+    // total() well before it is counted here (checked, then still sitting in a worker's own
+    // not-yet-flushed block). Read by pipeline::finish_doc_close() to hand callers a document's own
+    // final tally alongside its verdict (see pipeline_hooks::on_doc_close()'s own segments_stored
+    // parameter) - e.g. to skip a rejected document's own storage-cleanup call outright when this
+    // is 0 (nothing was ever durably written for it, so there is nothing to clean up).
+    [[nodiscard]] std::size_t stored_count() const noexcept;
 
     // Segment-processing completion: the ORIGINAL, single, lock-free CAS latch (cut_finished &&
     // total>=expected_total) -- whichever of record_doc_close()/end_segment() satisfies this
@@ -185,6 +194,7 @@ namespace fsp
   inline std::size_t doc_counters::error() const noexcept { return error_.load(std::memory_order_relaxed); }
   inline std::size_t doc_counters::total() const noexcept { return ok() + error(); }
   inline bool        doc_counters::cut_finished() const noexcept { return cut_finished_.load(std::memory_order_acquire); }
+  inline std::size_t doc_counters::stored_count() const noexcept { return stored_.load(std::memory_order_relaxed); }
 
   // doc_close_/last_seg_ are only ever written inside record_doc_close()/the completion branch
   // of end_segment() -- for a document that never completes (e.g. cutting fails partway

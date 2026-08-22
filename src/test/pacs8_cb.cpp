@@ -119,16 +119,18 @@ fsp::e_void pacs8_cb::on_doc_finish(std::size_t doc_ndx)
   return {};
 }
 
-bool pacs8_cb::on_doc_close(std::size_t doc_ndx, const fsp::doc_status_t& verdict, const fsp::error_info& err, const fsp::doc_dscr& dscr)
+bool pacs8_cb::on_doc_close(
+  std::size_t doc_ndx, const fsp::doc_status_t& verdict, const fsp::error_info& err, const fsp::doc_dscr& dscr, std::size_t segments_stored)
 {
-  log().info(fmt::format("[pacs8_cb] {:12}: doc_ndx={} syntax={} validation={} semantic={} err='{}' path='{}'",
+  log().info(fmt::format("[pacs8_cb] {:12}: doc_ndx={} syntax={} validation={} semantic={} err='{}' path='{}' segments_stored={}",
                          "on_doc_close",
                          doc_ndx,
                          static_cast<int>(verdict.syntax_status()),
                          static_cast<int>(verdict.valid_status()),
                          static_cast<int>(verdict.semantic_status()),
                          err.message(),
-                         dscr.path()));
+                         dscr.path(),
+                         segments_stored));
   return verdict.ok();
 }
 

@@ -550,13 +550,15 @@ instead, but still counts towards "all segments processed"/"all segments stored"
    many of its segments have actually left `on_block_store()`/`on_failed_block_store()`, against the
    same total the cutter already recorded for step 4. This is your signal that nothing more will
    ever be written for this document.
-6. **`on_doc_close(doc_ndx, verdict, err, dscr)`** -- fires exactly once, as soon as syntax,
-   validation, step 4's semantic verdict, AND step 5's storage-completeness are ALL known
+6. **`on_doc_close(doc_ndx, verdict, err, dscr, segments_stored)`** -- fires exactly once, as soon
+   as syntax, validation, step 4's semantic verdict, AND step 5's storage-completeness are ALL known
    (whichever of those four facts happens to complete last is what triggers it -- there is no fixed
    order between steps 3/4 and step 5, only that step 5 is now, by construction, always known
    before this fires). `verdict.is_finished()` is guaranteed true here; `verdict.ok()` gives the
    final aggregate, `verdict.syntax_status()`/`valid_status()`/`semantic_status()` give the
-   individual partial results if you need to know exactly which fact failed.
+   individual partial results if you need to know exactly which fact failed. `segments_stored` is
+   this document's own final `doc_counters::stored_count()` tally (`0` for a document rejected
+   before any segment was ever processed).
 7. **`on_doc_finish(doc_ndx)`** -- fires immediately after `on_doc_close()` returns. `doc_data
    (doc_ndx)`'s timing is already stopped by the time this runs, so `duration()` is safe to read.
    This is the LAST point at which `doc_data(doc_ndx)` is guaranteed to still hold this document's
@@ -729,13 +731,14 @@ are the batch storage hooks covered separately in
   - usage: your own "this document will never be written to again" signal -- e.g. mark it durably complete in your own storage, independent of the pass/fail verdict `on_doc_close()` below reports
   - parameters:
     - `doc_ndx` / `dscr` -- same as `on_doc_open()`'s
-- **`bool on_doc_close(std::size_t doc_ndx, const doc_status_t& verdict, const error_info& err, const doc_dscr& dscr)`**
+- **`bool on_doc_close(std::size_t doc_ndx, const doc_status_t& verdict, const error_info& err, const doc_dscr& dscr, std::size_t segments_stored)`**
   - when: 6. once, as soon as syntax + validation + step 4's semantic verdict + step 5's storage-completeness are ALL known -- whichever of those four facts happens to complete last is what triggers it; step 5 is now, by construction, always known before this fires
   - usage: log/act on the document's final verdict, e.g. move it to a done-path or an err-path
   - parameters:
     - `doc_ndx` / `dscr` -- as above
     - `verdict` : `const doc_status_t&` -- this document's final status: `verdict.ok()` for the overall pass/fail, `verdict.syntax_status()`/`valid_status()`/`semantic_status()` for the individual partial results (each a `fsp::three_state`), `verdict.is_finished()` guaranteed `true` here
     - `err` : `const error_info&` -- the syntax/validation error that failed the document, if any (default-constructed, i.e. "no error", otherwise)
+    - `segments_stored` : `std::size_t` -- how many of this document's own segments actually left `on_block_store()`/`on_failed_block_store()` (`doc_counters::stored_count()`) -- guaranteed to already equal this document's own total segment count by this point (storage-completeness is what gates this hook's own timing), so this is really "how many segments this document had in total, confirmed durably written". `0` for a document rejected before any of its segments were ever processed (e.g. `get_doc_agent_id()` resolving to `0`) -- lets a caller skip storage-cleanup work outright when there is provably nothing to clean up
   - returns: the FINAL verdict you want recorded for this document (default: `verdict.ok()`)
 - **`e_void on_doc_finish(std::size_t doc_ndx)`**
   - when: 7. once, immediately after `on_doc_close()` returns

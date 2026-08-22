@@ -247,6 +247,7 @@ namespace
     std::atomic<bool>          remove_stored_data_no_headers{false};
     std::mutex                doc_close_err_mutex;   // guards doc_close_err_message (plain string, not lock-free)
     fsp::str_t                doc_close_err_message; // last on_doc_close()'s own err.message(), verbatim
+    std::atomic<int>          doc_close_segments_stored{-1}; // last on_doc_close()'s own segments_stored argument
     // --- on_doc_stored()/on_doc_close() ordering + per-document accounting (see the on_doc_stored
     // TEST_CASEs below) -- a single, monotonically increasing global sequence counter is stamped
     // into per-doc_ndx slots by both hooks, so a test can assert stored's own stamp is strictly
@@ -367,9 +368,11 @@ namespace
     [[nodiscard]] bool on_doc_close(std::size_t              doc_ndx,
                                     const fsp::doc_status_t& verdict,
                                     const fsp::error_info&   err,
-                                    const fsp::doc_dscr& /*dscr*/) override
+                                    const fsp::doc_dscr& /*dscr*/,
+                                    std::size_t              segments_stored) override
     {
       state_->doc_close_calls.fetch_add(1, std::memory_order_relaxed);
+      state_->doc_close_segments_stored.store(static_cast<int>(segments_stored), std::memory_order_relaxed);
       if (doc_ndx < state_->doc_close_seq.size()) // only sized by TEST_CASEs that actually check ordering
       {
         const int seq = state_->global_seq.fetch_add(1, std::memory_order_relaxed);
@@ -774,6 +777,11 @@ TEST_CASE("pipeline: get_doc_agent_id()'s resolved 0 rejects the document before
   CHECK(state->remove_stored_data_calls.load() == 1);
   CHECK(state->remove_stored_data_out_doc_id.load() == ds_dscr[0].out_doc_id());
   CHECK_FALSE(state->remove_stored_data_no_headers.load());
+  // on_doc_close()'s own segments_stored parameter is 0 - no segment was ever processed at all
+  // (segments_ever_seen == 0 above), so nothing could have been durably stored either. A caller
+  // (e.g. ach's own remove_stored_data_for_doc() call) can use this to skip cleanup work outright
+  // for exactly this shape of rejection.
+  CHECK(state->doc_close_segments_stored.load() == 0);
 }
 
 // --- Scenario 6c: same as Scenario 6b, with two documents instead of one, both agent_id()==0 -
@@ -876,6 +884,11 @@ TEST_CASE("pipeline: on_doc_stored() fires exactly once, strictly before on_doc_
   // Functional non-regression: every segment (header + all txns) actually made it through.
   CHECK(res->total_segments_ok(p->ds_dscr()) == static_cast<std::size_t>(num_txns + 1));
   CHECK(res->total_segments_error(p->ds_dscr()) == 0);
+
+  // on_doc_close()'s own new segments_stored parameter (doc_counters::stored_count()) matches the
+  // same total - every one of this document's segments was confirmed durably stored by the time
+  // on_doc_close() ran (guaranteed by stored_seq < close_seq above), so this is not a partial tally.
+  CHECK(state->doc_close_segments_stored.load() == num_txns + 1);
 }
 
 // --- Scenario 9: several documents, several worker threads, several shards at once -- confirms no

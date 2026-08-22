@@ -72,7 +72,8 @@ protected:
   [[nodiscard]] bool                        on_doc_close(std::size_t              doc_ndx,
                                                          const fsp::doc_status_t& verdict,
                                                          const fsp::error_info&   err,
-                                                         const fsp::doc_dscr&     dscr) override;
+                                                         const fsp::doc_dscr&     dscr,
+                                                         std::size_t              segments_stored) override;
   [[nodiscard]] fsp::e_void                 on_doc_finish(std::size_t doc_ndx) override;
 private:
   std::size_t documents_seen = 0;

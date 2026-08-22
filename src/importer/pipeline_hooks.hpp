@@ -283,9 +283,19 @@ namespace fsp
      * runs. NOTE: doc_data(doc_ndx) is still valid inside this call and inside on_doc_safe_finish()
      * below -- the doc-level slot is only recycled AFTER on_doc_finish() returns, see
      * pipeline::finish_doc_close().
+     * @param segments_stored how many of this document's own segments have actually left
+     * on_block_store()/on_failed_block_store() so far (doc_counters::stored_count(), read by
+     * pipeline::finish_doc_close() right before this call) - guaranteed to already equal this
+     * document's own total segment count by this point (storage-completeness is what gates this
+     * hook's own timing, see above), so this is really "how many segments this document had in
+     * total, confirmed durably written" rather than a partial, still-changing tally. Lets a cb
+     * skip a rejected document's own storage-cleanup work outright when this is 0 - nothing was
+     * ever durably written for it, so there is nothing to clean up (e.g. ach's own
+     * remove_stored_data_for_doc() call from inside its own on_doc_close() override).
      */
-    virtual bool on_doc_safe_close(std::size_t doc_ndx, const doc_status_t& verdict, const error_info& err, const doc_dscr& dscr) final
-    { return on_doc_close(doc_ndx, verdict, err, dscr); }
+    virtual bool on_doc_safe_close(
+      std::size_t doc_ndx, const doc_status_t& verdict, const error_info& err, const doc_dscr& dscr, std::size_t segments_stored) final
+    { return on_doc_close(doc_ndx, verdict, err, dscr, segments_stored); }
 
     /**
      * @brief Fires immediately after on_doc_safe_close() returns -- same call site, same "exactly
@@ -467,7 +477,8 @@ namespace fsp
     virtual bool on_doc_close([[maybe_unused]] std::size_t       doc_ndx,
                               const doc_status_t&                verdict,
                               [[maybe_unused]] const error_info& err,
-                              [[maybe_unused]] const doc_dscr&   dscr)
+                              [[maybe_unused]] const doc_dscr&   dscr,
+                              [[maybe_unused]] std::size_t       segments_stored)
     { return verdict.ok(); }
     /**
      * @brief Override point for on_doc_safe_finish() -- see the class's own doc comment. log() and
