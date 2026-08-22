@@ -248,6 +248,13 @@ function(add_fsp_target TARGET_NAME TYPE)
         target_compile_options(${TARGET_NAME} PRIVATE ${COMMON_RELEASE_FLAGS})
     # Enable Link Time Optimization (LTO) specifically for Release targets
         set_target_properties(${TARGET_NAME} PROPERTIES INTERPROCEDURAL_OPTIMIZATION TRUE)
+        # Strip symbols from the final binary (executables/shared libs only -- a static
+        # library has no link step of its own, "-s" would have nothing to act on). Unlike
+        # Profile below, a Release binary is never meant to be attached to a profiler/
+        # debugger, so there is no debug info to preserve here in the first place.
+        if(NOT MSVC AND NOT TYPE STREQUAL "STATIC")
+            target_link_options(${TARGET_NAME} PRIVATE "-s")
+        endif()
     elseif(CMAKE_BUILD_TYPE STREQUAL "Profile")
         target_compile_options(${TARGET_NAME} PRIVATE ${COMMON_PROFILE_FLAGS})
         set_target_properties(${TARGET_NAME} PROPERTIES INTERPROCEDURAL_OPTIMIZATION TRUE)
