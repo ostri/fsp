@@ -129,6 +129,14 @@ namespace fsp
     {
       xercesc::MemBufInputSource src(
         reinterpret_cast<const XMLByte*>(handler_->doc().data()), static_cast<XMLSize_t>(handler_->doc().size()), "xml_input", false);
+      // Xerces defaults to giving each stream it creates its OWN copy of the buffer (see
+      // MemBufInputSource::setCopyBufToStream()'s own doc comment) -- adoptBuffer=false above only
+      // controls ownership of THIS input source's buffer, not that per-stream copy. handler_->doc()
+      // is a string_view into ds_dscr_[doc_ndx]'s own mmap, which stays valid for this call's whole
+      // duration (well past parser_->parse() returning), so the copy is pure waste here -- confirmed
+      // via strace (operator new -> BinMemInputStream ctor -> MemBufInputSource::makeStream()) as
+      // the single largest allocation in a cutter's own SAX pass.
+      src.setCopyBufToStream(false);
       parser_->parse(src);
     }
     catch (const xercesc::SAXParseException& e)

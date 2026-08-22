@@ -79,6 +79,10 @@ namespace fsp
     try
     {
       xercesc::MemBufInputSource src(reinterpret_cast<const XMLByte*>(doc.data()), static_cast<XMLSize_t>(doc.size()), "xml_input", false);
+      // See doc_cutter::cut()'s identical call for why this is safe: doc is a string_view into
+      // ds_dscr_[doc_ndx]'s own mmap, valid for this call's whole duration -- no need for Xerces's
+      // own per-stream defensive copy (default behavior, see setCopyBufToStream()'s doc comment).
+      src.setCopyBufToStream(false);
       parser_->parse(src);
       valid = ! err_handler_.has_error();
     }

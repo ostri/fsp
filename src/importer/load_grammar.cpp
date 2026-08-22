@@ -57,8 +57,14 @@ namespace fsp
     {
       const auto* xml_data = reinterpret_cast<const XMLByte*>(buf.data());
       x_str       buf_id_str(buffer_id);
-      // Create input source from memory buffer (false = do not adopt/take ownership of buffer)
+      // Create input source from memory buffer (false = do not adopt/take ownership of buffer).
+      // buf outlives this call (the XSD's own mmap, or a caller-owned buffer -- see this
+      // function's callers), so the per-stream defensive copy Xerces makes by default (see
+      // MemBufInputSource::setCopyBufToStream()'s own doc comment, and doc_cutter::cut()'s
+      // identical call for the same reasoning) is unnecessary here too, though this path only
+      // runs once per worker thread (grammar load), not once per document.
       xercesc::MemBufInputSource inputSource(xml_data, buf.size(), buf_id_str.to_u16string().data(), false);
+      inputSource.setCopyBufToStream(false);
       auto                       reader  = load_grammar::prepare_grammar_parser(gr_pool);
       auto*                      grammar = reader->loadGrammar(inputSource, xercesc::Grammar::SchemaGrammarType, true);
 
