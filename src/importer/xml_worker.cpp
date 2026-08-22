@@ -539,15 +539,28 @@ namespace fsp
   // ok_block_indices_ (see flush_ok_block()), flushing the latter once ok_block_flush_size_ is
   // reached. The segment's own result_values already lives in pool_.result_at(idx) (copied by
   // process_one() before this call) -- no separate accumulator keeps a second copy.
+  //
+  // drop_rejected() below only runs at the threshold check, not on every single push_back() -
+  // O(1) amortized per segment at scale (millions of segments per run), rather than an O(block
+  // size) scan on every one of them. Once the block is actually full, a rejected segment (if any)
+  // is compacted out FIRST, and the threshold re-checked: if the block is no longer full after
+  // that (a rejected document's segments were the only thing pushing it over), this returns
+  // WITHOUT flushing - there is room again, so the next record_ok() call simply keeps filling it,
+  // same as if the threshold had never been reached this time. Only an actually-full, actually-
+  // clean block ever reaches the real store call below.
   void xml_worker::record_ok(std::size_t idx, xml_segment& seg)
   {
     seg.set_valid(true);
     ok_block_indices_.push_back(idx);
+    if (ok_block_indices_.size() < ok_block_flush_size_) return;
+    drop_rejected(ok_block_indices_);
     if (ok_block_indices_.size() >= ok_block_flush_size_) flush_ok_block();
   }
 
-  // Common tail of every "this segment failed" path above -- see record_ok()'s own doc comment,
-  // mirrored for the nak side (plus nak_block_errors_, parallel to nak_block_indices_).
+  // Common tail of every "this segment failed" path above - see record_ok()'s own doc comment,
+  // mirrored for the nak side (plus nak_block_errors_, parallel to nak_block_indices_). NOT
+  // drop_rejected() here - see flush_nak_block()'s own doc comment on why the nak side is never
+  // dropped for a rejected document (diagnostic writes must survive regardless of verdict).
   void xml_worker::record_nak(std::size_t idx, xml_segment& seg, error_info err)
   {
     seg.set_valid(false);
@@ -611,6 +624,37 @@ namespace fsp
     if (errs != nullptr) errs->resize(hi);
   }
 
+  // Same swap-and-pop compaction as drop_doc() above, but the removal predicate is "this
+  // segment's own document is rejected()" rather than "this segment's own document is doc_ndx" -
+  // see this method's own doc comment in xml_worker.hpp for why a whole-block scan is needed here,
+  // not just drop_doc()'s own single-document one.
+  void xml_worker::drop_rejected(std::vector<std::size_t>& indices, std::vector<error_info>* errs)
+  {
+    std::size_t lo = 0;
+    std::size_t hi = indices.size();
+    while (lo < hi)
+    {
+      const auto idx = indices[lo];
+      if (! ds_dscr_[static_cast<std::size_t>(pool_.segment_at(idx).doc_ndx())].rejected())
+      {
+        ++lo;
+        continue;
+      }
+      pool_.release_slots(std::span{&idx, 1});
+      --hi;
+      indices[lo] = indices[hi];
+      if (errs != nullptr) (*errs)[lo] = std::move((*errs)[hi]);
+    }
+    indices.resize(hi);
+    if (errs != nullptr) errs->resize(hi);
+  }
+
+  // NOT called with drop_rejected() run again here: record_ok() (the only threshold-triggered
+  // caller) already ran it once, right before deciding to call this - see its own doc comment for
+  // why paying that scan again here, unconditionally, on every flush would defeat the whole point
+  // (amortized O(1) per segment at millions-of-segments scale). flush_results() (the OTHER
+  // caller, at thread end) calls drop_rejected() itself, right before this, for the exact same
+  // reason record_ok() does - see its own doc comment.
   void xml_worker::flush_ok_block()
   {
     if (! ok_block_indices_.empty())
@@ -626,6 +670,11 @@ namespace fsp
 
   void xml_worker::flush_nak_block()
   {
+    // NOT drop_rejected() here: nak_block_indices_ holds diagnostic writes (write_failed_segment()-
+    // style findings a cb wants to keep regardless of the owning document's eventual verdict, e.g.
+    // ach's own NT-D9/NT-D10 unknown-BIC header diagnostics) - see drop_doc()'s own doc comment
+    // (xml_worker.hpp) on why the nak side is deliberately never dropped for a rejected document,
+    // only the ok side is.
     if (! nak_block_indices_.empty())
     {
       if (auto res = hooks_.on_failed_block_safe_store(nak_block_indices_, nak_block_errors_, pool_, ds_dscr_); res)
@@ -642,9 +691,16 @@ namespace fsp
   /**
    * @brief flushes whatever remains in the ok/nak blocks (see flush_ok_block()/flush_nak_block())
    * -- called by pipeline_worker at thread end.
+   *
+   * drop_rejected() runs here explicitly, right before flush_ok_block(), since this is the ONE
+   * caller of flush_ok_block() that does not go through record_ok()'s own threshold check (which
+   * is where every OTHER call already ran it - see record_ok()'s own doc comment) - this is fsp's
+   * last chance to compact a leftover rejected segment out of ok_block_indices_ before it is
+   * unconditionally flushed as-is.
    */
   void xml_worker::flush_results()
   {
+    drop_rejected(ok_block_indices_);
     flush_ok_block();
     flush_nak_block();
   }

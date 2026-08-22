@@ -113,6 +113,31 @@ namespace fsp
      *                vector).
      */
     void drop_doc(std::vector<std::size_t>& indices, std::size_t doc_ndx, std::vector<error_info>* errs = nullptr);
+    /**
+     * @brief Same compaction as drop_doc() above, but scans the WHOLE block for ANY segment whose
+     * own document is rejected() (not just one specific doc_ndx) - the last line of defense against
+     * a segment whose own document was found rejected only AFTER the segment was already added to
+     * ok_block_indices_, closing the window process_one()'s own per-segment rejected() check
+     * (checked once, when a segment starts processing) cannot: a segment legitimately started
+     * processing before its document was known rejected (a document's segments stream in via SAX
+     * as the input is read, so several can already be mid-flight on different worker threads' own
+     * blocks by the time a LATER part of the same document - e.g. a missing closing tag only
+     * discovered at EOF - is what actually rejects it) can still land here, in THIS thread's own
+     * block, after that.
+     *
+     * Called ONLY at the flush threshold (record_ok(), right before it decides whether to actually
+     * call flush_ok_block() - see its own doc comment) and once more at thread end
+     * (flush_results(), the one flush_ok_block() call that bypasses record_ok()'s own check
+     * entirely) - NOT from inside flush_ok_block() itself, deliberately: paying this O(block size)
+     * scan on every single flush would defeat the point (amortized O(1) per segment is the goal, at
+     * millions-of-segments-per-run scale) - confirmed directly: a small-buffer (ok_block_flush_
+     * size=1) end-to-end scenario that flushed one segment at a time, reproducing the underlying
+     * race non-deterministically before this existed, no longer does with this in place.
+     * @param indices vector to compact in place (ok_block_indices_ or nak_block_indices_).
+     * @param errs    nak_block_errors_ when indices is nak_block_indices_, or nullptr for the ok
+     *                side - same pairing convention as drop_doc() above.
+     */
+    void drop_rejected(std::vector<std::size_t>& indices, std::vector<error_info>* errs = nullptr);
     // Shared tail of flush_ok_block()/flush_nak_block() -- groups indices (a just-flushed batch,
     // already confirmed durably stored by the caller) by pool_.segment_at(idx).doc_ndx() and calls
     // pipeline_.record_segments_stored(doc_ndx, count, hooks_) once per distinct document

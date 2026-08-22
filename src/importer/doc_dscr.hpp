@@ -263,7 +263,10 @@ namespace fsp
      * document's lifetime. Lock-free: error_mask_ is its own atomic, independent of mtx_ (nothing
      * reads error_mask_ together with syntax_/valid_/semantic_/stored_ as one consistent
      * snapshot, so there is no cross-field ordering to protect here the way set_field() has to for
-     * those four).
+     * those four). Deliberately does NOT touch rejected_flag_ itself -- HE/TE (a single segment's
+     * own semantic failure) must NOT make rejected() true, only UA/SE/VE (the whole document is
+     * unusable) may -- see mark_rejected() below, which a caller opts into separately for exactly
+     * those three classes.
      * @return true iff THIS call is the one that moved error_mask_ from empty (0) to non-empty --
      * i.e. the first time this document has EVER been marked with any error class at all. Same
      * "exactly one winner" shape as try_start_closing(), but simpler: fetch_or()'s own return
@@ -274,6 +277,27 @@ namespace fsp
      */
     [[nodiscard]] bool mark_error(error_class cls) noexcept
     { return error_mask_.fetch_or(static_cast<std::uint8_t>(cls), std::memory_order_relaxed) == 0; }
+
+    /**
+     * @brief Stamps rejected_flag_ true early, for the whole-document error classes (UA/SE/VE) --
+     * same one-way store set_field() itself already performs the moment syntax_/valid_/semantic_
+     * first turns invalid, but needed HERE too for those three classes specifically: every one of
+     * their own call sites in pipeline_worker.cpp calls report_error_class() (which calls
+     * mark_error() above, then dispatches on_remove_stored_data_safe()) BEFORE the corresponding
+     * report_syntax_result()/report_validation_result() -- the call that would otherwise be what
+     * first sets rejected_flag_ via set_field(). Without this, there is a real window, between
+     * mark_error() returning (error_mask_ already non-empty, on_remove_stored_data_safe() already
+     * dispatched and possibly already returned) and that later call actually landing, during which
+     * rejected() still reads false -- a P-role thread's own xml_worker::process_one() rejected()
+     * check would not yet skip this document's segments, so one could still be written to storage
+     * in that window and never get cleaned up afterward (confirmed directly: a small-buffer
+     * end-to-end scenario flushing one segment at a time reproduced this non-deterministically,
+     * roughly 1 run in 5, before this fix). NOT called for HE/TE (see mark_error()'s own doc
+     * comment on why those must leave rejected() alone) -- pipeline::report_error_class()'s own
+     * no_headers parameter is exactly "is this UA/SE/VE (false) or HE (true)", so it is the one
+     * caller in a position to know which of the two applies here.
+     */
+    void mark_rejected() noexcept { rejected_flag_.store(true, std::memory_order_relaxed); }
     /// @brief The raw accumulated bitmask -- see error_class's own doc comment for the bit layout.
     [[nodiscard]] std::uint8_t error_mask() const noexcept { return error_mask_.load(std::memory_order_relaxed); }
     /// @brief Convenience over error_mask(): true iff cls's own bit has been recorded via mark_error().
@@ -495,6 +519,7 @@ namespace fsp
     // set_semantic_result()/set_stored_result() above, so call sites don't need to spell out
     // .status().mark_error(...) themselves.
     [[nodiscard]] bool          mark_error(error_class cls) noexcept { return status_.mark_error(cls); }
+    void                        mark_rejected() noexcept { status_.mark_rejected(); }
     [[nodiscard]] std::uint8_t  error_mask() const noexcept { return status_.error_mask(); }
     [[nodiscard]] bool          has_error(error_class cls) const noexcept { return status_.has_error(cls); }
     // Reported by C (the cutter) once cutting finishes. folded_validation is

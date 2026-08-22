@@ -219,6 +219,14 @@ namespace fsp
 
   e_void pipeline::report_error_class(std::size_t doc_ndx, error_class cls, bool no_headers, pipeline_hooks& hooks)
   {
+    // no_headers==false is exactly "this class is UA/SE/VE" (see every call site in
+    // pipeline_worker.cpp) -- the whole document is unusable, so rejected() must become true here,
+    // BEFORE on_remove_stored_data_safe() below returns, not only later via the corresponding
+    // report_syntax_result()/report_validation_result() call - see doc_dscr::mark_rejected()'s own
+    // doc comment for the race this closes. HE (no_headers==true) deliberately does NOT call this
+    // - a header semantic failure does not reject the whole document the way UA/SE/VE do (see
+    // error_class::he's own doc comment) - so rejected() must stay whatever it already was.
+    if (! no_headers) ds_dscr_[doc_ndx].mark_rejected();
     if (! ds_dscr_[doc_ndx].mark_error(cls)) return {}; // not the first error class recorded for this document -- already fired below
     return hooks.on_remove_stored_data_safe(ds_dscr_[doc_ndx].out_doc_id(), no_headers);
   }
