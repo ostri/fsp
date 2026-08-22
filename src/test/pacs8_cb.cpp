@@ -3,6 +3,22 @@
 #include <fmt/format.h>
 #include <magic_enum.hpp>
 
+namespace
+{
+  // BIC codes of every agent in ach's own dic_agents reference table (see
+  // ach/config/dic_agents.conf) -- kept here as a plain, semicolon-delimited literal instead of
+  // reading that JSON file at runtime, since fsp only vendors ach/utility.hpp/.cpp (see
+  // src/ach/), not ach's own DB-backed dic_agents loader. usr::bic_code_t::init() (see below)
+  // needs exactly this: a caller-owned, stable buffer plus a delimiter, nothing more. Lives here,
+  // not in work.hpp, since it's run-level validation data, not part of the document's own
+  // segmentation schema (which is all work.hpp otherwise describes).
+  // clang-format off
+  constexpr fsp::cstr_t known_agent_bics =
+    "HAABSI22;BAKOSI2X;KSPKSI22;SZKBSI2X;GORESI2X;LJBASI2X;KBMASI2X;"
+    "SIDRSI22;BACXSI22;HDELSI22;HLONSI22;HKVISI22;BFKKSI22;BSLJSI2X";
+  // clang-format on
+} // namespace
+
 fsp::e_void pacs8_cb::on_run_start(const fsp::doc_set_dscr& ds_dscr)
 {
   // No need to chain to a base body here (unlike the old on_run_start()) -- pipeline_hooks'
@@ -14,7 +30,7 @@ fsp::e_void pacs8_cb::on_run_start(const fsp::doc_set_dscr& ds_dscr)
   // see work.hpp) -- on_run_start() is guaranteed to run first (see pipeline_hooks.hpp's own
   // class comment), so this is the right place, not e.g. main() itself, which would need to know
   // about a fsp::work implementation detail it otherwise has no reason to touch.
-  usr::bic_code_t::init(fsp::work::known_agent_bics, ';');
+  usr::bic_code_t::init(known_agent_bics, ';');
   return {};
 }
 

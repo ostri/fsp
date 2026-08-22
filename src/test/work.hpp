@@ -14,17 +14,6 @@ namespace fsp::work
   });
   // clang-format on
 
-  // BIC codes of every agent in ach's own dic_agents reference table (see
-  // ach/config/dic_agents.conf) -- kept here as a plain, semicolon-delimited literal instead of
-  // reading that JSON file at runtime, since fsp only vendors ach/utility.hpp/.cpp (see
-  // src/ach/), not ach's own DB-backed dic_agents loader. usr::bic_code_t::init() (see below)
-  // needs exactly this: a caller-owned, stable buffer plus a delimiter, nothing more.
-  // clang-format off
-  static constexpr fsp::cstr_t known_agent_bics =
-    "HAABSI22;BAKOSI2X;KSPKSI22;SZKBSI2X;GORESI2X;LJBASI2X;KBMASI2X;"
-    "SIDRSI22;BACXSI22;HDELSI22;HLONSI22;HKVISI22;BFKKSI22;BSLJSI2X";
-  // clang-format on
-
   class[[= "/x:Document/FIToFICstmrCdtTrf/x:GrpHdr"]] pacs8_hdr : public fsp::seg_schema
   {
   public:
