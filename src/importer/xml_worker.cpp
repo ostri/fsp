@@ -492,12 +492,15 @@ namespace fsp
       }
       if (log_debug_) log_.debug(fmt::format("Segment {} (doc {}): document invalid, skipped processing.", seg.id(), seg.doc_ndx()));
       pipeline_.record_segment_failed(static_cast<std::size_t>(seg.doc_ndx()), seg.id(), hooks_);
+      // Captured BEFORE record_nak() -- see the doc_ndx capture below (the general rule this
+      // follows) for why seg must never be read again after a record_ok()/record_nak() call.
+      const int rejected_doc_ndx = seg.doc_ndx();
       record_nak(
         idx,
         seg,
         segment_result{seg.id(), seg.subtree_type(), seg.doc_ndx()},
         error_info{processor_error::syntax_error, "document invalid, segment skipped", "", static_cast<std::size_t>(seg.doc_ndx())});
-      return seg.doc_ndx();
+      return rejected_doc_ndx;
     }
 
     if (auto res = process_segment(seg))
@@ -508,6 +511,16 @@ namespace fsp
       // on_failed_block_safe_store() hook) need their own copy of *res -- hence the copy into the pool
       // before *res is moved into record_ok()/record_nak() below.
       pool_.result_at(idx) = *res;
+      // Captured BEFORE record_ok()/record_nak() below, and used instead of a second seg.doc_ndx()
+      // read afterwards: those calls can flush this segment straight into storage (see their own
+      // doc comment below) and, once flushed, release idx back to segment_pool's shared
+      // free_queues_ from INSIDE the call -- another thread's acquire_slot()/set_segment() (a
+      // cutter starting a new segment on the very same, just-freed slot) can then race a later read
+      // through seg, which is only ever a reference into that same pool slot, not a copy. Confirmed
+      // by direct experiment: capturing doc_ndx here and never reading seg again afterwards is what
+      // makes the data race TSan reports on xml_segment::operator=()/doc_ndx() (segment_pool.hpp's
+      // set_segment() racing this read) disappear.
+      const int captured_doc_ndx = seg.doc_ndx();
       // record_ok()/record_nak() below can flush this segment straight into storage
       // (on_block_safe_store()/on_failed_block_safe_store(), once ok_block_flush_size_/
       // nak_block_flush_size_ is reached) -- deliberately BEFORE pipeline_::finish_segment(), which
@@ -517,16 +530,20 @@ namespace fsp
       // for why the old, single-call record_segment_done() could not give that guarantee).
       if (semantically_ok) record_ok(idx, seg, std::move(*res));
       else record_nak(idx, seg, std::move(*res), error_info::semantic("on_seg_sem_check", "segment failed semantic validation"));
-      pipeline_.finish_segment(static_cast<std::size_t>(seg.doc_ndx()), semantically_ok, hooks_);
+      pipeline_.finish_segment(static_cast<std::size_t>(captured_doc_ndx), semantically_ok, hooks_);
+      return captured_doc_ndx;
     }
-    else
+    else // NOLINT(readability-else-after-return, llvm-else-after-return) -- res (process_segment()'s std::expected) is only in scope
+         // inside this if/else's init-statement
     {
       // res holds an error_info here, not a segment_result -- *res would be UB (dereferencing a
       // disengaged std::expected). Record the failure with the id-only constructor instead.
       pipeline_.record_segment_failed(static_cast<std::size_t>(seg.doc_ndx()), seg.id(), hooks_);
+      // Captured BEFORE record_nak() -- see the doc_ndx capture above for why.
+      const int failed_doc_ndx = seg.doc_ndx();
       record_nak(idx, seg, segment_result{seg.id(), seg.subtree_type(), seg.doc_ndx()}, res.error());
+      return failed_doc_ndx;
     }
-    return seg.doc_ndx();
   }
 
   // Common tail of every "this segment turned out OK" path above: marks seg valid, appends to
