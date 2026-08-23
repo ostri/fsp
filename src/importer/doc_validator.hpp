@@ -54,11 +54,18 @@ namespace fsp
     // constraint: a document xercesc can't even parse can't have gotten far enough to be judged
     // against the schema.
     void set_well_formed_error() noexcept { last_error_source_ = sax_error_source::well_formed; }
+    // Set by doc_validator::validate() right before every parser_->parse() call, same reasoning
+    // as Handler::set_doc() (handler.hpp) -- record() needs the whole document to recover a few
+    // lines of context around the error's own row (see context_around(), xml_line_context.hpp),
+    // and this ErrorHandler is a per-thread member of doc_validator, not per-document, so it has
+    // no other way to reach it.
+    void set_doc(cstr_t doc) { doc_ = doc; }
   private:
     void             record(const xercesc::SAXParseException& e);
     bool             has_error_ = false;
     str_t            message_;
     sax_error_source last_error_source_ = sax_error_source::none;
+    cstr_t           doc_;
   };
 
   // Narrow "V toolkit": owns one grammar pool + one SGXMLScanner-based reader, bound to a

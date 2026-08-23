@@ -341,6 +341,7 @@ endfunction()
 
 set(SRC_IMPORTER
     ${PROJECT_SOURCE_DIR}/src/importer/handler.cpp
+    ${PROJECT_SOURCE_DIR}/src/importer/xml_line_context.cpp
     ${PROJECT_SOURCE_DIR}/src/importer/xml_segment.cpp
     ${PROJECT_SOURCE_DIR}/src/importer/error_info.cpp
     ${PROJECT_SOURCE_DIR}/src/importer/importer_config.cpp

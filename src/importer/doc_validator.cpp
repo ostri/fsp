@@ -1,5 +1,6 @@
 #include "doc_validator.hpp"
 #include "x_str.hpp"
+#include "xml_line_context.hpp"
 #include <xercesc/framework/MemBufInputSource.hpp>
 #include <xercesc/validators/common/Grammar.hpp>
 #include <xercesc/sax2/XMLReaderFactory.hpp>
@@ -12,8 +13,12 @@ namespace fsp
   void validation_error_handler::record(const xercesc::SAXParseException& e)
   {
     if (has_error_) return; // keep the first reported error
-    has_error_ = true;
-    message_   = fmt::format("row:{} col:{} - {}", e.getLineNumber(), e.getColumnNumber(), x_str(e.getMessage()).to_string());
+    has_error_         = true;
+    const auto row     = e.getLineNumber();
+    const auto context = context_around(doc_, row);
+    message_ = context.empty()
+                 ? fmt::format("row:{} col:{} - {}", row, e.getColumnNumber(), x_str(e.getMessage()).to_string())
+                 : fmt::format("row:{} col:{} - {} near: {}", row, e.getColumnNumber(), x_str(e.getMessage()).to_string(), context);
   }
 
   doc_validator::doc_validator(const logger::Logger& log, const doc_set_dscr& ds_dscr)
@@ -76,6 +81,7 @@ namespace fsp
     err_handler_.resetErrors();
     const auto doc   = ds_dscr_[doc_ndx].string_view();
     bool       valid = true;
+    err_handler_.set_doc(doc); // see its own doc comment - record() needs this to build its own "near: ..." context
     try
     {
       xercesc::MemBufInputSource src(reinterpret_cast<const XMLByte*>(doc.data()), static_cast<XMLSize_t>(doc.size()), "xml_input", false);

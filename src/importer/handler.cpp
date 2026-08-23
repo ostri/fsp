@@ -2,68 +2,13 @@
 #include "common.hpp"
 #include "e_tag_wide.hpp"
 #include "x_str.hpp"
+#include "xml_line_context.hpp"
 
 #include <ranges>
 #include <xercesc/sax/SAXParseException.hpp>
 #include <xercesc/util/XMLString.hpp>
 namespace fsp
 {
-  namespace
-  {
-    // Byte offset (into doc) of the first character of 1-based line row, or cstr_t::npos if row
-    // is beyond the document's own last line (e.g. a bogus/0 line number, or xerces reporting one
-    // line past EOF for an unterminated document -- observed directly for a missing closing tag).
-    [[nodiscard]] std::size_t line_start_of(cstr_t doc, XMLFileLoc row)
-    {
-      if (row < 1) return cstr_t::npos;
-      std::size_t pos     = 0;
-      XMLFileLoc  cur_row = 1;
-      while (cur_row < row)
-      {
-        pos = doc.find('\n', pos);
-        if (pos == cstr_t::npos) return cstr_t::npos;
-        ++pos;
-        ++cur_row;
-      }
-      return pos;
-    }
-
-    // line starting at start, up to (not including) the next '\n' or end of doc -- trailing '\r'
-    // (CRLF input) is trimmed so a caller joining several of these into one single-line log record
-    // never embeds a stray control character.
-    [[nodiscard]] cstr_t line_at(cstr_t doc, std::size_t start)
-    {
-      auto end = doc.find('\n', start);
-      if (end == cstr_t::npos) end = doc.size();
-      auto line = doc.substr(start, end - start);
-      if (! line.empty() && line.back() == '\r') line.remove_suffix(1);
-      return line;
-    }
-
-    // xercesc::SAXParseException only ever gives a (1-based) row/col, never the offending text
-    // itself -- this recovers up to context_lines of surrounding text from Handler::doc() (the
-    // whole document, already mapped in memory, see doc_cutter::cut()'s own set_doc() call) purely
-    // for a human reading the log, no parsing decision anywhere depends on it: the line BEFORE the
-    // error, the error's own line, and the line AFTER, each prefixed with its own 1-based line
-    // number so the reader can tell which is which without re-counting. Returns an empty string if
-    // row is out of range (see line_start_of()'s own doc comment) rather than guessing -- this is
-    // diagnostic best-effort, never allowed to turn a parse error into a crash.
-    [[nodiscard]] str_t context_around(cstr_t doc, XMLFileLoc row)
-    {
-      const auto start = line_start_of(doc, row);
-      if (start == cstr_t::npos) return {};
-      str_t out;
-      if (row > 1)
-      {
-        const auto prev_start = line_start_of(doc, row - 1);
-        if (prev_start != cstr_t::npos) out += fmt::format("{}: '{}' | ", row - 1, line_at(doc, prev_start));
-      }
-      out += fmt::format("{}: '{}'", row, line_at(doc, start));
-      const auto next_start = line_start_of(doc, row + 1);
-      if (next_start != cstr_t::npos) out += fmt::format(" | {}: '{}'", row + 1, line_at(doc, next_start));
-      return out;
-    }
-  } // namespace
   // ============================================================================
   // Konstrukcija
   // ============================================================================
