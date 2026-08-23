@@ -18,10 +18,18 @@ namespace fsp
   // Minimal ErrorHandler that records the first validation error, then throws it straight back
   // out of parser_->parse() -- once a document is known invalid, there's no value in continuing
   // to validate the rest of it, so this short-circuits the parse instead of paying full CPU cost
-  // for content we're going to discard anyway.
+  // for content we're going to discard anyway. record() (doc_validator.cpp) also logs the first
+  // error at warn level, the moment it is seen - same "log where the problem is actually found"
+  // convention Handler::error()/fatalError() (handler.cpp, the C-side counterpart of this same
+  // validity-error path) already follow, so a caller never has to dig into a later, calmer
+  // info-level docs-row log line (e.g. ach's own on_doc_close()) to learn WHY a document failed V.
   class validation_error_handler : public xercesc::ErrorHandler
   {
   public:
+    explicit validation_error_handler(const logger::Logger& log)
+    : log_(log)
+    {
+    }
     void warning(const xercesc::SAXParseException& /*e*/) override { }
     void error(const xercesc::SAXParseException& e) override
     {
@@ -61,11 +69,15 @@ namespace fsp
     // no other way to reach it.
     void set_doc(cstr_t doc) { doc_ = doc; }
   private:
-    void             record(const xercesc::SAXParseException& e);
+    void record(const xercesc::SAXParseException& e);
+    // NOLINTBEGIN(cppcoreguidelines-avoid-const-or-ref-data-members)
+    const logger::Logger& log_; // must be first logger, same convention Handler::log_ documents
+    // NOLINTEND(cppcoreguidelines-avoid-const-or-ref-data-members)
     bool             has_error_ = false;
     str_t            message_;
     sax_error_source last_error_source_ = sax_error_source::none;
     cstr_t           doc_;
+    const bool       log_warn_ = log_.active(logger::level::warn);
   };
 
   // Narrow "V toolkit": owns one grammar pool + one SGXMLScanner-based reader, bound to a

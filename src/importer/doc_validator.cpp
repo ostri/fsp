@@ -19,11 +19,16 @@ namespace fsp
     message_ = context.empty()
                  ? fmt::format("row:{} col:{} - {}", row, e.getColumnNumber(), x_str(e.getMessage()).to_string())
                  : fmt::format("row:{} col:{} - {} near: {}", row, e.getColumnNumber(), x_str(e.getMessage()).to_string(), context);
+    // Same "log where the problem is actually found" convention Handler::error()/fatalError()
+    // already follow (handler.cpp) - warn, not error/critical (this project's own convention: a
+    // rejected document is an expected outcome, not itself a sign the importer is malfunctioning).
+    if (log_warn_) log_.warn(fmt::format("V: {}", message_));
   }
 
   doc_validator::doc_validator(const logger::Logger& log, const doc_set_dscr& ds_dscr)
   : log_(log)
   , ds_dscr_(ds_dscr)
+  , err_handler_(log)
   {
   }
 
