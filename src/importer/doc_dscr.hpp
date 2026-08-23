@@ -252,6 +252,29 @@ namespace fsp
       const std::scoped_lock lock(mtx_);
       return stored_;
     }
+    /**
+     * @brief True once BOTH syntax_ and valid_ have been reported (neither is still
+     * three_state::unknown) -- the point at which "is this document SE/VE/UA-rejected" has a
+     * definitive answer, not just a not-yet-known one. C and V run on separate worker threads with
+     * no ordering guarantee between them (pipeline_worker::do_validate()'s own doc comment); P
+     * (segment processing) can finish and call maybe_finish_seg_processing() (pipeline.cpp) the
+     * moment C alone is done (record_doc_close()'s own cut_finished() trigger), with no dependency
+     * on V having reported anything at all yet. A caller that trusts rejected()==false to mean
+     * "this document is fine" without first waiting for this can therefore race a V verdict still
+     * in flight -- confirmed by direct experiment: a document whose only problem is a well-
+     * formedness break C itself does not treat as fatal (validating_==false in non-folded mode,
+     * see Handler::error()/fatalError()'s own doc comment) relies ENTIRELY on V to ever report
+     * syntax_/valid_ invalid at all; without waiting, on_doc_sem_check() can run (and, if it also
+     * fails, e.g. because the malformed document has no readable segments) win try_start_closing()
+     * via semantic_ before V's own report_validation_result(false) ever arrives, leaving the
+     * document's own error_class/no_headers cleanup routed through the wrong path entirely (see
+     * pipeline::maybe_finish_seg_processing()'s own doc comment for what waiting on this fixes).
+     */
+    [[nodiscard]] bool cv_known() const noexcept
+    {
+      const std::scoped_lock lock(mtx_);
+      return syntax_ != three_state::unknown && valid_ != three_state::unknown;
+    }
 
     /**
      * @brief Records that this document was rejected for reason cls -- OR's cls's own bit into

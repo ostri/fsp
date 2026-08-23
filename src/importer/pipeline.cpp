@@ -148,6 +148,21 @@ namespace fsp
   // segment-level one (check_segment_semantics()) already does.
   void pipeline::maybe_finish_seg_processing(std::size_t doc_ndx, pipeline_hooks& hooks)
   {
+    // Waits (spin-yield, not a queue requeue -- same "normally sub-millisecond" reasoning as
+    // pipeline_worker::do_validate()'s own is_opened() wait) for BOTH syntax_/valid_ to be known
+    // before trusting rejected()==false below: cut_finished() (this call's own trigger, via
+    // record_doc_close()) only requires C to be done, not V, which can still be in flight on a
+    // different thread for the same document -- see doc_status_t::cv_known()'s own doc comment for
+    // the concrete failure this closes (a malformed document racing its own on_doc_sem_check()
+    // verdict ahead of V's report_validation_result(), landing on the wrong error_class/no_headers
+    // cleanup path entirely). Always terminates: V always eventually reports either
+    // report_validation_result(true) or (report_error_class()+)report_validation_result(false) for
+    // every doc_ndx that reaches this line, except the agent_id()==0 case, which do_validate()
+    // itself skips outright -- but that case has already dragged BOTH syntax_/valid_ invalid via
+    // do_cut()'s own report_syntax_result(false) before ever reaching P, so cv_known() is already
+    // true for it by the time any of this document's segments could finish processing.
+    while (! ds_dscr_[doc_ndx].status().cv_known()) std::this_thread::yield();
+
     const bool already_rejected = ds_dscr_[doc_ndx].rejected();
     const bool semantic_ok      = already_rejected || hooks.on_doc_safe_sem_check(doc_ndx);
     // on_doc_sem_check() returning false is a DOCUMENT-level header semantic finding (e.g. a
