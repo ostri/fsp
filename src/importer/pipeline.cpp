@@ -140,9 +140,36 @@ namespace fsp
   // hook: the document's own aggregate status() is unaffected either way, since at least one other
   // fact is already three_state::invalid (that's what rejected() means) and status() only needs
   // ONE invalid fact to report invalid overall.
+  //
+  // A FALSE verdict from actually asking the hook (i.e. this is the first fact to reject the
+  // document) is itself routed through report_error_class(doc_ndx, error_class::he, true, hooks)
+  // below, before set_semantic_result() ever runs -- see that call's own doc comment for why a
+  // document-level semantic finding gets the exact same on_remove_stored_data() cleanup a
+  // segment-level one (check_segment_semantics()) already does.
   void pipeline::maybe_finish_seg_processing(std::size_t doc_ndx, pipeline_hooks& hooks)
   {
-    const bool semantic_ok = ds_dscr_[doc_ndx].rejected() || hooks.on_doc_safe_sem_check(doc_ndx);
+    const bool already_rejected = ds_dscr_[doc_ndx].rejected();
+    const bool semantic_ok      = already_rejected || hooks.on_doc_safe_sem_check(doc_ndx);
+    // on_doc_sem_check() returning false is a DOCUMENT-level header semantic finding (e.g. a
+    // header-stated transaction count/sum that does not match what was actually read) -- the same
+    // error_class::he outcome check_segment_semantics() already reports for a SEGMENT-level header
+    // finding (on_type() itself returning false for the header segment), just discovered one layer
+    // later, once every one of this document's segments has finished processing rather than while
+    // the header segment itself was still being read. Routing it through the same
+    // report_error_class() call the segment-level case already uses means a hook's own
+    // on_remove_stored_data() cleanup (no_headers=true -- every non-header row goes, the header's
+    // own row and whatever finding was staged against it stays, see error_class::he's own doc
+    // comment) fires for BOTH cases identically -- a concrete cb's own on_doc_sem_check() override
+    // does not need any cleanup logic of its own, only to report ok/not. Guarded by
+    // !already_rejected: a document already rejected on an earlier fact must not report a second,
+    // redundant error_class (report_error_class() itself also guards this via mark_error()'s own
+    // "first class only" rule, see its own doc comment, but checking here too avoids the call
+    // altogether for the common case of a document that is ALREADY known bad by this point).
+    if (! semantic_ok && ! already_rejected)
+    {
+      if (auto res = report_error_class(doc_ndx, error_class::he, true, hooks); ! res)
+        log_.error(fmt::format("on_remove_stored_data() failed for doc {} (HE, document-level): {}", doc_ndx, res.error().to_string()));
+    }
     if (ds_dscr_[doc_ndx].set_semantic_result(semantic_ok)) finish_doc_close(doc_ndx, hooks);
     // doc_data(doc_ndx) is done being read from THIS side (on_doc_safe_sem_check() above already
     // returned, or was skipped) -- see mark_doc_data_reader_done()'s own doc comment on why
