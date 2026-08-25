@@ -398,6 +398,41 @@ namespace fsp
     const auto num_processors   = std::max<std::size_t>(1, (max_concurrent_cutters_ * cfg_.cutter_ratio_den) / cutter_ratio_num);
 
     const auto num_parallel = std::min(requested_threads, max_concurrent_cutters_ + num_processors);
+
+    // requested_threads capped num_parallel below max_concurrent_cutters_ + num_processors (the
+    // budget max_concurrent_cutters_ was sized against above) -- without this, max_concurrent_
+    // cutters_ itself would stay at its uncapped value while num_parallel shrank around it, so
+    // try_reserve_cutter_slot() (which only ever compares against max_concurrent_cutters_, never
+    // num_parallel) could let EVERY thread in the pool win a cutter slot at once whenever
+    // doc_count >= min(requested_threads, hw_concurrency) (>1 documents queued, each a worker's
+    // own worth of cutting). With no thread ever reaching P, segment_pool's fixed-size free list
+    // drains to zero and Handler::endElement()'s acquire_slot() deadlocks permanently the moment
+    // one document's own segment count exhausts it - exactly the failure try_reserve_cutter_
+    // slot()'s own doc comment already names, just not fully prevented by it until this clamp.
+    //
+    // Re-derived from num_parallel at the SAME cutter_ratio_num:cutter_ratio_den ratio the
+    // uncapped max_concurrent_cutters_/num_processors pair above was already sized at (not
+    // "shrink cutters by whatever num_processors needs" - that would leave P oversized relative
+    // to the now-smaller thread budget, the same regression commit a838163 measured in the
+    // opposite direction). Clamped into [1, num_parallel] on BOTH ends, not just capped from
+    // above: num_parallel==1 (a caller-requested single worker thread, e.g. num_of_workers=1 --
+    // see test_pipeline_stages.cpp's own "test-sem-then-v") rounds the ratio down to 0, which
+    // would leave NO thread ever eligible to cut at all - every document then sits in c_queue_
+    // forever and nothing downstream (V/P) has anything to report either, hanging in
+    // maybe_finish_seg_processing()'s own cv_known() spin-yield permanently (a live, spinning
+    // hang, not the blocking futex deadlock this whole clamp exists to prevent, but no less
+    // fatal) - the one worker thread that DOES exist must always be allowed to cut. The upper
+    // clamp (num_parallel itself, not num_parallel-1) matters for the same num_parallel==1 case:
+    // that lone thread has to serve C, V and P all by itself in turn (try_reserve_cutter_slot()
+    // releases its own slot the moment do_cut() returns, see pipeline_worker::operator()()'s own
+    // priority order), so num_parallel==1 is exactly the one case where max_concurrent_cutters_
+    // == num_parallel is correct, not a deadlock risk (there is no OTHER thread being starved of
+    // a cutter slot). For every num_parallel > 1 this ratio-based value is already < num_parallel
+    // on its own (verified: (n*13)/19 < n for all n >= 1), so the upper clamp is a no-op there.
+    if (max_concurrent_cutters_ + num_processors > num_parallel)
+      max_concurrent_cutters_ =
+        std::min(num_parallel, std::max<std::size_t>(1, (num_parallel * cutter_ratio_num) / (cutter_ratio_num + cfg_.cutter_ratio_den)));
+
     return {.run_validation = run_validation, .cut_with_validation = cut_with_validation, .num_parallel = num_parallel};
   }
 
