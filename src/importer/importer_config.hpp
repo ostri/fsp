@@ -46,6 +46,15 @@ namespace fsp
     // lock/condition_variable contention between concurrent C/P threads. Default 2 was found
     // empirically fastest against N=1,3,4 (see pipeline.cpp / segment_pool.hpp).
     std::size_t pool_shard_count = 2; // NOLINT(readability-magic-numbers)
+    // Multiplier applied to std::thread::hardware_concurrency() before it caps
+    // max_concurrent_cutters_ (see pipeline::plan_run()). Default 1.0 keeps today's behaviour (cap
+    // == hw_concurrency exactly). Raising it lets a caller deliberately oversubscribe the C role
+    // past the hardware thread count -- measured harmless up to 2x hw_concurrency on a
+    // 20-hw-thread/10M-txn benchmark (102-103s from 20 workers up through 40, no regression), since
+    // the extra threads spend most of their time blocked on I/O (DB round-trips, disk), not
+    // competing for CPU. Left at 1.0, requested_threads/doc_count still clamp exactly as before --
+    // this only raises the ceiling, never forces oversubscription on its own.
+    double overcommit = 1.0; // NOLINT(readability-magic-numbers)
     // Batch sizes for pipeline_hooks::on_block_store()/on_failed_block_store(): a P-role thread flushes
     // its locally accumulated ok/failed segment indices once one of these many have piled up (or,
     // for whatever remains, once at thread-loop end -- see xml_worker::process_one()/
@@ -71,14 +80,15 @@ namespace fsp
   {0}cutter_ratio_num: {4}
   {0}cutter_ratio_den: {5}
   {0}pool_shard_count: {6}
-  {0}ok_block_flush_size: {7}
-  {0}nak_block_flush_size: {8}
-  {0}log_config.app_name: {9}
-  {0}log_config.run_mode: {10}
-  {0}log_config.console_level: {11}
-  {0}log_config.file_level: {12}
-  {0}log_config.log_folder: {13}
-  {0}program_name: {14})",
+  {0}overcommit: {7}
+  {0}ok_block_flush_size: {8}
+  {0}nak_block_flush_size: {9}
+  {0}log_config.app_name: {10}
+  {0}log_config.run_mode: {11}
+  {0}log_config.console_level: {12}
+  {0}log_config.file_level: {13}
+  {0}log_config.log_folder: {14}
+  {0}program_name: {15})",
                        ind,
                        targets.dump(offs),
                        num_of_workers,
@@ -86,6 +96,7 @@ namespace fsp
                        cutter_ratio_num,
                        cutter_ratio_den,
                        pool_shard_count,
+                       overcommit,
                        ok_block_flush_size,
                        nak_block_flush_size,
                        log_config.app_name,

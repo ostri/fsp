@@ -377,15 +377,20 @@ namespace fsp
     auto hw_concurrency = static_cast<std::size_t>(std::thread::hardware_concurrency());
     if (hw_concurrency == 0) hw_concurrency = 1;
 
+    // cfg_.overcommit (default 1.0) scales the hardware-concurrency cap below before it is
+    // applied -- see its own doc comment in importer_config.hpp. Rounds down, then re-clamped to
+    // >= 1 same as hw_concurrency itself, so an overcommit < 1/hw_concurrency can't zero it out.
+    const auto hw_cap = std::max<std::size_t>(1, static_cast<std::size_t>(static_cast<double>(hw_concurrency) * cfg_.overcommit));
+
     // At most one cutter can ever usefully work per document (try_reserve_cutter_slot() would
     // just leave surplus cutter slots permanently unused past doc_count), and cutting more
     // documents at once than there are hardware threads just oversubscribes the CPU -- so C is
-    // capped by the smallest of (caller's requested thread count, hardware concurrency, doc
-    // count), not sized as a fixed fraction of the thread budget. This matters most for small
-    // batches: for a single document, 15 idle-prone extra P threads competing over one cutter's
-    // trickle of segments cost us a measured ~25-35% wall-time regression (see bisection of
-    // commit a838163) for zero throughput gain.
-    max_concurrent_cutters_ = std::max<std::size_t>(1, std::min({requested_threads, hw_concurrency, doc_count}));
+    // capped by the smallest of (caller's requested thread count, hardware concurrency (scaled by
+    // cfg_.overcommit), doc count), not sized as a fixed fraction of the thread budget. This
+    // matters most for small batches: for a single document, 15 idle-prone extra P threads
+    // competing over one cutter's trickle of segments cost us a measured ~25-35% wall-time
+    // regression (see bisection of commit a838163) for zero throughput gain.
+    max_concurrent_cutters_ = std::max<std::size_t>(1, std::min({requested_threads, hw_cap, doc_count}));
 
     // P is then sized off the caller-configured C:P ratio (cfg_.cutter_ratio_num/_den, default
     // 13:6, empirically the fastest of 13:5/13:6/13:7/13:8 tested on a 10-doc/10M-txn batch),
