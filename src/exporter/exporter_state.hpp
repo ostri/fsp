@@ -56,16 +56,16 @@ namespace fsp
      * with another thread that just exhausted the last drain -- not an error, caller should
      * re-check available_drains_empty() and loop).
      */
-    [[nodiscard]] std::optional<int> pick_or_keep_drain(std::optional<int> current);
+    [[nodiscard]] std::optional<drain_t> pick_or_keep_drain(std::optional<drain_t> current);
     /// @brief Removes drain_id from available_drains_, if present. Idempotent.
-    void remove_available_drain(int drain_id);
+    void remove_available_drain(drain_t drain_id);
     /// @brief True once every drain has been removed from available_drains_.
     [[nodiscard]] bool available_drains_empty() const;
 
     // --- drain_statistic_: lazily-loaded per-drain run statistics ---
 
     /// @brief True once drain_id's initial statistics have been loaded (see load_drain_stat_if_needed()).
-    [[nodiscard]] bool is_drain_loaded(int drain_id) const;
+    [[nodiscard]] bool is_drain_loaded(drain_t drain_id) const;
     /**
      * @brief Loads drain_id's initial statistics exactly once, the first time any worker calls
      * this for that drain.
@@ -76,9 +76,9 @@ namespace fsp
      * @param fetch invokes the caller's cb_exporter::fetch_run_stat() for drain_id; only called
      * at all if this is genuinely the first (winning) caller for drain_id.
      */
-    void load_drain_stat_if_needed(int drain_id, std::size_t max_doc_txn, const std::function<exp_result<run_stat_pair_t>()>& fetch);
+    void load_drain_stat_if_needed(drain_t drain_id, std::size_t max_doc_txn, const std::function<exp_result<run_stat_pair_t>()>& fetch);
     /// @brief Atomically allocates and returns the next document id for drain_id (numbered from 1).
-    [[nodiscard]] std::uint64_t next_doc_id(int drain_id);
+    [[nodiscard]] doc_id_t next_doc_id(drain_t drain_id);
 
     // --- doc_statistics_: per-document bookkeeping ---
 
@@ -87,10 +87,10 @@ namespace fsp
     /// @brief Updates a previously-registered document's entry once it has been fully written.
     void finalize_doc(std::size_t doc_stat_ndx, doc_statistics_t updated_fields);
     /// @brief Increments the running "documents produced" count for drain_id (the run's global stat).
-    void increment_drain_doc_count(int drain_id);
+    void increment_drain_doc_count(drain_t drain_id);
 
     /// @brief Looks up drain_id's static description, or nullptr if unknown.
-    [[nodiscard]] const drain_dscr_t*              find_drain(int drain_id) const noexcept;
+    [[nodiscard]] const drain_dscr_t*              find_drain(drain_t drain_id) const noexcept;
     [[nodiscard]] const std::vector<drain_dscr_t>& drains() const noexcept { return drain_static_; }
 
     // --- controlled-stop signal shared by every worker ---
@@ -102,8 +102,8 @@ namespace fsp
   private:
     std::vector<drain_dscr_t> drain_static_; // immutable after construction, no lock needed
 
-    mutable std::mutex available_mutex_; // protects available_drains_ -- the hottest lock, touched every loop iteration
-    std::vector<int>   available_drains_;
+    mutable std::mutex  available_mutex_; // protects available_drains_ -- the hottest lock, touched every loop iteration
+    std::vector<drain_t> available_drains_;
 
     mutable std::mutex             stats_mutex_;     // protects only the one-time 'loaded' transition per drain
     std::vector<drain_statistic_t> drain_statistic_; // sized once in the ctor, never resized (see drain_statistic_t)
@@ -111,8 +111,8 @@ namespace fsp
     mutable std::mutex            doc_stats_mutex_; // protects doc_statistics_, touched once per document
     std::vector<doc_statistics_t> doc_statistics_;
 
-    mutable std::mutex                   doc_count_mutex_; // protects drain_doc_counts_
-    std::unordered_map<int, std::size_t> drain_doc_counts_;
+    mutable std::mutex                       doc_count_mutex_; // protects drain_doc_counts_
+    std::unordered_map<drain_t, std::size_t> drain_doc_counts_;
 
     std::stop_source stop_source_; // one shared source; every worker reads its token
   };

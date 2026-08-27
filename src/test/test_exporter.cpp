@@ -14,11 +14,11 @@
 #include <vector>
 
 using fsp::cb_exporter_crtp;
+using fsp::exp_error;
 using fsp::exp_result;
 using fsp::exporter;
 using fsp::exporter_config_t;
 using fsp::exporter_drain_cfg_t;
-using fsp::exporter_error;
 using fsp::fetch_doc_data_result_t;
 using fsp::fetch_doc_data_status;
 using fsp::qualificators_t;
@@ -115,40 +115,42 @@ namespace
    */
   struct shared_fixture
   {
-    std::mutex                             mtx;
-    std::map<int, std::vector<test_txn_t>> pending;       // drain_id -> remaining transactions, front = next
-    std::map<int, std::size_t>             max_doc_txn;   // drain_id -> block size
-    std::map<int, std::size_t>             existing_docs; // drain_id -> existing_doc_count reported by fetch_run_stat
-    bool                                   fail_fetch_doc_name      = false;
-    bool                                   fail_fetch_run_stat      = false;
-    bool                                   fail_fetch_doc_data      = false;
-    bool                                   fail_prepare_transaction = false;
-    bool                                   fail_prepare_header      = false;
-    bool                                   fail_prepare_footer      = false;
-    bool                                   always_reject            = false; // document_prepared() always returns false
-    bool                                   always_taken_name = false; // fetch_doc_name() always returns a name that already exists on disk
-    std::string                            tmp_dir;
+    std::mutex                                      mtx;
+    std::map<fsp::drain_t, std::vector<test_txn_t>> pending;       // drain_id -> remaining transactions, front = next
+    std::map<fsp::drain_t, std::size_t>             max_doc_txn;   // drain_id -> block size
+    std::map<fsp::drain_t, std::size_t>             existing_docs; // drain_id -> existing_doc_count reported by fetch_run_stat
+    bool                                            fail_fetch_doc_name      = false;
+    bool                                            fail_fetch_run_stat      = false;
+    bool                                            fail_fetch_doc_data      = false;
+    bool                                            fail_prepare_transaction = false;
+    bool                                            fail_prepare_header      = false;
+    bool                                            fail_prepare_footer      = false;
+    bool                                            always_reject            = false; // document_prepared() always returns false
+    bool        always_taken_name = false; // fetch_doc_name() always returns a name that already exists on disk
+    std::string tmp_dir;
   };
 
   class demo_cb : public cb_exporter_crtp<demo_cb, test_txn_t, test_qual_t>
   {
   public:
-    explicit demo_cb(std::shared_ptr<shared_fixture> shared)
-    : shared_(std::move(shared))
+    demo_cb(std::shared_ptr<shared_fixture> shared, const Logger& log)
+    : cb_exporter_crtp<demo_cb, test_txn_t, test_qual_t>(log)
+    , shared_(std::move(shared))
     {
     }
 
     [[nodiscard]] exp_result<fsp::str_t> fetch_doc_name(const test_qual_t& /*qualifiers*/,
                                                         fsp::cstr_t /*path*/,
-                                                        int         drain_id,
-                                                        std::size_t block_number,
-                                                        std::size_t /*total_blocks*/,
-                                                        fsp::cstr_t /*filename_prefix*/) override
+                                                        fsp::drain_t drain_id,
+                                                        blk_id_t     block_number,
+                                                        blk_id_t /*total_blocks*/,
+                                                        fsp::cstr_t /*filename_prefix*/,
+                                                        fsp::cstr_t /*filename_ext*/) override
     {
       const std::scoped_lock lock(shared_->mtx);
       if (shared_->fail_fetch_doc_name)
       {
-        return std::unexpected(fsp::exporter_error_info(exporter_error::fetch_doc_name_failed, "fetch_doc_name failed"));
+        return std::unexpected(fsp::exp_error_info(exp_error::fetch_doc_name_failed, "fetch_doc_name failed"));
       }
       if (shared_->always_taken_name) { return fsp::str_t("collide.xml"); }
       // drain_id is embedded in the name -- block_number alone is only unique WITHIN one drain
@@ -158,28 +160,27 @@ namespace
       return fmt::format("doc_{}_{}.xml", drain_id, block_number);
     }
 
-    [[nodiscard]] exp_result<run_stat_t> fetch_run_stat(const test_qual_t& /*qualifiers*/, int drain_id) override
+    [[nodiscard]] exp_result<run_stat_t> fetch_run_stat(const test_qual_t& /*qualifiers*/, fsp::drain_t drain_id) override
     {
       const std::scoped_lock lock(shared_->mtx);
       if (shared_->fail_fetch_run_stat)
       {
-        return std::unexpected(fsp::exporter_error_info(exporter_error::fetch_run_stat_failed, "fetch_run_stat failed"));
+        return std::unexpected(fsp::exp_error_info(exp_error::fetch_run_stat_failed, "fetch_run_stat failed"));
       }
       const auto existing = shared_->existing_docs.contains(drain_id) ? shared_->existing_docs.at(drain_id) : 0;
       return run_stat_t{.remaining_txn_count = shared_->pending[drain_id].size(), .existing_doc_count = existing};
     }
 
     [[nodiscard]] fetch_doc_data_result_t<test_txn_t> fetch_doc_data(const test_qual_t& /*qualifiers*/,
-                                                                     int drain_id,
-                                                                     std::uint64_t /*doc_id*/) override
+                                                                     fsp::drain_t drain_id,
+                                                                     fsp::doc_id_t /*doc_id*/) override
     {
       const std::scoped_lock lock(shared_->mtx);
       if (shared_->fail_fetch_doc_data)
       {
-        return fetch_doc_data_result_t<test_txn_t>{
-          .status = fetch_doc_data_status::error,
-          .block  = {},
-          .error  = fsp::exporter_error_info(exporter_error::fetch_doc_data_failed, "fetch_doc_data failed")};
+        return fetch_doc_data_result_t<test_txn_t>{.status = fetch_doc_data_status::error,
+                                                   .block  = {},
+                                                   .error = fsp::exp_error_info(exp_error::fetch_doc_data_failed, "fetch_doc_data failed")};
       }
       auto& queue = shared_->pending[drain_id];
       if (queue.empty())
@@ -196,45 +197,45 @@ namespace
     }
 
     [[nodiscard]] exp_result<fsp::str_t> prepare_transaction(std::size_t /*ndx*/,
-                                                             int /*drain_id*/,
-                                                             std::uint64_t /*doc_id*/,
+                                                             fsp::drain_t /*drain_id*/,
+                                                             fsp::doc_id_t /*doc_id*/,
                                                              const test_txn_t& data) override
     {
       const std::scoped_lock lock(shared_->mtx);
       if (shared_->fail_prepare_transaction)
       {
-        return std::unexpected(fsp::exporter_error_info(exporter_error::prepare_transaction_failed, "prepare_transaction failed"));
+        return std::unexpected(fsp::exp_error_info(exp_error::prepare_transaction_failed, "prepare_transaction failed"));
       }
       return fmt::format("<txn id=\"{}\">{}</txn>", fsp::to_string(data.id), data.value);
     }
 
     [[nodiscard]] exp_result<fsp::str_t> prepare_header(const test_qual_t& /*qualifiers*/,
-                                                        int           drain_id,
-                                                        std::uint64_t doc_id,
+                                                        fsp::drain_t  drain_id,
+                                                        fsp::doc_id_t doc_id,
                                                         const txn_block_t<test_txn_t>& /*block*/) override
     {
       const std::scoped_lock lock(shared_->mtx);
       if (shared_->fail_prepare_header)
       {
-        return std::unexpected(fsp::exporter_error_info(exporter_error::prepare_header_failed, "prepare_header failed"));
+        return std::unexpected(fsp::exp_error_info(exp_error::prepare_header_failed, "prepare_header failed"));
       }
       return fmt::format(R"(<?xml version="1.0" encoding="UTF-8"?><doc drain="{}" id="{}">)", drain_id, doc_id);
     }
 
     [[nodiscard]] exp_result<fsp::str_t> prepare_footer(const test_qual_t& /*qualifiers*/,
-                                                        int /*drain_id*/,
-                                                        std::uint64_t /*doc_id*/,
+                                                        fsp::drain_t /*drain_id*/,
+                                                        fsp::doc_id_t /*doc_id*/,
                                                         const txn_block_t<test_txn_t>& /*block*/) override
     {
       const std::scoped_lock lock(shared_->mtx);
       if (shared_->fail_prepare_footer)
       {
-        return std::unexpected(fsp::exporter_error_info(exporter_error::prepare_footer_failed, "prepare_footer failed"));
+        return std::unexpected(fsp::exp_error_info(exp_error::prepare_footer_failed, "prepare_footer failed"));
       }
       return fsp::str_t("</doc>");
     }
 
-    [[nodiscard]] bool document_prepared(const test_qual_t& /*qualifiers*/, int /*drain_id*/, std::uint64_t /*doc_id*/) override
+    [[nodiscard]] bool document_prepared(const test_qual_t& /*qualifiers*/, fsp::drain_t /*drain_id*/, fsp::doc_id_t /*doc_id*/) override
     {
       const std::scoped_lock lock(shared_->mtx);
       return ! shared_->always_reject;
@@ -243,7 +244,7 @@ namespace
     std::shared_ptr<shared_fixture> shared_;
   };
 
-  test_txn_t make_txn(fsp::uint128_t id, const fsp::str_t& value)
+  test_txn_t make_txn(fsp::txn_id_t id, const fsp::str_t& value)
   {
     test_txn_t t;
     t.id    = id;
@@ -267,8 +268,8 @@ TEST_CASE("exporter produces documents for a single drain with a single worker t
   exporter<test_txn_t, test_qual_t> exp(
     make_cfg(dirs, {exporter_drain_cfg_t{.id = 1, .name = "BANKA1", .max_doc_txn = 2}}, 1), test_qual_t{}, *log_ptr, "test"); // NOLINT
 
-  demo_cb    cb(shared);
-  const auto res = exp.execute(cb);
+  demo_cb    cb(shared, *log_ptr);
+  const auto res = exp.exec(cb);
   REQUIRE(res.has_value());
   CHECK(res->total_documents == 2);      // NOLINT(readability-magic-numbers)
   CHECK(res->total_transactions == 3);   // NOLINT(readability-magic-numbers)
@@ -287,8 +288,8 @@ TEST_CASE("exporter's produced documents contain the expected header/transaction
 
   exporter<test_txn_t, test_qual_t> exp(
     make_cfg(dirs, {exporter_drain_cfg_t{.id = 1, .name = "BANKA1", .max_doc_txn = 10}}, 1), test_qual_t{}, *log_ptr, "test"); // NOLINT
-  demo_cb cb(shared);
-  REQUIRE(exp.execute(cb).has_value());
+  demo_cb cb(shared, *log_ptr);
+  REQUIRE(exp.exec(cb).has_value());
 
   REQUIRE(file_count(dirs.target()) == 1);
   const auto content = read_file((fs::path(dirs.target()) / *fs::directory_iterator(dirs.target())).string());
@@ -305,8 +306,8 @@ TEST_CASE("exporter with multiple worker threads and multiple drains produces ev
   auto shared = std::make_shared<shared_fixture>();
   for (int drain_id = 1; drain_id <= 2; ++drain_id) // NOLINT(readability-magic-numbers)
   {
-    shared->max_doc_txn[drain_id] = 5;      // NOLINT(readability-magic-numbers)
-    for (fsp::uint128_t i = 0; i < 23; ++i) // NOLINT(readability-magic-numbers)
+    shared->max_doc_txn[drain_id] = 5;     // NOLINT(readability-magic-numbers)
+    for (fsp::txn_id_t i = 0; i < 23; ++i) // NOLINT(readability-magic-numbers)
     {
       shared->pending[drain_id].push_back(make_txn(i + 1, "x"));
     }
@@ -320,8 +321,8 @@ TEST_CASE("exporter with multiple worker threads and multiple drains produces ev
     test_qual_t{},
     *log_ptr,
     "test");
-  demo_cb    cb(shared);
-  const auto res = exp.execute(cb);
+  demo_cb    cb(shared, *log_ptr);
+  const auto res = exp.exec(cb);
   REQUIRE(res.has_value());
   CHECK(res->total_transactions == 46);   // NOLINT(readability-magic-numbers) -- 23 * 2 drains
   CHECK(res->total_documents == 10);      // NOLINT(readability-magic-numbers) -- ceil(23/5) * 2 = 5*2
@@ -341,8 +342,8 @@ TEST_CASE("exporter removes a drain from available work once its final partial b
 
   exporter<test_txn_t, test_qual_t> exp(
     make_cfg(dirs, {exporter_drain_cfg_t{.id = 1, .name = "BANKA1", .max_doc_txn = 10}}, 2), test_qual_t{}, *log_ptr, "test"); // NOLINT
-  demo_cb    cb(shared);
-  const auto res = exp.execute(cb);
+  demo_cb    cb(shared, *log_ptr);
+  const auto res = exp.exec(cb);
   REQUIRE(res.has_value());
   CHECK(res->total_documents == 1);
   CHECK(res->total_transactions == 2);
@@ -362,8 +363,8 @@ TEST_CASE("exporter honors fetch_run_stat's existing_doc_count as the starting d
 
   exporter<test_txn_t, test_qual_t> exp(
     make_cfg(dirs, {exporter_drain_cfg_t{.id = 1, .name = "BANKA1", .max_doc_txn = 10}}, 1), test_qual_t{}, *log_ptr, "test"); // NOLINT
-  demo_cb cb(shared);
-  REQUIRE(exp.execute(cb).has_value());
+  demo_cb cb(shared, *log_ptr);
+  REQUIRE(exp.exec(cb).has_value());
 
   // The new document's content embeds its doc_id in the header -- verify it starts after 5, not at 1.
   REQUIRE(file_count(dirs.target()) == 1);
@@ -385,10 +386,10 @@ TEST_CASE("exporter treats document_prepared() == false as a fatal run error", "
 
   exporter<test_txn_t, test_qual_t> exp(
     make_cfg(dirs, {exporter_drain_cfg_t{.id = 1, .name = "BANKA1", .max_doc_txn = 10}}, 2), test_qual_t{}, *log_ptr, "test"); // NOLINT
-  demo_cb    cb(shared);
-  const auto res = exp.execute(cb);
+  demo_cb    cb(shared, *log_ptr);
+  const auto res = exp.exec(cb);
   REQUIRE_FALSE(res.has_value());
-  CHECK(res.error().code() == exporter_error::document_rejected);
+  CHECK(res.error().code() == exp_error::document_rejected);
 }
 
 // --- filename collision retry -------------------------------------------------------------------
@@ -410,8 +411,8 @@ TEST_CASE("exporter retries with a suffixed name when the naive candidate alread
 
   exporter<test_txn_t, test_qual_t> exp(
     make_cfg(dirs, {exporter_drain_cfg_t{.id = 1, .name = "BANKA1", .max_doc_txn = 10}}, 1), test_qual_t{}, *log_ptr, "test"); // NOLINT
-  demo_cb    cb(shared);
-  const auto res = exp.execute(cb);
+  demo_cb    cb(shared, *log_ptr);
+  const auto res = exp.exec(cb);
   REQUIRE(res.has_value());
   CHECK(res->total_documents == 1);
   CHECK(file_count(dirs.target()) == 1); // succeeded despite the pre-existing tmp/doc_1.xml
@@ -437,10 +438,10 @@ TEST_CASE("exporter surfaces a fatal error when every collision-retry candidate 
 
   exporter<test_txn_t, test_qual_t> exp(
     make_cfg(dirs, {exporter_drain_cfg_t{.id = 1, .name = "BANKA1", .max_doc_txn = 10}}, 1), test_qual_t{}, *log_ptr, "test"); // NOLINT
-  demo_cb    cb(shared);
-  const auto res = exp.execute(cb);
+  demo_cb    cb(shared, *log_ptr);
+  const auto res = exp.exec(cb);
   REQUIRE_FALSE(res.has_value());
-  CHECK(res.error().code() == exporter_error::file_rename_collision);
+  CHECK(res.error().code() == exp_error::file_rename_collision);
 }
 
 // --- error propagation from each cb_exporter method individually ---------------------------------
@@ -456,10 +457,10 @@ TEST_CASE("exporter surfaces a fatal error when fetch_doc_name fails", "[exporte
 
   exporter<test_txn_t, test_qual_t> exp(
     make_cfg(dirs, {exporter_drain_cfg_t{.id = 1, .name = "BANKA1", .max_doc_txn = 10}}, 1), test_qual_t{}, *log_ptr, "test"); // NOLINT
-  demo_cb    cb(shared);
-  const auto res = exp.execute(cb);
+  demo_cb    cb(shared, *log_ptr);
+  const auto res = exp.exec(cb);
   REQUIRE_FALSE(res.has_value());
-  CHECK(res.error().code() == exporter_error::fetch_doc_name_failed);
+  CHECK(res.error().code() == exp_error::fetch_doc_name_failed);
 }
 
 TEST_CASE("exporter surfaces a fatal error when fetch_run_stat fails", "[exporter][negative]")
@@ -473,10 +474,10 @@ TEST_CASE("exporter surfaces a fatal error when fetch_run_stat fails", "[exporte
 
   exporter<test_txn_t, test_qual_t> exp(
     make_cfg(dirs, {exporter_drain_cfg_t{.id = 1, .name = "BANKA1", .max_doc_txn = 10}}, 1), test_qual_t{}, *log_ptr, "test"); // NOLINT
-  demo_cb    cb(shared);
-  const auto res = exp.execute(cb);
+  demo_cb    cb(shared, *log_ptr);
+  const auto res = exp.exec(cb);
   REQUIRE_FALSE(res.has_value());
-  CHECK(res.error().code() == exporter_error::fetch_run_stat_failed);
+  CHECK(res.error().code() == exp_error::fetch_run_stat_failed);
 }
 
 TEST_CASE("exporter surfaces a fatal error when fetch_doc_data reports an error status", "[exporter][negative]")
@@ -490,10 +491,10 @@ TEST_CASE("exporter surfaces a fatal error when fetch_doc_data reports an error 
 
   exporter<test_txn_t, test_qual_t> exp(
     make_cfg(dirs, {exporter_drain_cfg_t{.id = 1, .name = "BANKA1", .max_doc_txn = 10}}, 1), test_qual_t{}, *log_ptr, "test"); // NOLINT
-  demo_cb    cb(shared);
-  const auto res = exp.execute(cb);
+  demo_cb    cb(shared, *log_ptr);
+  const auto res = exp.exec(cb);
   REQUIRE_FALSE(res.has_value());
-  CHECK(res.error().code() == exporter_error::fetch_doc_data_failed);
+  CHECK(res.error().code() == exp_error::fetch_doc_data_failed);
 }
 
 TEST_CASE("exporter surfaces a fatal error when prepare_transaction fails", "[exporter][negative]")
@@ -507,10 +508,10 @@ TEST_CASE("exporter surfaces a fatal error when prepare_transaction fails", "[ex
 
   exporter<test_txn_t, test_qual_t> exp(
     make_cfg(dirs, {exporter_drain_cfg_t{.id = 1, .name = "BANKA1", .max_doc_txn = 10}}, 1), test_qual_t{}, *log_ptr, "test"); // NOLINT
-  demo_cb    cb(shared);
-  const auto res = exp.execute(cb);
+  demo_cb    cb(shared, *log_ptr);
+  const auto res = exp.exec(cb);
   REQUIRE_FALSE(res.has_value());
-  CHECK(res.error().code() == exporter_error::prepare_transaction_failed);
+  CHECK(res.error().code() == exp_error::prepare_transaction_failed);
 }
 
 TEST_CASE("exporter surfaces a fatal error when prepare_header fails", "[exporter][negative]")
@@ -524,10 +525,10 @@ TEST_CASE("exporter surfaces a fatal error when prepare_header fails", "[exporte
 
   exporter<test_txn_t, test_qual_t> exp(
     make_cfg(dirs, {exporter_drain_cfg_t{.id = 1, .name = "BANKA1", .max_doc_txn = 10}}, 1), test_qual_t{}, *log_ptr, "test"); // NOLINT
-  demo_cb    cb(shared);
-  const auto res = exp.execute(cb);
+  demo_cb    cb(shared, *log_ptr);
+  const auto res = exp.exec(cb);
   REQUIRE_FALSE(res.has_value());
-  CHECK(res.error().code() == exporter_error::prepare_header_failed);
+  CHECK(res.error().code() == exp_error::prepare_header_failed);
 }
 
 TEST_CASE("exporter surfaces a fatal error when prepare_footer fails", "[exporter][negative]")
@@ -541,10 +542,10 @@ TEST_CASE("exporter surfaces a fatal error when prepare_footer fails", "[exporte
 
   exporter<test_txn_t, test_qual_t> exp(
     make_cfg(dirs, {exporter_drain_cfg_t{.id = 1, .name = "BANKA1", .max_doc_txn = 10}}, 1), test_qual_t{}, *log_ptr, "test"); // NOLINT
-  demo_cb    cb(shared);
-  const auto res = exp.execute(cb);
+  demo_cb    cb(shared, *log_ptr);
+  const auto res = exp.exec(cb);
   REQUIRE_FALSE(res.has_value());
-  CHECK(res.error().code() == exporter_error::prepare_footer_failed);
+  CHECK(res.error().code() == exp_error::prepare_footer_failed);
 }
 
 // --- config validation ---------------------------------------------------------------------------
@@ -556,10 +557,10 @@ TEST_CASE("exporter rejects an empty drain_list before starting any worker", "[e
 
   exporter<test_txn_t, test_qual_t> exp(make_cfg(dirs, {}, 1), test_qual_t{}, *log_ptr, "test");
   auto                              shared = std::make_shared<shared_fixture>();
-  demo_cb                           cb(shared);
-  const auto                        res = exp.execute(cb);
+  demo_cb                           cb(shared, *log_ptr);
+  const auto                        res = exp.exec(cb);
   REQUIRE_FALSE(res.has_value());
-  CHECK(res.error().code() == exporter_error::invalid_config);
+  CHECK(res.error().code() == exp_error::invalid_config);
 }
 
 TEST_CASE("exporter rejects zero worker threads before starting any worker", "[exporter][negative]")
@@ -570,8 +571,8 @@ TEST_CASE("exporter rejects zero worker threads before starting any worker", "[e
   exporter<test_txn_t, test_qual_t> exp(
     make_cfg(dirs, {exporter_drain_cfg_t{.id = 1, .name = "BANKA1", .max_doc_txn = 10}}, 0), test_qual_t{}, *log_ptr, "test"); // NOLINT
   auto       shared = std::make_shared<shared_fixture>();
-  demo_cb    cb(shared);
-  const auto res = exp.execute(cb);
+  demo_cb    cb(shared, *log_ptr);
+  const auto res = exp.exec(cb);
   REQUIRE_FALSE(res.has_value());
-  CHECK(res.error().code() == exporter_error::invalid_config);
+  CHECK(res.error().code() == exp_error::invalid_config);
 }

@@ -18,22 +18,19 @@
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
-#include <string>
 #include <vector>
 
 namespace fsp
 {
-  /// @brief unsigned 128-bit integer, used for transaction_t::id (see doc/opis_exporterja.txt).
-  /// @details __int128 is a GCC/Clang extension, not ISO C++ -- __extension__ suppresses the
-  /// -Wpedantic warning it would otherwise trigger under this project's -Werror build.
-  __extension__ using uint128_t = unsigned __int128;
+  /// @brief unsigned 64-bit integer, used for transaction_t::id (see doc/opis_exporterja.txt).
+  using txn_id_t = int64_t;
 
   /**
    * @brief Formats a uint128_t in base 10.
    * @details Neither fmt nor <iostream> support __int128 natively, so this is a small
    * repeated-division helper -- needed by anything that logs or displays a transaction id.
    */
-  inline str_t to_string(uint128_t v)
+  inline str_t to_string(txn_id_t v)
   {
     if (v == 0) { return "0"; }
     str_t digits;
@@ -62,9 +59,9 @@ namespace fsp
   struct transaction_t // NOLINT(hicpp-special-member-functions)
   {
     // NOLINTBEGIN(misc-non-private-member-variables-in-classes) -- plain data struct by design
-    uint128_t id   = 0; ///< unique transaction id
-    int       type = 0; ///< transaction type
-    str_t     value;    ///< transaction content (input to cb_exporter::prepare_transaction())
+    txn_id_t id   = 0; ///< unique transaction id (snowflake)
+    int      type = 0; ///< transaction type
+    str_t    value;    ///< transaction content (input to cb_exporter::prepare_transaction())
     // NOLINTEND(misc-non-private-member-variables-in-classes)
     virtual ~transaction_t() = default;
   };
@@ -95,7 +92,7 @@ namespace fsp
   /// @brief Static description of one recipient ("drain"), supplied by the caller at construction.
   struct drain_dscr_t
   {
-    int         id = 0;          ///< unique drain id
+    drain_t     id = 0;          ///< unique drain id
     str_t       name;            ///< short drain name (e.g. a BIC)
     str_t       dscr;            ///< longer drain name (e.g. a bank's full name)
     std::size_t max_doc_txn = 0; ///< maximum number of transactions per document for this drain
@@ -127,7 +124,7 @@ namespace fsp
     std::chrono::steady_clock::time_point start_ts;
     std::chrono::milliseconds             duration{0};
     int                                   worker_id = -1; ///< id of the worker thread that produced this document
-    int                                   drain_id  = -1; ///< drain this document belongs to
+    drain_t                               drain_id  = -1; ///< drain this document belongs to
   };
 
   /**
@@ -166,6 +163,7 @@ namespace fsp
     std::vector<exporter_drain_cfg_t> drain_list;
     std::size_t                       number_of_threads = 0;
     str_t                             filename_prefix;
+    str_t                             filename_ext = "xml"; ///< passed through to fetch_doc_name(), no leading dot
     str_t                             tmp_dir;    ///< staging area; must share a filesystem with target_dir/error_dir
     str_t                             target_dir; ///< final destination for successfully produced documents
     str_t                             error_dir;  ///< diagnostic destination for a tmp file that failed to move
@@ -174,7 +172,7 @@ namespace fsp
   /**
    * @brief The three possible outcomes of cb_exporter::fetch_doc_data(): a block of
    * transactions, an explicit end-of-data signal, or an error signal.
-   * @details A plain std::expected<txn_block_t<T>, exporter_error_info> only has room for
+   * @details A plain std::expected<txn_block_t<T>, exp_error_info> only has room for
    * "value" or "error", which would force "no more data for this drain" -- a normal, expected
    * end-of-work condition -- to be encoded as an error too, blurring it together with a real
    * failure. This explicit status enum keeps "drain exhausted" and "something went wrong"
@@ -193,7 +191,7 @@ namespace fsp
   {
     fetch_doc_data_status status = fetch_doc_data_status::error;
     txn_block_t<T>        block; ///< valid only when status == ok
-    exporter_error_info   error; ///< valid only when status == error
+    exp_error_info        error; ///< valid only when status == error
   };
 
   /**

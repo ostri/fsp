@@ -94,7 +94,7 @@ namespace fsp
     /// @brief The fatal error this worker recorded. Precondition: fatal() == true (mirrors
     /// std::optional::value()'s own unchecked operator* -- callers (see exporter::execute(),
     /// which always checks fatal() first) are expected to guard this themselves).
-    [[nodiscard]] const exporter_error_info& fatal_error() const noexcept
+    [[nodiscard]] const exp_error_info& fatal_error() const noexcept
     { return *fatal_error_; } // NOLINT(bugprone-unchecked-optional-access) -- precondition documented above
   private:
     /**
@@ -107,21 +107,21 @@ namespace fsp
     {
       const auto drain_id_opt = select_work_drain();
       if (! drain_id_opt.has_value()) { return true; } // lost a race for the last drain -- retry top-of-loop checks
-      const int drain_id = *drain_id_opt;
+      const drain_t drain_id = *drain_id_opt;
 
       ensure_drain_stats_loaded(drain_id);
-      if (! state_.is_drain_loaded(drain_id)) { return fail(exporter_error::fetch_run_stat_failed, "fetch_run_stat failed", drain_id, 0); }
+      if (! state_.is_drain_loaded(drain_id)) { return fail(exp_error::fetch_run_stat_failed, "fetch_run_stat failed", drain_id, 0); }
 
       // doc_id must be known BEFORE fetch_doc_data() is called -- it is one of that call's own
       // parameters per doc/opis_exporterja.txt ("fetch_doc_data (..., drain-id, id-dokumenta)").
       // Allocating it here does mean a document id can be "used up" if this block turns out to
       // be empty (no_more_data) -- harmless, since ids only need to be unique, not contiguous.
-      const std::uint64_t doc_id = state_.next_doc_id(drain_id);
+      const doc_id_t doc_id = state_.next_doc_id(drain_id);
 
       auto fetched = cb_->fetch_doc_data(qualifiers_, drain_id, doc_id);
       if (fetched.status == fetch_doc_data_status::error)
       {
-        return fail(exporter_error::fetch_doc_data_failed, str_t(fetched.error.message()), drain_id, doc_id);
+        return fail(exp_error::fetch_doc_data_failed, str_t(fetched.error.message()), drain_id, doc_id);
       }
       if (fetched.status == fetch_doc_data_status::no_more_data || fetched.block.empty())
       {
@@ -131,7 +131,7 @@ namespace fsp
       }
 
       const auto* drain_dscr = state_.find_drain(drain_id);
-      if (drain_dscr == nullptr) { return fail(exporter_error::invalid_config, "unknown drain id", drain_id, doc_id); }
+      if (drain_dscr == nullptr) { return fail(exp_error::invalid_config, "unknown drain id", drain_id, doc_id); }
       if (fetched.block.size() < drain_dscr->max_doc_txn)
       {
         // Fewer transactions than a full block -- this was the last (partial) block for this
@@ -162,7 +162,7 @@ namespace fsp
         // Confirmed with the user: false is ALWAYS a fatal system error, not a soft
         // per-document rejection -- regardless of whether moving the tmp file elsewhere for
         // diagnostics would itself succeed.
-        return fail(exporter_error::document_rejected, "document_prepared() returned false", drain_id, doc_id);
+        return fail(exp_error::document_rejected, "document_prepared() returned false", drain_id, doc_id);
       }
 
       auto move_res = move_to_final(write_res.value(), drain_id, doc_id);
@@ -190,7 +190,7 @@ namespace fsp
     }
 
     /// @brief "keep it if we already have one, else consult state_" -- see exporter_state::pick_or_keep_drain().
-    [[nodiscard]] std::optional<int> select_work_drain()
+    [[nodiscard]] std::optional<drain_t> select_work_drain()
     {
       auto picked    = state_.pick_or_keep_drain(work_drain_id_);
       work_drain_id_ = picked;
@@ -198,7 +198,7 @@ namespace fsp
     }
 
     /// @brief Lazily loads drain_id's initial run statistics, once, via cb_->fetch_run_stat().
-    void ensure_drain_stats_loaded(int drain_id)
+    void ensure_drain_stats_loaded(drain_t drain_id)
     {
       if (state_.is_drain_loaded(drain_id)) { return; } // fast path -- already loaded by some worker
       const auto*       drain_dscr  = state_.find_drain(drain_id);
@@ -222,8 +222,8 @@ namespace fsp
      * accumulation layer on top of it.
      * @return the tmp path on success.
      */
-    [[nodiscard]] exp_result<str_t> write_document(int                   drain_id,
-                                                   std::uint64_t         doc_id,
+    [[nodiscard]] exp_result<str_t> write_document(drain_t               drain_id,
+                                                   doc_id_t              doc_id,
                                                    const txn_block_t<T>& block,
                                                    std::size_t           doc_stat_ndx)
     {
@@ -279,11 +279,11 @@ namespace fsp
      * collisions -- the spec's own wording places that responsibility on the exporter/worker
      * layer, not the callback's semantics.
      */
-    [[nodiscard]] exp_result<str_t> resolve_unique_doc_name(int drain_id, std::uint64_t doc_id)
+    [[nodiscard]] exp_result<str_t> resolve_unique_doc_name(drain_t drain_id, doc_id_t doc_id)
     {
       static constexpr int MAX_ATTEMPTS = 10;
 
-      auto name_res = cb_->fetch_doc_name(qualifiers_, cfg_.tmp_dir, drain_id, doc_id, 0, cfg_.filename_prefix);
+      auto name_res = cb_->fetch_doc_name(qualifiers_, cfg_.tmp_dir, drain_id, doc_id, 0, cfg_.filename_prefix, cfg_.filename_ext);
       if (! name_res.has_value()) { return std::unexpected(name_res.error()); }
 
       str_t candidate = *name_res;
@@ -299,27 +299,27 @@ namespace fsp
         candidate = fmt::format("{}_{}{}", original.stem().string(), attempt + 1, original.extension().string());
       }
       return std::unexpected(
-        exporter_error_info{exporter_error::file_rename_collision, "collision retry attempts exhausted", candidate, drain_id, doc_id});
+        exp_error_info{exp_error::file_rename_collision, "collision retry attempts exhausted", candidate, drain_id, doc_id});
     }
 
     /// @brief Atomically moves tmp_path to cfg_.target_dir, returning the final path on success.
-    [[nodiscard]] exp_result<str_t> move_to_final(const str_t& tmp_path, int drain_id, std::uint64_t doc_id)
+    [[nodiscard]] exp_result<str_t> move_to_final(const str_t& tmp_path, drain_t drain_id, doc_id_t doc_id)
     {
       const fs::path  final_path = fs::path(cfg_.target_dir) / fs::path(tmp_path).filename();
       std::error_code ec;
       fs::rename(tmp_path, final_path, ec); // atomic only when tmp_dir/target_dir share a filesystem
-      if (ec) { return std::unexpected(exporter_error_info{exporter_error::file_move_failed, ec.message(), tmp_path, drain_id, doc_id}); }
+      if (ec) { return std::unexpected(exp_error_info{exp_error::file_move_failed, ec.message(), tmp_path, drain_id, doc_id}); }
       return final_path.string();
     }
 
     /// @brief Translates a fsp::error_info from xml_writer into this module's own error type.
-    [[nodiscard]] static exporter_error_info wrap_xml_writer_error(const error_info& src, cstr_t path, int drain_id, std::uint64_t doc_id)
-    { return exporter_error_info{exporter_error::xml_writer_error, str_t(src.message()), path, drain_id, doc_id}; }
+    [[nodiscard]] static exp_error_info wrap_xml_writer_error(const error_info& src, cstr_t path, drain_t drain_id, doc_id_t doc_id)
+    { return exp_error_info{exp_error::xml_writer_error, str_t(src.message()), path, drain_id, doc_id}; }
 
     /// @brief Records a fatal error and signals every worker to stop. Always returns false.
-    bool fail(exporter_error code, str_t msg, int drain_id, std::uint64_t doc_id)
+    bool fail(exp_error code, str_t msg, drain_t drain_id, doc_id_t doc_id)
     {
-      fatal_error_ = exporter_error_info{code, std::move(msg), "", drain_id, doc_id};
+      fatal_error_ = exp_error_info{code, std::move(msg), "", drain_id, doc_id};
       log_.error("{}", fatal_error_->to_string());
       state_.request_stop();
       return false;
@@ -338,8 +338,8 @@ namespace fsp
     str_t                              parent_log_name_;
     std::unique_ptr<cb_exporter<T, Q>> cb_;     // this thread's own clone, made once at construction
     xml_writer                         writer_; // reopened fresh per document
-    std::optional<int>                 work_drain_id_;
+    std::optional<drain_t>             work_drain_id_;
     exporter_thread_stats_t            stats_{};
-    std::optional<exporter_error_info> fatal_error_;
+    std::optional<exp_error_info>      fatal_error_;
   };
 } // namespace fsp

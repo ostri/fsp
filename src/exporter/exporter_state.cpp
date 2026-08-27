@@ -23,7 +23,7 @@ namespace fsp
     for (const auto& d : drain_static_) { available_drains_.push_back(d.id); }
   }
 
-  std::optional<int> exporter_state::pick_or_keep_drain(std::optional<int> current)
+  std::optional<drain_t> exporter_state::pick_or_keep_drain(std::optional<drain_t> current)
   {
     if (current.has_value()) { return current; }
 
@@ -35,7 +35,7 @@ namespace fsp
     return available_drains_.at(dist(rng()));
   }
 
-  void exporter_state::remove_available_drain(int drain_id)
+  void exporter_state::remove_available_drain(drain_t drain_id)
   {
     const std::scoped_lock lock(available_mutex_);
     std::erase(available_drains_, drain_id);
@@ -47,7 +47,7 @@ namespace fsp
     return available_drains_.empty();
   }
 
-  bool exporter_state::is_drain_loaded(int drain_id) const
+  bool exporter_state::is_drain_loaded(drain_t drain_id) const
   {
     const auto* d = find_drain(drain_id);
     if (d == nullptr) { return false; }
@@ -57,7 +57,7 @@ namespace fsp
     return drain_statistic_.at(ndx).loaded;
   }
 
-  void exporter_state::load_drain_stat_if_needed(int                                                 drain_id,
+  void exporter_state::load_drain_stat_if_needed(drain_t                                             drain_id,
                                                  std::size_t                                         max_doc_txn,
                                                  const std::function<exp_result<run_stat_pair_t>()>& fetch)
   {
@@ -79,7 +79,7 @@ namespace fsp
     stat_entry.loaded = true;
   }
 
-  std::uint64_t exporter_state::next_doc_id(int drain_id)
+  doc_id_t exporter_state::next_doc_id(drain_t drain_id)
   {
     const auto* d = find_drain(drain_id);
     if (d == nullptr) { return 0; }
@@ -101,13 +101,13 @@ namespace fsp
     if (doc_stat_ndx < doc_statistics_.size()) { doc_statistics_.at(doc_stat_ndx) = std::move(updated_fields); }
   }
 
-  void exporter_state::increment_drain_doc_count(int drain_id)
+  void exporter_state::increment_drain_doc_count(drain_t drain_id)
   {
     const std::scoped_lock lock(doc_count_mutex_);
     ++drain_doc_counts_[drain_id];
   }
 
-  const drain_dscr_t* exporter_state::find_drain(int drain_id) const noexcept
+  const drain_dscr_t* exporter_state::find_drain(drain_t drain_id) const noexcept
   {
     const auto it = std::ranges::find(drain_static_, drain_id, &drain_dscr_t::id);
     return it == drain_static_.end() ? nullptr : &*it;

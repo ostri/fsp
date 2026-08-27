@@ -2,7 +2,7 @@
 
 namespace fsp
 {
-  exporter_error_info::exporter_error_info(exporter_error code, str_t msg, cstr_t path, int drain_id, std::uint64_t doc_id)
+  exp_error_info::exp_error_info(exp_error code, str_t msg, cstr_t path, drain_t drain_id, doc_id_t doc_id)
   : code_(code)
   , message_(std::move(msg))
   , path_(path)
@@ -11,11 +11,11 @@ namespace fsp
   {
   }
 
-  exporter_error exporter_error_info::code() const { return code_; }
-  cstr_t         exporter_error_info::message() const { return message_; }
-  cstr_t         exporter_error_info::path() const { return path_; }
+  exp_error exp_error_info::code() const { return code_; }
+  cstr_t    exp_error_info::message() const { return message_; }
+  cstr_t    exp_error_info::path() const { return path_; }
 
-  str_t exporter_error_info::to_string() const
+  str_t exp_error_info::to_string() const
   {
     auto code_name = magic_enum::enum_name(code_);
     auto prefix    = fmt::format("[{}]", code_name);

@@ -51,7 +51,7 @@ namespace fsp
      * @param proto_cb the caller's prototype callback instance; never mutated here directly,
      * only cloned once per worker thread (see cb_exporter::clone()).
      */
-    [[nodiscard]] exp_result<exporter_run_stats_t> execute(cb_exporter<T, Q>& proto_cb)
+    [[nodiscard]] exp_result<exporter_run_stats_t> exec(cb_exporter<T, Q>& proto_cb)
     {
       if (auto res = validate_config(); ! res) { return std::unexpected(res.error()); }
 
@@ -109,18 +109,22 @@ namespace fsp
       return drains;
     }
 
-    [[nodiscard]] exp_void_result validate_config() const
+    [[nodiscard]] ev_result validate_config() const
     {
-      if (cfg_.drain_list.empty()) { return std::unexpected(exporter_error_info{exporter_error::invalid_config, "drain_list is empty"}); }
-      if (cfg_.number_of_threads == 0)
-      {
-        return std::unexpected(exporter_error_info{exporter_error::invalid_config, "number_of_threads is zero"});
-      }
+      if (cfg_.drain_list.empty()) { return std::unexpected(exp_error_info{exp_error::invalid_config, "drain_list is empty"}); }
+      if (cfg_.number_of_threads == 0) { return std::unexpected(exp_error_info{exp_error::invalid_config, "number_of_threads is zero"}); }
       return {};
     }
-
-    [[nodiscard]] static exporter_run_stats_t aggregate_stats(const std::vector<std::unique_ptr<exporter_worker<T, Q>>>& workers,
-                                                              double                                                     elapsed_ms)
+    /**
+     * @brief calculate statistics for all workers
+     *
+     * @param workers list of workers
+     * @param elapsed_ms acumulated time for all workers
+     * @return exporter_run_stats_t statistical block
+     */
+    [[nodiscard]] static exporter_run_stats_t aggregate_stats( //
+      const std::vector<std::unique_ptr<exporter_worker<T, Q>>>& workers,
+      double                                                     elapsed_ms)
     {
       exporter_run_stats_t total;
       for (const auto& w : workers)
@@ -135,11 +139,12 @@ namespace fsp
     // NOLINTBEGIN(cppcoreguidelines-avoid-const-or-ref-data-members) -- exporter is neither
     // copied nor moved (see pipeline.hpp for the identical rationale/precedent), only ever
     // constructed once and driven through execute(), so a reference member is safe here.
-    exporter_config_t     cfg_;
-    Q                     qualifiers_;
-    const logger::Logger& log_;
-    str_t                 parent_log_name_;
-    exporter_state        state_; // built from cfg_.drain_list, see build_drain_list()
+    exporter_config_t     cfg_;             ///< configuration of the exporter
+    Q                     qualifiers_;      ///< readonly block of data that all worker share
+    const logger::Logger& log_;             ///< central logger
+    str_t                 parent_log_name_; ///< parent log name so that each worker is
+                                            ///< uniquelly identified
+    exporter_state state_;                  ///< built from cfg_.drain_list, see build_drain_list()
     // NOLINTEND(cppcoreguidelines-avoid-const-or-ref-data-members)
   };
 } // namespace fsp

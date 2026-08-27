@@ -1,13 +1,12 @@
 #include "exporter_state.hpp"
-#include <algorithm>
 #include <catch2/catch_test_macros.hpp>
 #include <set>
 #include <thread>
 #include <vector>
 
 using fsp::drain_dscr_t;
-using fsp::exporter_error;
-using fsp::exporter_error_info;
+using fsp::exp_error;
+using fsp::exp_error_info;
 using fsp::exporter_state;
 using fsp::run_stat_pair_t;
 
@@ -142,7 +141,7 @@ TEST_CASE("load_drain_stat_if_needed leaves the drain unloaded when fetch fails"
 {
   exporter_state state(one_drain());
   const auto     fetch = []() -> fsp::exp_result<run_stat_pair_t>
-  { return std::unexpected(exporter_error_info(exporter_error::fetch_run_stat_failed, "boom")); };
+  { return std::unexpected(exp_error_info(exp_error::fetch_run_stat_failed, "boom")); };
 
   state.load_drain_stat_if_needed(1, 100, fetch); // NOLINT(readability-magic-numbers)
   CHECK_FALSE(state.is_drain_loaded(1));
