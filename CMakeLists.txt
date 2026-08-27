@@ -356,6 +356,7 @@ set(SRC_IMPORTER
     ${PROJECT_SOURCE_DIR}/src/importer/pipeline_hooks.cpp
     ${PROJECT_SOURCE_DIR}/src/importer/xml_worker.cpp
     ${PROJECT_SOURCE_DIR}/src/importer/load_grammar.cpp
+    ${PROJECT_SOURCE_DIR}/src/importer/xsd_validator.cpp
     ${PROJECT_SOURCE_DIR}/src/importer/importer.cpp
     ${PROJECT_SOURCE_DIR}/src/importer/stats.cpp
     ${PROJECT_SOURCE_DIR}/src/importer/segment_sax.cpp
@@ -546,6 +547,7 @@ set(${b_target}_SOURCES
     ${PROJECT_SOURCE_DIR}/src/common/xercesc_helpers/xerces_mgr.cpp
     ${PROJECT_SOURCE_DIR}/src/common/xercesc_helpers/x_str.cpp
     ${PROJECT_SOURCE_DIR}/src/importer/load_grammar.cpp
+    ${PROJECT_SOURCE_DIR}/src/importer/xsd_validator.cpp
     ${PROJECT_SOURCE_DIR}/src/common/mmap/mmap_file.cpp
 )
 set(FSP_TARGET_${b_target}_INCLUDES
