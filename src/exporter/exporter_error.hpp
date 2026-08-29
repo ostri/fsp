@@ -35,8 +35,12 @@ namespace fsp
   /// cb_exporter, ...) shares the SAME type without a circular include (exporter_types.hpp
   /// already includes this file).
   using drain_t = int;
-  /// @brief Document id, allocated by exporter_state::next_doc_id() -- see its own doc comment.
-  using doc_id_t = unsigned int;
+  /// @brief Document id. 64-bit: in the two-phase model (see cb_exporter::compute_drain_stat())
+  /// this is a concrete callback's own snowflake id (e.g. ach's rtl::unique_id(), uint64_t), not a
+  /// small sequential counter - see exporter_state::next_doc_id()'s own doc comment for the
+  /// single-phase model's own (still supported) sequential-counter allocation, which fits in the
+  /// same 64-bit type without truncation either.
+  using doc_id_t = std::uint64_t;
 
   /// @brief Failure categories an exp_result<T>/exp_void_result can carry.
   enum class exp_error : std::uint8_t
@@ -83,8 +87,8 @@ namespace fsp
     str_t     message_;                  ///< message associated with the error code
     str_t     path_;                     ///< path - normally denotes output file that exporter
                                          ///< produces
-    drain_t  drain_id_ = -1; ///< drain for which the file is/was prodiced
-    doc_id_t doc_id_   = 0;  ///< id of the document that the error refers to
+    drain_t  drain_id_ = -1;             ///< drain for which the file is/was prodiced
+    doc_id_t doc_id_   = 0;              ///< id of the document that the error refers to
   };
 
   /// @brief Result type shared by cb_exporter's non-throwing methods and exporter's own internals.

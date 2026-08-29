@@ -15,9 +15,10 @@ namespace fsp
     }
   } // namespace
 
-  exporter_state::exporter_state(std::vector<drain_dscr_t> drains)
+  exporter_state::exporter_state(std::vector<drain_dscr_t> drains, std::size_t phase1_worker_count)
   : drain_static_(std::move(drains))
   , drain_statistic_(drain_static_.size()) // sized once here, never resized afterward
+  , phase1_active_workers_(phase1_worker_count)
   {
     available_drains_.reserve(drain_static_.size());
     for (const auto& d : drain_static_) { available_drains_.push_back(d.id); }
@@ -128,5 +129,27 @@ namespace fsp
   {
     const auto it = std::ranges::find(drain_static_, drain_id, &drain_dscr_t::id);
     return it == drain_static_.end() ? nullptr : &*it;
+  }
+
+  void exporter_state::publish_blocks(drain_t drain_id, const std::vector<doc_id_t>& doc_ids)
+  {
+    const std::scoped_lock lock(work_queue_mutex_);
+    for (const auto id : doc_ids) { work_queue_.push_back(drain_doc_slot_t{.drain_id = drain_id, .doc_id = id}); }
+  }
+
+  std::optional<drain_doc_slot_t> exporter_state::pop_work_block()
+  {
+    const std::scoped_lock lock(work_queue_mutex_);
+    if (work_queue_.empty()) { return std::nullopt; }
+    const auto slot = work_queue_.front();
+    work_queue_.pop_front();
+    return slot;
+  }
+
+  bool exporter_state::mark_phase1_worker_done()
+  {
+    // fetch_sub returns the value BEFORE the decrement -- phase 1 as a whole is done once that
+    // value was 1 (this call is the last one), i.e. the counter is now 0.
+    return phase1_active_workers_.fetch_sub(1, std::memory_order_acq_rel) == 1;
   }
 } // namespace fsp

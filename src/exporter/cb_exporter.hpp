@@ -16,6 +16,7 @@
 #include <cstddef>
 #include <logger/logger.hpp>
 #include <memory>
+#include <vector>
 
 namespace fsp
 {
@@ -68,14 +69,43 @@ namespace fsp
       drain_t  drain_id ///< receiver of the document
       ) = 0;
     /**
+     * @brief Computes and stores drain_id's own full block plan (phase 1) - one entry per document
+     * this drain will eventually produce, each already assigned its own final doc_id (a concrete
+     * callback's own responsibility to allocate, e.g. a snowflake id - fsp itself never generates
+     * one). A concrete callback keeps whatever it needs to later re-derive each doc_id's own block
+     * content (e.g. an id range) in its own state (shared across every worker thread's own clone -
+     * see cb_ach_exporter's own shared_state precedent), since fsp itself only ever sees the doc_id
+     * values themselves (see exporter_types.hpp's own drain_doc_slot_t doc comment).
+     * @details Called once per drain, by whichever worker thread's phase-1 loop claims drain_id
+     * (see exporter_worker.hpp's own phase-1 loop and exporter_state::pick_or_keep_drain()) - never
+     * called twice for the same drain_id within one run.
+     * @return the doc_id list for drain_id's own blocks, in the order fetch_doc_data() should
+     * later be able to serve them (not otherwise significant to fsp itself) - empty is valid (a
+     * drain with no work at all), not treated as an error.
+     */
+    [[nodiscard]] virtual exp_result<std::vector<doc_id_t>> compute_drain_stat(
+      //
+      const Q& q,       ///< readonly block of the run qualifiers
+      drain_t  drain_id ///< receiver of the document
+      ) = 0;
+    /**
      * @brief Fetches one block of transactions for one document. See fetch_doc_data_status for
      * the three possible outcomes (a block, end-of-data for this drain, or an error).
+     * @details doc_id is one of the values compute_drain_stat() (phase 1) already returned for
+     * drain_id - NOT a value this call itself allocates (a concrete callback looks its own
+     * previously-computed block content for doc_id back up from wherever compute_drain_stat()
+     * stored it, e.g. by doc_id in a shared map - see compute_drain_stat()'s own doc comment).
+     * no_more_data (see fetch_doc_data_status) is not expected in the two-phase model - every
+     * doc_id fetch_doc_data() is ever called with came from compute_drain_stat()'s own block plan,
+     * so a caller reaching here already knows a real block exists; returning it anyway (e.g. on an
+     * inconsistent doc_id) is still treated as a normal, non-fatal "nothing to do" outcome by
+     * exporter_worker, not specially diagnosed as an error.
      */
     [[nodiscard]] virtual fetch_doc_data_result_t<T> fetch_doc_data(
       //
       const Q& q,        ///< read only block of run qualifiers
       drain_t  drain_id, ///< receiver of the document
-      doc_id_t doc_id    ///< internal id of the document
+      doc_id_t doc_id    ///< id of the document, as returned by this drain's own compute_drain_stat()
       ) = 0;
     /**
      * @brief Converts one transaction's input data into its external/document string representation.
@@ -115,6 +145,19 @@ namespace fsp
       drain_t  drain_id, ///< receiver of the document
       doc_id_t doc_id    ///< internal id of the document
       ) = 0;
+    /**
+     * @brief Called exactly ONCE for the whole run, on the MAIN thread, before exporter<T,Q>::exec()
+     * starts any worker thread - NOT a per-worker hook (see on_wrk_start() below for that). Runs on
+     * the caller-supplied prototype cb_exporter instance itself (the one exec() goes on to clone()
+     * once per worker thread), so any state this sets on *this IS carried into every clone via
+     * Derived's own copy constructor - the place for a concrete callback to do whole-run,
+     * single-threaded setup that every worker's own clone then reads read-only (e.g. precomputing a
+     * per-drain block plan up front, so no worker thread needs to compute or coordinate over it
+     * itself). Default is a no-op.
+     * @return {} on success, or the error to log and treat as fatal for the whole run - exec()
+     * returns this error immediately and starts no worker thread at all.
+     */
+    [[nodiscard]] virtual ev_result on_init();
     /**
      * @brief Called once per worker thread, right after clone() and before that thread's first
      * fetch_run_stat()/fetch_doc_data() call - the place for a concrete callback to open its own
@@ -233,6 +276,10 @@ namespace fsp
     doc_id_t /*doc_id*/,   ///< internal id of the document
     const blk_t& /*block*/ //< block of transactions
   )
+  { return {}; }
+
+  template <transaction_like T, qualifiers_like Q>
+  inline ev_result cb_exporter<T, Q>::on_init()
   { return {}; }
 
   template <transaction_like T, qualifiers_like Q>

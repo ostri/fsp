@@ -30,7 +30,7 @@ namespace
 
 TEST_CASE("exporter_state construction seeds available_drains_ with every configured drain", "[exporter_state][positive]")
 {
-  const exporter_state state(two_drains());
+  const exporter_state state(two_drains(), 2);
   CHECK_FALSE(state.available_drains_empty());
   CHECK(state.find_drain(1) != nullptr);
   CHECK(state.find_drain(2) != nullptr);
@@ -39,7 +39,7 @@ TEST_CASE("exporter_state construction seeds available_drains_ with every config
 
 TEST_CASE("exporter_state construction with an empty drain list starts already exhausted", "[exporter_state][negative]")
 {
-  const exporter_state state({});
+  const exporter_state state({}, 0);
   CHECK(state.available_drains_empty());
 }
 
@@ -47,7 +47,7 @@ TEST_CASE("exporter_state construction with an empty drain list starts already e
 
 TEST_CASE("pick_or_keep_drain returns the current drain unchanged without consulting available_drains_", "[exporter_state][positive]")
 {
-  exporter_state state(one_drain());
+  exporter_state state(one_drain(), 1);
   const auto     picked = state.pick_or_keep_drain(42); // NOLINT(readability-magic-numbers) -- not even a real drain id
   REQUIRE(picked.has_value());
   CHECK(*picked == 42); // NOLINT(readability-magic-numbers,bugprone-unchecked-optional-access) -- REQUIRE above guards this
@@ -55,7 +55,7 @@ TEST_CASE("pick_or_keep_drain returns the current drain unchanged without consul
 
 TEST_CASE("pick_or_keep_drain(nullopt) on a single-drain state deterministically returns that drain", "[exporter_state][positive]")
 {
-  exporter_state state(one_drain());
+  exporter_state state(one_drain(), 1);
   const auto     picked = state.pick_or_keep_drain(std::nullopt);
   REQUIRE(picked.has_value());
   CHECK(*picked == 1); // NOLINT(bugprone-unchecked-optional-access) -- REQUIRE above guards this
@@ -63,7 +63,7 @@ TEST_CASE("pick_or_keep_drain(nullopt) on a single-drain state deterministically
 
 TEST_CASE("pick_or_keep_drain(nullopt) on a multi-drain state returns one of the configured ids", "[exporter_state][positive]")
 {
-  exporter_state state(two_drains());
+  exporter_state state(two_drains(), 2);
   for (int i = 0; i < 20; ++i) // NOLINT(readability-magic-numbers) -- exercise the random branch a few times
   {
     const auto picked = state.pick_or_keep_drain(std::nullopt);
@@ -74,7 +74,7 @@ TEST_CASE("pick_or_keep_drain(nullopt) on a multi-drain state returns one of the
 
 TEST_CASE("pick_or_keep_drain(nullopt) on an exhausted state returns nullopt", "[exporter_state][negative]")
 {
-  exporter_state state(one_drain());
+  exporter_state state(one_drain(), 1);
   state.remove_available_drain(1);
   const auto picked = state.pick_or_keep_drain(std::nullopt);
   CHECK_FALSE(picked.has_value());
@@ -84,7 +84,7 @@ TEST_CASE("pick_or_keep_drain(nullopt) on an exhausted state returns nullopt", "
 
 TEST_CASE("remove_available_drain removes exactly the requested drain", "[exporter_state][positive]")
 {
-  exporter_state state(two_drains());
+  exporter_state state(two_drains(), 2);
   state.remove_available_drain(1);
   CHECK_FALSE(state.available_drains_empty());
   const auto picked = state.pick_or_keep_drain(std::nullopt);
@@ -94,7 +94,7 @@ TEST_CASE("remove_available_drain removes exactly the requested drain", "[export
 
 TEST_CASE("remove_available_drain down to zero leaves available_drains_empty true", "[exporter_state][positive]")
 {
-  exporter_state state(two_drains());
+  exporter_state state(two_drains(), 2);
   state.remove_available_drain(1);
   state.remove_available_drain(2);
   CHECK(state.available_drains_empty());
@@ -102,7 +102,7 @@ TEST_CASE("remove_available_drain down to zero leaves available_drains_empty tru
 
 TEST_CASE("remove_available_drain on an unknown or already-removed id is a harmless no-op", "[exporter_state][negative]")
 {
-  exporter_state state(one_drain());
+  exporter_state state(one_drain(), 1);
   state.remove_available_drain(1);
   CHECK_NOTHROW(state.remove_available_drain(1));  // already removed
   CHECK_NOTHROW(state.remove_available_drain(99)); // NOLINT(readability-magic-numbers) -- never existed
@@ -113,13 +113,13 @@ TEST_CASE("remove_available_drain on an unknown or already-removed id is a harml
 
 TEST_CASE("is_drain_loaded is false before load_drain_stat_if_needed is ever called", "[exporter_state][negative]")
 {
-  const exporter_state state(one_drain());
+  const exporter_state state(one_drain(), 1);
   CHECK_FALSE(state.is_drain_loaded(1));
 }
 
 TEST_CASE("load_drain_stat_if_needed loads stats exactly once", "[exporter_state][positive]")
 {
-  exporter_state state(one_drain());
+  exporter_state state(one_drain(), 1);
   int            call_count = 0;
 
   const auto fetch = [&call_count]() -> fsp::exp_result<run_stat_pair_t>
@@ -139,7 +139,7 @@ TEST_CASE("load_drain_stat_if_needed loads stats exactly once", "[exporter_state
 
 TEST_CASE("load_drain_stat_if_needed leaves the drain unloaded when fetch fails", "[exporter_state][negative]")
 {
-  exporter_state state(one_drain());
+  exporter_state state(one_drain(), 1);
   const auto     fetch = []() -> fsp::exp_result<run_stat_pair_t>
   { return std::unexpected(exp_error_info(exp_error::fetch_run_stat_failed, "boom")); };
 
@@ -149,7 +149,7 @@ TEST_CASE("load_drain_stat_if_needed leaves the drain unloaded when fetch fails"
 
 TEST_CASE("load_drain_stat_if_needed on an unknown drain id is a harmless no-op", "[exporter_state][negative]")
 {
-  exporter_state state(one_drain());
+  exporter_state state(one_drain(), 1);
   int            call_count = 0;
   const auto     fetch      = [&call_count]() -> fsp::exp_result<run_stat_pair_t>
   {
@@ -164,7 +164,7 @@ TEST_CASE("load_drain_stat_if_needed on an unknown drain id is a harmless no-op"
 
 TEST_CASE("next_doc_id starts at existing_doc_count + 1 (resume-after-crash semantics)", "[exporter_state][positive]")
 {
-  exporter_state state(one_drain());
+  exporter_state state(one_drain(), 1);
   const auto     fetch = []() -> fsp::exp_result<run_stat_pair_t>
   { return run_stat_pair_t{.remaining_txn_count = 10, .existing_doc_count = 5}; }; // NOLINT(readability-magic-numbers)
   state.load_drain_stat_if_needed(1, 100, fetch);                                  // NOLINT(readability-magic-numbers)
@@ -175,7 +175,7 @@ TEST_CASE("next_doc_id starts at existing_doc_count + 1 (resume-after-crash sema
 
 TEST_CASE("next_doc_id starts at 1 when the drain has no pre-existing documents", "[exporter_state][positive]")
 {
-  exporter_state state(one_drain());
+  exporter_state state(one_drain(), 1);
   const auto     fetch = []() -> fsp::exp_result<run_stat_pair_t> { return run_stat_pair_t{}; };
   state.load_drain_stat_if_needed(1, 100, fetch); // NOLINT(readability-magic-numbers)
   CHECK(state.next_doc_id(1) == 1);
@@ -183,7 +183,7 @@ TEST_CASE("next_doc_id starts at 1 when the drain has no pre-existing documents"
 
 TEST_CASE("next_doc_id allocates unique, non-colliding ids under concurrent callers", "[exporter_state][positive]")
 {
-  exporter_state state(one_drain());
+  exporter_state state(one_drain(), 1);
   const auto     fetch = []() -> fsp::exp_result<run_stat_pair_t> { return run_stat_pair_t{}; };
   state.load_drain_stat_if_needed(1, 100, fetch); // NOLINT(readability-magic-numbers)
 
@@ -215,7 +215,7 @@ TEST_CASE("next_doc_id allocates unique, non-colliding ids under concurrent call
 
 TEST_CASE("register_doc_start / finalize_doc round-trip a document's bookkeeping entry", "[exporter_state][positive]")
 {
-  exporter_state state(one_drain());
+  exporter_state state(one_drain(), 1);
   const auto     ndx = state.register_doc_start(fsp::doc_statistics_t{.doc_name       = "",
                                                                       .txn_count      = 0,
                                                                       .header_written = false,
@@ -237,13 +237,13 @@ TEST_CASE("register_doc_start / finalize_doc round-trip a document's bookkeeping
 
 TEST_CASE("finalize_doc on an out-of-range index is a harmless no-op", "[exporter_state][negative]")
 {
-  exporter_state state(one_drain());
+  exporter_state state(one_drain(), 1);
   CHECK_NOTHROW(state.finalize_doc(999, fsp::doc_statistics_t{})); // NOLINT(readability-magic-numbers)
 }
 
 TEST_CASE("increment_drain_doc_count does not throw for any drain id", "[exporter_state][positive]")
 {
-  exporter_state state(one_drain());
+  exporter_state state(one_drain(), 1);
   CHECK_NOTHROW(state.increment_drain_doc_count(1));
   CHECK_NOTHROW(state.increment_drain_doc_count(1));
 }
@@ -252,7 +252,7 @@ TEST_CASE("increment_drain_doc_count does not throw for any drain id", "[exporte
 
 TEST_CASE("stop_token reflects request_stop across the shared source", "[exporter_state][positive]")
 {
-  exporter_state state(one_drain());
+  exporter_state state(one_drain(), 1);
   CHECK_FALSE(state.stop_token().stop_requested());
   state.request_stop();
   CHECK(state.stop_token().stop_requested());
@@ -260,7 +260,7 @@ TEST_CASE("stop_token reflects request_stop across the shared source", "[exporte
 
 TEST_CASE("request_stop is idempotent", "[exporter_state][negative]")
 {
-  exporter_state state(one_drain());
+  exporter_state state(one_drain(), 1);
   state.request_stop();
   CHECK_NOTHROW(state.request_stop());
   CHECK(state.stop_token().stop_requested());

@@ -24,6 +24,8 @@
 
 #include "exporter_error.hpp"
 #include "exporter_types.hpp"
+#include <atomic>
+#include <deque>
 #include <functional>
 #include <mutex>
 #include <optional>
@@ -41,7 +43,14 @@ namespace fsp
   class exporter_state
   {
   public:
-    explicit exporter_state(std::vector<drain_dscr_t> drains);
+    /**
+     * @param drains the static drain list, as built from exporter_config_t.
+     * @param phase1_worker_count number of worker threads that take part in phase 1
+     * (min(drains.size(), exporter_config_t::number_of_threads), see exporter<T,Q>::exec()'s own
+     * doc comment for why this can be smaller than the total thread count) - initializes
+     * phase1_active_workers_ (see that member's own doc comment).
+     */
+    explicit exporter_state(std::vector<drain_dscr_t> drains, std::size_t phase1_worker_count);
 
     // --- available_drains_: which drains still have unclaimed work ---
 
@@ -101,6 +110,34 @@ namespace fsp
     [[nodiscard]] const drain_dscr_t*              find_drain(drain_t drain_id) const noexcept;
     [[nodiscard]] const std::vector<drain_dscr_t>& drains() const noexcept { return drain_static_; }
 
+    // --- work_queue_: phase-2 work, published by phase 1 (see cb_exporter::compute_drain_stat()) ---
+
+    /// @brief Appends one drain_doc_slot_t per doc_id in doc_ids to the shared phase-2 work queue.
+    /// Called once per drain, by whichever worker thread's phase-1 loop just finished computing
+    /// that drain's own block list - see exporter_worker.hpp's own phase-1 loop.
+    void publish_blocks(drain_t drain_id, const std::vector<doc_id_t>& doc_ids);
+    /**
+     * @brief Pops and returns the next phase-2 work item, if any is available RIGHT NOW.
+     * @return nullopt does NOT mean "phase 2 is over" - see phase1_done() below, which a caller
+     * must also check before treating an empty pop as the end of this worker's own loop: another
+     * worker thread may still be inside its own phase-1 compute_drain_stat() call, about to
+     * publish more blocks this one hasn't seen yet.
+     */
+    [[nodiscard]] std::optional<drain_doc_slot_t> pop_work_block();
+    /**
+     * @brief Records that one phase-1 participant (see the constructor's own phase1_worker_count
+     * parameter) has no more drains left to claim, and so will never call publish_blocks() again.
+     * @return true once every phase-1 participant has called this - i.e. phase 1 as a whole is
+     * over and work_queue_'s own remaining content (if any) is now final. A worker's own
+     * pop_work_block() returning nullopt is only the true end of phase 2 once phase1_done() (below)
+     * also returns true (see pop_work_block()'s own doc comment) - this return value is a
+     * convenience for whichever caller happens to be the last one, e.g. for a one-time log line.
+     */
+    bool mark_phase1_worker_done();
+    /// @brief True once every phase-1 participant has called mark_phase1_worker_done() - see that
+    /// method's own doc comment.
+    [[nodiscard]] bool phase1_done() const noexcept { return phase1_active_workers_.load(std::memory_order_acquire) == 0; }
+
     // --- controlled-stop signal shared by every worker ---
 
     /// @brief One stop_token, shared by every worker thread, so one request_stop() call reaches all of them.
@@ -110,7 +147,7 @@ namespace fsp
   private:
     std::vector<drain_dscr_t> drain_static_; // immutable after construction, no lock needed
 
-    mutable std::mutex  available_mutex_; // protects available_drains_ -- the hottest lock, touched every loop iteration
+    mutable std::mutex   available_mutex_; // protects available_drains_ -- the hottest lock, touched every loop iteration
     std::vector<drain_t> available_drains_;
 
     mutable std::mutex             stats_mutex_;     // protects only the one-time 'loaded' transition per drain
@@ -121,6 +158,18 @@ namespace fsp
 
     mutable std::mutex                       doc_count_mutex_; // protects drain_doc_counts_
     std::unordered_map<drain_t, std::size_t> drain_doc_counts_;
+
+    mutable std::mutex           work_queue_mutex_; // protects work_queue_, touched every phase-2 loop iteration
+    std::deque<drain_doc_slot_t> work_queue_;       // FIFO -- see publish_blocks()/pop_work_block()
+
+    /// @brief Counts DOWN from the constructor's own phase1_worker_count as each phase-1
+    /// participant finishes (see mark_phase1_worker_done()) - reaching 0 is phase 1's own
+    /// completion signal, checked by pop_work_block() callers alongside "queue empty" (see that
+    /// method's own doc comment for why neither condition alone is enough). Atomic, not behind
+    /// work_queue_mutex_: read on every phase-2 loop iteration by every worker, written at most
+    /// phase1_worker_count times total (once per phase-1 participant) - a shared mutex here would
+    /// only add contention to the hottest phase-2 check for no benefit over a lock-free counter.
+    std::atomic<std::size_t> phase1_active_workers_;
 
     std::stop_source stop_source_; // one shared source; every worker reads its token
   };

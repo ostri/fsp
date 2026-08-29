@@ -115,18 +115,23 @@ namespace
    */
   struct shared_fixture
   {
-    std::mutex                                      mtx;
-    std::map<fsp::drain_t, std::vector<test_txn_t>> pending;       // drain_id -> remaining transactions, front = next
-    std::map<fsp::drain_t, std::size_t>             max_doc_txn;   // drain_id -> block size
-    std::map<fsp::drain_t, std::size_t>             existing_docs; // drain_id -> existing_doc_count reported by fetch_run_stat
-    bool                                            fail_fetch_doc_name      = false;
-    bool                                            fail_fetch_run_stat      = false;
-    bool                                            fail_fetch_doc_data      = false;
-    bool                                            fail_prepare_transaction = false;
-    bool                                            fail_prepare_header      = false;
-    bool                                            fail_prepare_footer      = false;
-    bool                                            always_reject            = false; // document_prepared() always returns false
-    bool        always_taken_name = false; // fetch_doc_name() always returns a name that already exists on disk
+    std::mutex mtx;
+    std::map<fsp::drain_t, std::vector<test_txn_t>>
+                                        pending;       // drain_id -> remaining transactions, split into blocks by compute_drain_stat()
+    std::map<fsp::drain_t, std::size_t> max_doc_txn;   // drain_id -> block size
+    std::map<fsp::drain_t, std::size_t> existing_docs; // drain_id -> starting doc_id, mirrors the single-phase model's own
+                                                       // fetch_run_stat()-based resume (see compute_drain_stat())
+    std::map<fsp::doc_id_t, std::vector<test_txn_t>>
+      blocks_by_doc_id; // filled by compute_drain_stat(), read by fetch_doc_data() - see that method's own doc comment on why the two-phase
+                        // model needs this indirection
+    bool        fail_fetch_doc_name      = false;
+    bool        fail_compute_drain_stat  = false;
+    bool        fail_fetch_doc_data      = false;
+    bool        fail_prepare_transaction = false;
+    bool        fail_prepare_header      = false;
+    bool        fail_prepare_footer      = false;
+    bool        always_reject            = false; // document_prepared() always returns false
+    bool        always_taken_name        = false; // fetch_doc_name() always returns a name that already exists on disk
     std::string tmp_dir;
   };
 
@@ -160,20 +165,57 @@ namespace
       return fmt::format("doc_{}_{}.xml", drain_id, block_number);
     }
 
+    /// @brief Not called by exporter_worker in the two-phase model (see cb_exporter.hpp's own
+    /// fetch_run_stat() doc comment) - kept only because it is still a pure-virtual API member;
+    /// returns plain, harmless values so nothing accidentally depends on it being reachable.
     [[nodiscard]] exp_result<run_stat_t> fetch_run_stat(const test_qual_t& /*qualifiers*/, fsp::drain_t drain_id) override
     {
       const std::scoped_lock lock(shared_->mtx);
-      if (shared_->fail_fetch_run_stat)
-      {
-        return std::unexpected(fsp::exp_error_info(exp_error::fetch_run_stat_failed, "fetch_run_stat failed"));
-      }
-      const auto existing = shared_->existing_docs.contains(drain_id) ? shared_->existing_docs.at(drain_id) : 0;
-      return run_stat_t{.remaining_txn_count = shared_->pending[drain_id].size(), .existing_doc_count = existing};
+      return run_stat_t{.remaining_txn_count = shared_->pending[drain_id].size(), .existing_doc_count = 0};
     }
 
+    /**
+     * @brief Phase 1: splits drain_id's own pending queue into blocks of at most max_doc_txn[drain_id]
+     * transactions each, stores each block under a freshly allocated doc_id in blocks_by_doc_id
+     * (fetch_doc_data() below reads it back from there), starting doc_id numbering at
+     * existing_docs[drain_id]+1 -- mirrors the single-phase model's own fetch_run_stat()-based resume
+     * behavior (see the "exporter honors ... existing_doc_count ..." TEST_CASE), now driven entirely
+     * by this method instead.
+     */
+    [[nodiscard]] exp_result<std::vector<fsp::doc_id_t>> compute_drain_stat(const test_qual_t& /*qualifiers*/,
+                                                                            fsp::drain_t drain_id) override
+    {
+      const std::scoped_lock lock(shared_->mtx);
+      if (shared_->fail_compute_drain_stat)
+      {
+        return std::unexpected(fsp::exp_error_info(exp_error::fetch_run_stat_failed, "compute_drain_stat failed"));
+      }
+
+      auto&             queue       = shared_->pending[drain_id];
+      const std::size_t block_size  = shared_->max_doc_txn.contains(drain_id) ? shared_->max_doc_txn.at(drain_id) : queue.size();
+      std::size_t       next_doc_id = shared_->existing_docs.contains(drain_id) ? shared_->existing_docs.at(drain_id) : 0;
+
+      std::vector<fsp::doc_id_t> doc_ids;
+      std::size_t                offset = 0;
+      while (offset < queue.size())
+      {
+        const std::size_t take = std::min(block_size, queue.size() - offset);
+        ++next_doc_id;
+        const auto doc_id = static_cast<fsp::doc_id_t>(next_doc_id);
+        shared_->blocks_by_doc_id[doc_id].assign(queue.begin() + static_cast<std::ptrdiff_t>(offset),
+                                                 queue.begin() + static_cast<std::ptrdiff_t>(offset + take));
+        doc_ids.push_back(doc_id);
+        offset += take;
+      }
+      queue.clear(); // fully consumed into blocks_by_doc_id above
+      return doc_ids;
+    }
+
+    /// @brief Phase 2: looks doc_id's own block back up from blocks_by_doc_id (see
+    /// compute_drain_stat()'s own doc comment) - no queue/cursor logic here anymore.
     [[nodiscard]] fetch_doc_data_result_t<test_txn_t> fetch_doc_data(const test_qual_t& /*qualifiers*/,
-                                                                     fsp::drain_t drain_id,
-                                                                     fsp::doc_id_t /*doc_id*/) override
+                                                                     fsp::drain_t /*drain_id*/,
+                                                                     fsp::doc_id_t doc_id) override
     {
       const std::scoped_lock lock(shared_->mtx);
       if (shared_->fail_fetch_doc_data)
@@ -182,18 +224,12 @@ namespace
                                                    .block  = {},
                                                    .error = fsp::exp_error_info(exp_error::fetch_doc_data_failed, "fetch_doc_data failed")};
       }
-      auto& queue = shared_->pending[drain_id];
-      if (queue.empty())
+      const auto it = shared_->blocks_by_doc_id.find(doc_id);
+      if (it == shared_->blocks_by_doc_id.end())
       {
         return fetch_doc_data_result_t<test_txn_t>{.status = fetch_doc_data_status::no_more_data, .block = {}, .error = {}};
       }
-
-      const std::size_t block_size = shared_->max_doc_txn.contains(drain_id) ? shared_->max_doc_txn.at(drain_id) : queue.size();
-      const std::size_t take       = std::min(block_size, queue.size());
-
-      txn_block_t<test_txn_t> block(queue.begin(), queue.begin() + static_cast<std::ptrdiff_t>(take));
-      queue.erase(queue.begin(), queue.begin() + static_cast<std::ptrdiff_t>(take));
-      return fetch_doc_data_result_t<test_txn_t>{.status = fetch_doc_data_status::ok, .block = std::move(block), .error = {}};
+      return fetch_doc_data_result_t<test_txn_t>{.status = fetch_doc_data_status::ok, .block = it->second, .error = {}};
     }
 
     [[nodiscard]] exp_result<fsp::str_t> prepare_transaction(std::size_t /*ndx*/,
@@ -349,17 +385,18 @@ TEST_CASE("exporter removes a drain from available work once its final partial b
   CHECK(res->total_transactions == 2);
 }
 
-// --- fetch_run_stat resume-after-crash ---------------------------------------------------------
+// --- compute_drain_stat()'s own doc_id numbering ------------------------------------------------
 
-TEST_CASE("exporter honors fetch_run_stat's existing_doc_count as the starting document id", "[exporter][positive]")
+TEST_CASE("exporter honors compute_drain_stat's starting doc_id offset", "[exporter][positive]")
 {
   const temp_dir_guard dirs;
   const auto           log_ptr = make_silent_logger();
 
-  auto shared              = std::make_shared<shared_fixture>();
-  shared->pending[1]       = {make_txn(1, "a")};
-  shared->max_doc_txn[1]   = 10; // NOLINT(readability-magic-numbers)
-  shared->existing_docs[1] = 5;  // NOLINT(readability-magic-numbers) -- simulate a prior crash after 5 documents
+  auto shared            = std::make_shared<shared_fixture>();
+  shared->pending[1]     = {make_txn(1, "a")};
+  shared->max_doc_txn[1] = 10; // NOLINT(readability-magic-numbers)
+  shared->existing_docs[1] =
+    5; // NOLINT(readability-magic-numbers) -- demo_cb's own compute_drain_stat() starts doc_id numbering after this
 
   exporter<test_txn_t, test_qual_t> exp(
     make_cfg(dirs, {exporter_drain_cfg_t{.id = 1, .name = "BANKA1", .max_doc_txn = 10}}, 1), test_qual_t{}, *log_ptr, "test"); // NOLINT
@@ -463,14 +500,14 @@ TEST_CASE("exporter surfaces a fatal error when fetch_doc_name fails", "[exporte
   CHECK(res.error().code() == exp_error::fetch_doc_name_failed);
 }
 
-TEST_CASE("exporter surfaces a fatal error when fetch_run_stat fails", "[exporter][negative]")
+TEST_CASE("exporter surfaces a fatal error when compute_drain_stat fails", "[exporter][negative]")
 {
   const temp_dir_guard dirs;
-  const auto           log_ptr = make_silent_logger();
-  auto                 shared  = std::make_shared<shared_fixture>();
-  shared->pending[1]           = {make_txn(1, "a")};
-  shared->max_doc_txn[1]       = 10; // NOLINT(readability-magic-numbers)
-  shared->fail_fetch_run_stat  = true;
+  const auto           log_ptr    = make_silent_logger();
+  auto                 shared     = std::make_shared<shared_fixture>();
+  shared->pending[1]              = {make_txn(1, "a")};
+  shared->max_doc_txn[1]          = 10; // NOLINT(readability-magic-numbers)
+  shared->fail_compute_drain_stat = true;
 
   exporter<test_txn_t, test_qual_t> exp(
     make_cfg(dirs, {exporter_drain_cfg_t{.id = 1, .name = "BANKA1", .max_doc_txn = 10}}, 1), test_qual_t{}, *log_ptr, "test"); // NOLINT
@@ -575,4 +612,85 @@ TEST_CASE("exporter rejects zero worker threads before starting any worker", "[e
   const auto res = exp.exec(cb);
   REQUIRE_FALSE(res.has_value());
   CHECK(res.error().code() == exp_error::invalid_config);
+}
+
+// --- two-phase model: thread/drain count edge cases -----------------------------------------
+
+TEST_CASE("exporter with more worker threads than drains still produces every document", "[exporter][positive]")
+{
+  // 5 threads, 1 drain: n_phase1 = min(1,5) = 1 -- 4 threads skip phase 1 entirely and go
+  // straight to phase 2 (see exporter<T,Q>::exec()'s own doc comment) - this is the "surplus
+  // threads" case the user asked to be measured/verified, not just the "fewer threads than
+  // drains" case every OTHER multi-thread test case here already exercises incidentally.
+  const temp_dir_guard dirs;
+  const auto           log_ptr = make_silent_logger();
+
+  auto shared            = std::make_shared<shared_fixture>();
+  shared->max_doc_txn[1] = 3;                                                                    // NOLINT(readability-magic-numbers)
+  for (fsp::txn_id_t i = 0; i < 37; ++i) { shared->pending[1].push_back(make_txn(i + 1, "x")); } // NOLINT(readability-magic-numbers)
+
+  exporter<test_txn_t, test_qual_t> exp(
+    make_cfg(dirs, {exporter_drain_cfg_t{.id = 1, .name = "BANKA1", .max_doc_txn = 3}}, 5), test_qual_t{}, *log_ptr, "test"); // NOLINT
+  demo_cb    cb(shared, *log_ptr);
+  const auto res = exp.exec(cb);
+  REQUIRE(res.has_value());
+  CHECK(res->total_transactions == 37);   // NOLINT(readability-magic-numbers)
+  CHECK(res->total_documents == 13);      // NOLINT(readability-magic-numbers) -- ceil(37/3)
+  CHECK(file_count(dirs.target()) == 13); // NOLINT(readability-magic-numbers)
+}
+
+TEST_CASE("exporter with fewer worker threads than drains work-steals across phase 1", "[exporter][positive]")
+{
+  // 2 threads, 5 drains: n_phase1 = min(5,2) = 2 -- both threads take part in phase 1, each
+  // claiming/computing more than one drain's own block plan in turn (work-stealing via
+  // pick_or_keep_drain(), see run_phase1()) before any thread reaches phase 2.
+  const temp_dir_guard dirs;
+  const auto           log_ptr = make_silent_logger();
+
+  auto                              shared = std::make_shared<shared_fixture>();
+  std::vector<exporter_drain_cfg_t> drains;
+  for (std::uint8_t drain_id = 1; drain_id <= 5; ++drain_id) // NOLINT(readability-magic-numbers)
+  {
+    shared->max_doc_txn[drain_id] = 4; // NOLINT(readability-magic-numbers)
+    for (fsp::txn_id_t i = 0; i < 9; ++i)
+    {
+      shared->pending[drain_id].push_back(make_txn(i + 1, "x"));
+    } // NOLINT(readability-magic-numbers)
+    drains.push_back(exporter_drain_cfg_t{.id = drain_id, .name = fmt::format("BANKA{}", drain_id), .max_doc_txn = 4}); // NOLINT
+  }
+
+  exporter<test_txn_t, test_qual_t> exp(make_cfg(dirs, drains, 2), test_qual_t{}, *log_ptr, "test");
+  demo_cb                           cb(shared, *log_ptr);
+  const auto                        res = exp.exec(cb);
+  REQUIRE(res.has_value());
+  CHECK(res->total_transactions == 45);   // NOLINT(readability-magic-numbers) -- 9 * 5 drains
+  CHECK(res->total_documents == 15);      // NOLINT(readability-magic-numbers) -- ceil(9/4)=3 docs/drain * 5
+  CHECK(file_count(dirs.target()) == 15); // NOLINT(readability-magic-numbers)
+}
+
+TEST_CASE("exporter surfaces a fatal error from compute_drain_stat without hanging any other phase-1 thread", "[exporter][negative]")
+{
+  // Confirms the fix documented in exporter_worker.hpp's own fail()/run_phase1() doc comments:
+  // a phase-1 failure on ONE thread must still let every OTHER phase-1 thread's own
+  // phase1_done() check see phase 1 as complete, instead of hanging forever waiting for the
+  // failed thread's own mark_phase1_worker_done() call that would otherwise never come. If this
+  // regressed, this test case would hang (timeout) rather than fail an assertion.
+  const temp_dir_guard dirs;
+  const auto           log_ptr = make_silent_logger();
+
+  auto                              shared = std::make_shared<shared_fixture>();
+  std::vector<exporter_drain_cfg_t> drains;
+  for (std::uint8_t drain_id = 1; drain_id <= 4; ++drain_id) // NOLINT(readability-magic-numbers)
+  {
+    shared->max_doc_txn[drain_id] = 2; // NOLINT(readability-magic-numbers)
+    shared->pending[drain_id]     = {make_txn(1, "a"), make_txn(2, "b")};
+    drains.push_back(exporter_drain_cfg_t{.id = drain_id, .name = fmt::format("BANKA{}", drain_id), .max_doc_txn = 2}); // NOLINT
+  }
+  shared->fail_compute_drain_stat = true; // every compute_drain_stat() call fails -- worst case for the hang scenario
+
+  exporter<test_txn_t, test_qual_t> exp(make_cfg(dirs, drains, 4), test_qual_t{}, *log_ptr, "test");
+  demo_cb                           cb(shared, *log_ptr);
+  const auto                        res = exp.exec(cb);
+  REQUIRE_FALSE(res.has_value());
+  CHECK(res.error().code() == exp_error::fetch_run_stat_failed);
 }

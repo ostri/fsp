@@ -138,6 +138,19 @@ namespace fsp
     std::size_t existing_doc_count  = 0; ///< # documents already produced for this drain (e.g. before a crash)
   };
 
+  /**
+   * @brief One phase-2 unit of work, as published into exporter_state's own work queue by phase 1
+   * (see cb_exporter::compute_drain_stat()). fsp itself never looks inside the block this doc_id
+   * refers to -- only WHICH drain and WHICH doc_id are its own concern; the block's own content
+   * (e.g. a caller-defined id range) lives entirely in the concrete cb_exporter's own state,
+   * looked up again from doc_id when fetch_doc_data() is called for it in phase 2.
+   */
+  struct drain_doc_slot_t
+  {
+    drain_t  drain_id = 0;
+    doc_id_t doc_id   = 0;
+  };
+
   /// @brief One entry of the caller-supplied drain list (exporter_config_t::drain_list).
   struct exporter_drain_cfg_t
   {
@@ -164,9 +177,9 @@ namespace fsp
     std::size_t                       number_of_threads = 0;
     str_t                             filename_prefix;
     str_t                             filename_ext = "xml"; ///< passed through to fetch_doc_name(), no leading dot
-    str_t                             tmp_dir;    ///< staging area; must share a filesystem with target_dir/error_dir
-    str_t                             target_dir; ///< final destination for successfully produced documents
-    str_t                             error_dir;  ///< diagnostic destination for a tmp file that failed to move
+    str_t                             tmp_dir;              ///< staging area; must share a filesystem with target_dir/error_dir
+    str_t                             target_dir;           ///< final destination for successfully produced documents
+    str_t                             error_dir;            ///< diagnostic destination for a tmp file that failed to move
   };
 
   /**

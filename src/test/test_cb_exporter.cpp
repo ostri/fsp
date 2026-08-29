@@ -3,6 +3,7 @@
 #include <logger/logger.hpp>
 #include <logger/logger_config.hpp>
 #include <memory>
+#include <vector>
 
 namespace
 {
@@ -48,6 +49,10 @@ namespace
 
     [[nodiscard]] fsp::exp_result<run_stat_t> fetch_run_stat(const test_qual_t& /*qualifiers*/, fsp::drain_t /*drain_id*/) override
     { return run_stat_t{}; }
+
+    [[nodiscard]] fsp::exp_result<std::vector<fsp::doc_id_t>> compute_drain_stat(const test_qual_t& /*qualifiers*/,
+                                                                                 fsp::drain_t /*drain_id*/) override
+    { return std::vector<fsp::doc_id_t>{}; }
 
     [[nodiscard]] fsp::fetch_doc_data_result_t<test_txn_t> fetch_doc_data(const test_qual_t& /*qualifiers*/,
                                                                           fsp::drain_t /*drain_id*/,
