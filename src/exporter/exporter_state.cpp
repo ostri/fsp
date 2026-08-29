@@ -65,12 +65,29 @@ namespace fsp
     if (d == nullptr) { return; } // unknown drain id -- nothing to load, caller will fail on the next step
     const auto ndx = static_cast<std::size_t>(std::distance(static_cast<const drain_dscr_t*>(drain_static_.data()), d));
 
-    const std::scoped_lock lock(stats_mutex_);
-    auto&                  stat_entry = drain_statistic_.at(ndx);
-    if (stat_entry.loaded) { return; } // lost the race to another thread -- idempotent no-op
+    {
+      const std::scoped_lock lock(stats_mutex_);
+      if (drain_statistic_.at(ndx).loaded) { return; } // lost the race to another thread -- idempotent no-op
+    }
 
+    // fetch() itself (the caller's own cb_exporter::fetch_run_stat()) runs OUTSIDE stats_mutex_ --
+    // it is a network round trip to the caller's own database, not bounded work, and stats_mutex_
+    // is shared by every drain, not one lock per drain (drain_statistic_ is a flat vector, sized
+    // once in the ctor, indexed by ndx). Holding the lock across fetch() would serialize every
+    // OTHER drain's own first fetch_run_stat() call behind whichever one happens to run first -
+    // confirmed directly (multi-worker export run, gdb thread sampling): every worker thread but
+    // one parked here in pthread_mutex_lock, the remaining one still inside its own fetch()'s own
+    // PQgetResult() wait, for as long as that single call took. Real double-checked locking
+    // instead: check under lock (above), fetch() unlocked, re-lock only to check+write the result
+    // (below) - a second caller that raced this one to the SAME drain_id and lost still does one
+    // redundant fetch() (wasted work, not a correctness problem: run_stat_pair_t is plain,
+    // idempotent data), but every OTHER drain's own first caller is never blocked on it.
     const auto stat = fetch();
     if (! stat.has_value()) { return; } // caller (exporter_worker) re-observes !loaded and surfaces the fetch error itself
+
+    const std::scoped_lock lock(stats_mutex_);
+    auto&                  stat_entry = drain_statistic_.at(ndx);
+    if (stat_entry.loaded) { return; } // another thread's own fetch() already won this drain_id - discard ours, not an error
 
     stat_entry.initial_txn_count        = stat->remaining_txn_count;
     stat_entry.initial_doc_count        = stat->existing_doc_count;

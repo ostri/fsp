@@ -69,12 +69,20 @@ namespace fsp
     /**
      * @brief Loads drain_id's initial statistics exactly once, the first time any worker calls
      * this for that drain.
-     * @details Double-checked locking: is_drain_loaded() (lock-free-ish fast path via the caller)
-     * lets a worker skip this call entirely once loaded; here, under stats_mutex_, the loaded
-     * flag is checked again so a second caller that lost the race to a first one does not
-     * re-invoke fetch (idempotent). max_doc_txn is needed to compute initial_future_doc_count.
-     * @param fetch invokes the caller's cb_exporter::fetch_run_stat() for drain_id; only called
-     * at all if this is genuinely the first (winning) caller for drain_id.
+     * @details Double-checked locking, with fetch() itself called OUTSIDE stats_mutex_:
+     * is_drain_loaded() (lock-free-ish fast path via the caller) lets a worker skip this call
+     * entirely once loaded; here, the loaded flag is checked under stats_mutex_ first (fast exit
+     * for a second caller that lost an earlier race), then fetch() runs unlocked (a network round
+     * trip to the caller's own database - see this method's own .cpp doc comment for why holding
+     * the lock across it would serialize every OTHER drain's own first call behind it, confirmed
+     * directly to stall a real export run), then the result is written back under stats_mutex_
+     * again, itself re-checking loaded so two callers that both raced to fetch() the SAME drain_id
+     * still only keep one result (the other's fetch() was redundant work, not incorrect - see
+     * run_stat_pair_t's own class comment: plain, idempotent data). max_doc_txn is needed to
+     * compute initial_future_doc_count.
+     * @param fetch invokes the caller's cb_exporter::fetch_run_stat() for drain_id - may run more
+     * than once for the same drain_id if two callers race (see above), but only the first result
+     * to reach the write-back lock is ever kept.
      */
     void load_drain_stat_if_needed(drain_t drain_id, std::size_t max_doc_txn, const std::function<exp_result<run_stat_pair_t>()>& fetch);
     /// @brief Atomically allocates and returns the next document id for drain_id (numbered from 1).

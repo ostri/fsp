@@ -115,6 +115,36 @@ namespace fsp
       drain_t  drain_id, ///< receiver of the document
       doc_id_t doc_id    ///< internal id of the document
       ) = 0;
+    /**
+     * @brief Called once per worker thread, right after clone() and before that thread's first
+     * fetch_run_stat()/fetch_doc_data() call - the place for a concrete callback to open its own
+     * database connection and PREPARE whatever statements fetch_doc_data()/document_prepared()
+     * etc. go on to reuse for the rest of this worker thread's own lifetime, mirroring
+     * fsp::pipeline_hooks::on_wrk_start() on the importer side (see that class's own doc comment).
+     * Default is a no-op (nothing to do) - override only if the concrete callback needs per-worker
+     * setup beyond what its own clone()/constructor already did.
+     * @return {} on success, or the error to log and treat as this worker thread's own fatal
+     * startup failure - see exporter_worker.hpp's own on_wrk_safe_start() for exactly how a
+     * failure here is surfaced.
+     */
+    [[nodiscard]] virtual ev_result on_wrk_start(
+      //
+      [[maybe_unused]] int    worker_id,  ///< 0-based index of this worker thread
+      [[maybe_unused]] cstr_t thread_name ///< this worker thread's own log name (see logger::Logger::log_name())
+    );
+    /**
+     * @brief Called once per worker thread, after its loop has ended (normal exit, stop requested,
+     * or a fatal error) - the place for a concrete callback to close whatever on_wrk_start() opened
+     * (its own database connection, in particular), mirroring fsp::pipeline_hooks::on_wrk_end() on
+     * the importer side. Default is a no-op. Errors are logged, never propagated (this runs during
+     * worker shutdown, with nothing left to fail back to - see exporter_worker.hpp's own
+     * on_wrk_safe_end()), same convention on_wrk_start()'s own doc comment documents for startup.
+     */
+    virtual void on_wrk_end(
+      //
+      [[maybe_unused]] int    worker_id,  ///< 0-based index of this worker thread
+      [[maybe_unused]] cstr_t thread_name ///< this worker thread's own log name
+    );
   protected:
     [[nodiscard]] const logger::Logger& lg() const noexcept;
   private:
@@ -126,14 +156,20 @@ namespace fsp
    * correctly with zero extra code. Mirrors fsp::pipeline_hooks_crtp exactly.
    * @tparam Derived the developer's own concrete cb_exporter type (Curiously Recurring Template
    * Pattern) -- must be copy-constructible (clone() copies *this via Derived's own copy ctor).
+   * @note The constructor is protected, not private+friend Derived -- protected still blocks
+   * cb_exporter_crtp<X> from being instantiated as a standalone (non-CRTP) type, but (unlike
+   * friend Derived, which only grants access to Derived itself) also allows an intermediate
+   * mixin between cb_exporter_crtp and Derived, mirroring pipeline_hooks_crtp's own constructor
+   * (pipeline_hooks.hpp) -- see that class's own doc comment for the worked example
+   * (typed_semantic_check.hpp) this mirrors.
    */
   template <typename Derived, transaction_like T, qualifiers_like Q>
   class cb_exporter_crtp : public cb_exporter<T, Q>
   {
+  protected:
     explicit cb_exporter_crtp(const logger::Logger& log) noexcept;
   public:
     [[nodiscard]] std::unique_ptr<cb_exporter<T, Q>> clone() const override;
-    friend Derived;
   };
   ///////////////////////////////////////////////////////////////////////////////////////////////
   /**
@@ -198,6 +234,23 @@ namespace fsp
     const blk_t& /*block*/ //< block of transactions
   )
   { return {}; }
+
+  template <transaction_like T, qualifiers_like Q>
+  inline ev_result cb_exporter<T, Q>::on_wrk_start(
+    //
+    [[maybe_unused]] int    worker_id,  ///< 0-based index of this worker thread
+    [[maybe_unused]] cstr_t thread_name ///< this worker thread's own log name
+  )
+  { return {}; }
+
+  template <transaction_like T, qualifiers_like Q>
+  inline void cb_exporter<T, Q>::on_wrk_end(
+    //
+    [[maybe_unused]] int    worker_id,  ///< 0-based index of this worker thread
+    [[maybe_unused]] cstr_t thread_name ///< this worker thread's own log name
+  )
+  {
+  }
 
   /// @brief This run's logger
   template <transaction_like T, qualifiers_like Q>

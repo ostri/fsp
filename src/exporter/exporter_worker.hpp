@@ -67,24 +67,39 @@ namespace fsp
       const auto thread_name = logger::Logger::log_name();
       log_.info("{}: worker started", thread_name);
 
-      const auto thread_start = std::chrono::steady_clock::now();
-
-      while (true)
+      // The one place a concrete cb_exporter opens its own per-worker-thread resources (database
+      // connection, PREPAREd statements fetch_doc_data()/document_prepared() etc. go on to reuse)
+      // - see cb_exporter::on_wrk_start()'s own doc comment. A failure here is fatal: nothing this
+      // worker thread does afterward (fetch_run_stat()/fetch_doc_data() in particular) has any
+      // chance of working without whatever on_wrk_start() itself was supposed to set up, so this
+      // skips straight to on_wrk_end()/writer_.close() rather than entering the loop at all.
+      if (auto res = cb_->on_wrk_start(worker_id, thread_name); ! res)
       {
-        if (state_.stop_token().stop_requested())
+        std::ignore = fail(exp_error::wrk_start_failed, str_t(res.error().message()), 0, 0);
+      }
+      else
+      {
+        const auto thread_start = std::chrono::steady_clock::now();
+
+        while (true)
         {
-          log_.warn("{}: stop requested -- forced exit", thread_name);
-          break;
+          if (state_.stop_token().stop_requested())
+          {
+            log_.warn("{}: stop requested -- forced exit", thread_name);
+            break;
+          }
+          if (state_.available_drains_empty())
+          {
+            log_.info("{}: no drains left -- normal exit", thread_name);
+            break;
+          }
+          if (! run_one_iteration(worker_id, thread_name)) { break; } // a fatal error occurred; stop already requested
         }
-        if (state_.available_drains_empty())
-        {
-          log_.info("{}: no drains left -- normal exit", thread_name);
-          break;
-        }
-        if (! run_one_iteration(worker_id, thread_name)) { break; } // a fatal error occurred; stop already requested
+
+        stats_.processing_time_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - thread_start).count();
       }
 
-      stats_.processing_time_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - thread_start).count();
+      cb_->on_wrk_end(worker_id, thread_name); // mirrors on_wrk_start() above - closes whatever it opened, even after a fatal error
       writer_.close(); // safety net -- xml_writer::close() is itself idempotent and no-throw
       log_.info("{}: worker done ({} document(s), {} transaction(s))", thread_name, stats_.successful_documents, stats_.total_transactions);
     }
@@ -238,12 +253,13 @@ namespace fsp
         return std::unexpected(wrap_xml_writer_error(res.error(), tmp_path, drain_id, doc_id));
       }
 
+      // header_res is written ONLY via writer_.finalize() below, never via writer_.append() here -
+      // xml_writer::finalize(header) already places it at the very start of the file (into the
+      // space open() reserved for exactly this purpose - see xml_writer.hpp's own class comment
+      // and usage example); appending it here too would duplicate it, once at the reserved offset
+      // (finalize()'s copy) and once inline in the batch stream (this append()'s copy).
       auto header_res = cb_->prepare_header(qualifiers_, drain_id, doc_id, block);
       if (! header_res.has_value()) { return std::unexpected(header_res.error()); }
-      if (auto res = writer_.append(*header_res); ! res)
-      {
-        return std::unexpected(wrap_xml_writer_error(res.error(), tmp_path, drain_id, doc_id));
-      }
 
       for (std::size_t ndx = 0; ndx < block.size(); ++ndx)
       {

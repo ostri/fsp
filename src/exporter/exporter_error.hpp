@@ -47,6 +47,7 @@ namespace fsp
     file_move_failed,           ///< std::filesystem::rename() from tmp to its destination failed
     file_rename_collision,      ///< the filename-collision retry loop was exhausted
     invalid_config,             ///< e.g. empty drain_list, number_of_threads == 0
+    wrk_start_failed,           ///< cb_exporter::on_wrk_start() returned an error
     fetch_doc_name_failed,      ///< cb_exporter::fetch_doc_name() returned an error
     fetch_run_stat_failed,      ///< cb_exporter::fetch_run_stat() returned an error
     fetch_doc_data_failed,      ///< cb_exporter::fetch_doc_data() reported fetch_doc_data_status::error
