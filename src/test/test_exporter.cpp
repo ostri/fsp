@@ -33,16 +33,18 @@ namespace
 
   // --- shared test fixtures, mirroring test_xml_writer.cpp's style -------------------------
 
+  /// @brief One scratch directory, shared by tmp AND final documents (fetch_doc_name() returns a
+  /// full path under it - see cb_exporter.hpp's own doc comment - and exporter_worker's own
+  /// tmp-name suffix stays in that same directory, see resolve_unique_tmp_path()), so a single
+  /// target() is now everything a test needs; there is no separate tmp/error sub-directory any
+  /// more (the callback alone decides the whole layout - fsp itself no longer has a directory
+  /// concept of its own to guard here).
   class temp_dir_guard
   {
   public:
     temp_dir_guard()
     : dir_(fs::temp_directory_path() / ("fsp_exporter_test_" + std::to_string(::getpid()) + "_" + std::to_string(counter_++)))
-    {
-      fs::create_directories(dir_ / "tmp");
-      fs::create_directories(dir_ / "target");
-      fs::create_directories(dir_ / "error");
-    }
+    { fs::create_directories(dir_ / "target"); }
     ~temp_dir_guard()
     {
       std::error_code ec;
@@ -52,9 +54,7 @@ namespace
     temp_dir_guard& operator=(const temp_dir_guard&)      = delete;
     temp_dir_guard(temp_dir_guard&&)                      = delete;
     temp_dir_guard&           operator=(temp_dir_guard&&) = delete;
-    [[nodiscard]] std::string tmp() const { return (dir_ / "tmp").string(); }
     [[nodiscard]] std::string target() const { return (dir_ / "target").string(); }
-    [[nodiscard]] std::string error() const { return (dir_ / "error").string(); }
   private:
     fs::path                    dir_;
     static inline std::uint32_t counter_ = 0; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
@@ -92,15 +92,12 @@ namespace
   {
   };
 
-  exporter_config_t make_cfg(const temp_dir_guard& dirs, std::vector<exporter_drain_cfg_t> drains, std::size_t threads)
+  exporter_config_t make_cfg(std::vector<exporter_drain_cfg_t> drains, std::size_t threads)
   {
     return exporter_config_t{
       .drain_list        = std::move(drains),
       .number_of_threads = threads,
       .filename_prefix   = "test",
-      .tmp_dir           = dirs.tmp(),
-      .target_dir        = dirs.target(),
-      .error_dir         = dirs.error(),
     };
   }
 
@@ -132,7 +129,8 @@ namespace
     bool        fail_prepare_footer      = false;
     bool        always_reject            = false; // document_prepared() always returns false
     bool        always_taken_name        = false; // fetch_doc_name() always returns a name that already exists on disk
-    std::string tmp_dir;
+    std::string target_dir; // fetch_doc_name() now returns a FULL final path (see cb_exporter.hpp's own doc comment) -
+                            // this is the directory it joins its own bare filename against.
   };
 
   class demo_cb : public cb_exporter_crtp<demo_cb, test_txn_t, test_qual_t>
@@ -157,12 +155,14 @@ namespace
       {
         return std::unexpected(fsp::exp_error_info(exp_error::fetch_doc_name_failed, "fetch_doc_name failed"));
       }
-      if (shared_->always_taken_name) { return fsp::str_t("collide.xml"); }
+      if (shared_->always_taken_name) { return fsp::str_t(fs::path(shared_->target_dir) / "collide.xml"); }
       // drain_id is embedded in the name -- block_number alone is only unique WITHIN one drain
       // (every drain's numbering starts at 1), so two drains would otherwise collide on the same
       // file name (see cb_exporter::fetch_doc_name()'s own doc comment for why drain_id is a
-      // parameter here at all, despite doc/opis_exporterja.txt's original list omitting it).
-      return fmt::format("doc_{}_{}.xml", drain_id, block_number);
+      // parameter here at all, despite doc/opis_exporterja.txt's original list omitting it). A
+      // FULL path now (see cb_exporter.hpp's own doc comment) - joined against shared_->target_dir
+      // itself, not a bare name relative to some caller-supplied directory any more.
+      return (fs::path(shared_->target_dir) / fmt::format("doc_{}_{}.xml", drain_id, block_number)).string();
     }
 
     /// @brief Not called by exporter_worker in the two-phase model (see cb_exporter.hpp's own
@@ -298,19 +298,22 @@ TEST_CASE("exporter produces documents for a single drain with a single worker t
   const auto           log_ptr = make_silent_logger();
 
   auto shared            = std::make_shared<shared_fixture>();
+  shared->target_dir     = dirs.target();
   shared->pending[1]     = {make_txn(1, "a"), make_txn(2, "b"), make_txn(3, "c")}; // NOLINT(readability-magic-numbers)
   shared->max_doc_txn[1] = 2; // NOLINT(readability-magic-numbers) -- two documents: [a,b] then [c]
 
   exporter<test_txn_t, test_qual_t> exp(
-    make_cfg(dirs, {exporter_drain_cfg_t{.id = 1, .name = "BANKA1", .max_doc_txn = 2}}, 1), test_qual_t{}, *log_ptr, "test"); // NOLINT
+    make_cfg({exporter_drain_cfg_t{.id = 1, .name = "BANKA1", .max_doc_txn = 2}}, 1), test_qual_t{}, *log_ptr, "test"); // NOLINT
 
   demo_cb    cb(shared, *log_ptr);
   const auto res = exp.exec(cb);
   REQUIRE(res.has_value());
-  CHECK(res->total_documents == 2);      // NOLINT(readability-magic-numbers)
-  CHECK(res->total_transactions == 3);   // NOLINT(readability-magic-numbers)
+  CHECK(res->total_documents == 2);    // NOLINT(readability-magic-numbers)
+  CHECK(res->total_transactions == 3); // NOLINT(readability-magic-numbers)
+  // Exactly the 2 final documents, no leftover .tmp files - resolve_unique_tmp_path()'s own
+  // ".tmp"-suffixed staging names (see exporter_worker.hpp) are always renamed away by
+  // move_to_final() on success.
   CHECK(file_count(dirs.target()) == 2); // NOLINT(readability-magic-numbers)
-  CHECK(file_count(dirs.tmp()) == 0);
 }
 
 TEST_CASE("exporter's produced documents contain the expected header/transaction/footer content", "[exporter][positive]")
@@ -319,11 +322,12 @@ TEST_CASE("exporter's produced documents contain the expected header/transaction
   const auto           log_ptr = make_silent_logger();
 
   auto shared            = std::make_shared<shared_fixture>();
+  shared->target_dir     = dirs.target();
   shared->pending[1]     = {make_txn(1, "hello")};
   shared->max_doc_txn[1] = 10; // NOLINT(readability-magic-numbers)
 
   exporter<test_txn_t, test_qual_t> exp(
-    make_cfg(dirs, {exporter_drain_cfg_t{.id = 1, .name = "BANKA1", .max_doc_txn = 10}}, 1), test_qual_t{}, *log_ptr, "test"); // NOLINT
+    make_cfg({exporter_drain_cfg_t{.id = 1, .name = "BANKA1", .max_doc_txn = 10}}, 1), test_qual_t{}, *log_ptr, "test"); // NOLINT
   demo_cb cb(shared, *log_ptr);
   REQUIRE(exp.exec(cb).has_value());
 
@@ -339,7 +343,8 @@ TEST_CASE("exporter with multiple worker threads and multiple drains produces ev
   const temp_dir_guard dirs;
   const auto           log_ptr = make_silent_logger();
 
-  auto shared = std::make_shared<shared_fixture>();
+  auto shared        = std::make_shared<shared_fixture>();
+  shared->target_dir = dirs.target();
   for (int drain_id = 1; drain_id <= 2; ++drain_id) // NOLINT(readability-magic-numbers)
   {
     shared->max_doc_txn[drain_id] = 5;     // NOLINT(readability-magic-numbers)
@@ -350,8 +355,7 @@ TEST_CASE("exporter with multiple worker threads and multiple drains produces ev
   }
 
   exporter<test_txn_t, test_qual_t> exp(
-    make_cfg(dirs,
-             {exporter_drain_cfg_t{.id = 1, .name = "BANKA1", .max_doc_txn = 5},  // NOLINT(readability-magic-numbers)
+    make_cfg({exporter_drain_cfg_t{.id = 1, .name = "BANKA1", .max_doc_txn = 5},  // NOLINT(readability-magic-numbers)
               exporter_drain_cfg_t{.id = 2, .name = "BANKA2", .max_doc_txn = 5}}, // NOLINT(readability-magic-numbers)
              4),
     test_qual_t{},
@@ -373,11 +377,12 @@ TEST_CASE("exporter removes a drain from available work once its final partial b
   const auto           log_ptr = make_silent_logger();
 
   auto shared            = std::make_shared<shared_fixture>();
+  shared->target_dir     = dirs.target();
   shared->pending[1]     = {make_txn(1, "a"), make_txn(2, "b")};
   shared->max_doc_txn[1] = 10; // NOLINT(readability-magic-numbers) -- block bigger than available txns -> one partial document
 
   exporter<test_txn_t, test_qual_t> exp(
-    make_cfg(dirs, {exporter_drain_cfg_t{.id = 1, .name = "BANKA1", .max_doc_txn = 10}}, 2), test_qual_t{}, *log_ptr, "test"); // NOLINT
+    make_cfg({exporter_drain_cfg_t{.id = 1, .name = "BANKA1", .max_doc_txn = 10}}, 2), test_qual_t{}, *log_ptr, "test"); // NOLINT
   demo_cb    cb(shared, *log_ptr);
   const auto res = exp.exec(cb);
   REQUIRE(res.has_value());
@@ -393,13 +398,14 @@ TEST_CASE("exporter honors compute_drain_stat's starting doc_id offset", "[expor
   const auto           log_ptr = make_silent_logger();
 
   auto shared            = std::make_shared<shared_fixture>();
+  shared->target_dir     = dirs.target();
   shared->pending[1]     = {make_txn(1, "a")};
   shared->max_doc_txn[1] = 10; // NOLINT(readability-magic-numbers)
   shared->existing_docs[1] =
     5; // NOLINT(readability-magic-numbers) -- demo_cb's own compute_drain_stat() starts doc_id numbering after this
 
   exporter<test_txn_t, test_qual_t> exp(
-    make_cfg(dirs, {exporter_drain_cfg_t{.id = 1, .name = "BANKA1", .max_doc_txn = 10}}, 1), test_qual_t{}, *log_ptr, "test"); // NOLINT
+    make_cfg({exporter_drain_cfg_t{.id = 1, .name = "BANKA1", .max_doc_txn = 10}}, 1), test_qual_t{}, *log_ptr, "test"); // NOLINT
   demo_cb cb(shared, *log_ptr);
   REQUIRE(exp.exec(cb).has_value());
 
@@ -417,12 +423,13 @@ TEST_CASE("exporter treats document_prepared() == false as a fatal run error", "
   const auto           log_ptr = make_silent_logger();
 
   auto shared            = std::make_shared<shared_fixture>();
+  shared->target_dir     = dirs.target();
   shared->pending[1]     = {make_txn(1, "a")};
   shared->max_doc_txn[1] = 10; // NOLINT(readability-magic-numbers)
   shared->always_reject  = true;
 
   exporter<test_txn_t, test_qual_t> exp(
-    make_cfg(dirs, {exporter_drain_cfg_t{.id = 1, .name = "BANKA1", .max_doc_txn = 10}}, 2), test_qual_t{}, *log_ptr, "test"); // NOLINT
+    make_cfg({exporter_drain_cfg_t{.id = 1, .name = "BANKA1", .max_doc_txn = 10}}, 2), test_qual_t{}, *log_ptr, "test"); // NOLINT
   demo_cb    cb(shared, *log_ptr);
   const auto res = exp.exec(cb);
   REQUIRE_FALSE(res.has_value());
@@ -436,23 +443,26 @@ TEST_CASE("exporter retries with a suffixed name when the naive candidate alread
   const temp_dir_guard dirs;
   const auto           log_ptr = make_silent_logger();
 
-  // Pre-create the name fetch_doc_name() would naturally return for block_number == 1.
+  // Pre-create the tmp name resolve_unique_tmp_path() would naturally return for the final path
+  // fetch_doc_name() gives for block_number == 1 ("doc_1.xml" -> "doc_1.xml.tmp" - see
+  // exporter_worker.hpp's own resolve_unique_tmp_path()).
   {
-    std::ofstream pre_existing(fs::path(dirs.tmp()) / "doc_1.xml");
+    std::ofstream pre_existing(fs::path(dirs.target()) / "doc_1.xml.tmp");
     pre_existing << "pre-existing";
   }
 
   auto shared            = std::make_shared<shared_fixture>();
+  shared->target_dir     = dirs.target();
   shared->pending[1]     = {make_txn(1, "a")};
   shared->max_doc_txn[1] = 10; // NOLINT(readability-magic-numbers)
 
   exporter<test_txn_t, test_qual_t> exp(
-    make_cfg(dirs, {exporter_drain_cfg_t{.id = 1, .name = "BANKA1", .max_doc_txn = 10}}, 1), test_qual_t{}, *log_ptr, "test"); // NOLINT
+    make_cfg({exporter_drain_cfg_t{.id = 1, .name = "BANKA1", .max_doc_txn = 10}}, 1), test_qual_t{}, *log_ptr, "test"); // NOLINT
   demo_cb    cb(shared, *log_ptr);
   const auto res = exp.exec(cb);
   REQUIRE(res.has_value());
   CHECK(res->total_documents == 1);
-  CHECK(file_count(dirs.target()) == 1); // succeeded despite the pre-existing tmp/doc_1.xml
+  CHECK(file_count(dirs.target()) == 2); // the final doc_1.xml, plus the untouched pre-existing doc_1.xml.tmp
 }
 
 TEST_CASE("exporter surfaces a fatal error when every collision-retry candidate is taken", "[exporter][negative]")
@@ -461,20 +471,24 @@ TEST_CASE("exporter surfaces a fatal error when every collision-retry candidate 
   const auto           log_ptr = make_silent_logger();
 
   auto shared               = std::make_shared<shared_fixture>();
+  shared->target_dir        = dirs.target();
   shared->pending[1]        = {make_txn(1, "a")};
   shared->max_doc_txn[1]    = 10; // NOLINT(readability-magic-numbers)
   shared->always_taken_name = true;
-  // resolve_unique_doc_name() retries "collide.xml" as "collide_1.xml", "collide_2.xml", ...,
-  // "collide_10.xml" (MAX_ATTEMPTS == 10, a sequential -- not random -- suffix, see
+  // resolve_unique_tmp_path() retries "collide.xml.tmp" as "collide.xml.tmp1", "collide.xml.tmp2",
+  // ..., "collide.xml.tmp10" (MAX_ATTEMPTS == 10, a sequential -- not random -- suffix, see
   // exporter_worker.hpp) -- pre-create every one of those candidates so the retry loop is
   // guaranteed to exhaust all of its attempts.
   {
-    std::ofstream(fs::path(dirs.tmp()) / "collide.xml") << "pre-existing";
-    for (int i = 1; i <= 10; ++i) { std::ofstream(fs::path(dirs.tmp()) / fmt::format("collide_{}.xml", i)) << "pre-existing"; } // NOLINT
+    std::ofstream(fs::path(dirs.target()) / "collide.xml.tmp") << "pre-existing";
+    for (int i = 1; i <= 10; ++i)
+    {
+      std::ofstream(fs::path(dirs.target()) / fmt::format("collide.xml.tmp{}", i)) << "pre-existing"; // NOLINT
+    }
   }
 
   exporter<test_txn_t, test_qual_t> exp(
-    make_cfg(dirs, {exporter_drain_cfg_t{.id = 1, .name = "BANKA1", .max_doc_txn = 10}}, 1), test_qual_t{}, *log_ptr, "test"); // NOLINT
+    make_cfg({exporter_drain_cfg_t{.id = 1, .name = "BANKA1", .max_doc_txn = 10}}, 1), test_qual_t{}, *log_ptr, "test"); // NOLINT
   demo_cb    cb(shared, *log_ptr);
   const auto res = exp.exec(cb);
   REQUIRE_FALSE(res.has_value());
@@ -488,12 +502,13 @@ TEST_CASE("exporter surfaces a fatal error when fetch_doc_name fails", "[exporte
   const temp_dir_guard dirs;
   const auto           log_ptr = make_silent_logger();
   auto                 shared  = std::make_shared<shared_fixture>();
+  shared->target_dir           = dirs.target();
   shared->pending[1]           = {make_txn(1, "a")};
   shared->max_doc_txn[1]       = 10; // NOLINT(readability-magic-numbers)
   shared->fail_fetch_doc_name  = true;
 
   exporter<test_txn_t, test_qual_t> exp(
-    make_cfg(dirs, {exporter_drain_cfg_t{.id = 1, .name = "BANKA1", .max_doc_txn = 10}}, 1), test_qual_t{}, *log_ptr, "test"); // NOLINT
+    make_cfg({exporter_drain_cfg_t{.id = 1, .name = "BANKA1", .max_doc_txn = 10}}, 1), test_qual_t{}, *log_ptr, "test"); // NOLINT
   demo_cb    cb(shared, *log_ptr);
   const auto res = exp.exec(cb);
   REQUIRE_FALSE(res.has_value());
@@ -505,12 +520,13 @@ TEST_CASE("exporter surfaces a fatal error when compute_drain_stat fails", "[exp
   const temp_dir_guard dirs;
   const auto           log_ptr    = make_silent_logger();
   auto                 shared     = std::make_shared<shared_fixture>();
+  shared->target_dir              = dirs.target();
   shared->pending[1]              = {make_txn(1, "a")};
   shared->max_doc_txn[1]          = 10; // NOLINT(readability-magic-numbers)
   shared->fail_compute_drain_stat = true;
 
   exporter<test_txn_t, test_qual_t> exp(
-    make_cfg(dirs, {exporter_drain_cfg_t{.id = 1, .name = "BANKA1", .max_doc_txn = 10}}, 1), test_qual_t{}, *log_ptr, "test"); // NOLINT
+    make_cfg({exporter_drain_cfg_t{.id = 1, .name = "BANKA1", .max_doc_txn = 10}}, 1), test_qual_t{}, *log_ptr, "test"); // NOLINT
   demo_cb    cb(shared, *log_ptr);
   const auto res = exp.exec(cb);
   REQUIRE_FALSE(res.has_value());
@@ -522,12 +538,13 @@ TEST_CASE("exporter surfaces a fatal error when fetch_doc_data reports an error 
   const temp_dir_guard dirs;
   const auto           log_ptr = make_silent_logger();
   auto                 shared  = std::make_shared<shared_fixture>();
+  shared->target_dir           = dirs.target();
   shared->pending[1]           = {make_txn(1, "a")};
   shared->max_doc_txn[1]       = 10; // NOLINT(readability-magic-numbers)
   shared->fail_fetch_doc_data  = true;
 
   exporter<test_txn_t, test_qual_t> exp(
-    make_cfg(dirs, {exporter_drain_cfg_t{.id = 1, .name = "BANKA1", .max_doc_txn = 10}}, 1), test_qual_t{}, *log_ptr, "test"); // NOLINT
+    make_cfg({exporter_drain_cfg_t{.id = 1, .name = "BANKA1", .max_doc_txn = 10}}, 1), test_qual_t{}, *log_ptr, "test"); // NOLINT
   demo_cb    cb(shared, *log_ptr);
   const auto res = exp.exec(cb);
   REQUIRE_FALSE(res.has_value());
@@ -539,12 +556,13 @@ TEST_CASE("exporter surfaces a fatal error when prepare_transaction fails", "[ex
   const temp_dir_guard dirs;
   const auto           log_ptr     = make_silent_logger();
   auto                 shared      = std::make_shared<shared_fixture>();
+  shared->target_dir               = dirs.target();
   shared->pending[1]               = {make_txn(1, "a")};
   shared->max_doc_txn[1]           = 10; // NOLINT(readability-magic-numbers)
   shared->fail_prepare_transaction = true;
 
   exporter<test_txn_t, test_qual_t> exp(
-    make_cfg(dirs, {exporter_drain_cfg_t{.id = 1, .name = "BANKA1", .max_doc_txn = 10}}, 1), test_qual_t{}, *log_ptr, "test"); // NOLINT
+    make_cfg({exporter_drain_cfg_t{.id = 1, .name = "BANKA1", .max_doc_txn = 10}}, 1), test_qual_t{}, *log_ptr, "test"); // NOLINT
   demo_cb    cb(shared, *log_ptr);
   const auto res = exp.exec(cb);
   REQUIRE_FALSE(res.has_value());
@@ -556,12 +574,13 @@ TEST_CASE("exporter surfaces a fatal error when prepare_header fails", "[exporte
   const temp_dir_guard dirs;
   const auto           log_ptr = make_silent_logger();
   auto                 shared  = std::make_shared<shared_fixture>();
+  shared->target_dir           = dirs.target();
   shared->pending[1]           = {make_txn(1, "a")};
   shared->max_doc_txn[1]       = 10; // NOLINT(readability-magic-numbers)
   shared->fail_prepare_header  = true;
 
   exporter<test_txn_t, test_qual_t> exp(
-    make_cfg(dirs, {exporter_drain_cfg_t{.id = 1, .name = "BANKA1", .max_doc_txn = 10}}, 1), test_qual_t{}, *log_ptr, "test"); // NOLINT
+    make_cfg({exporter_drain_cfg_t{.id = 1, .name = "BANKA1", .max_doc_txn = 10}}, 1), test_qual_t{}, *log_ptr, "test"); // NOLINT
   demo_cb    cb(shared, *log_ptr);
   const auto res = exp.exec(cb);
   REQUIRE_FALSE(res.has_value());
@@ -573,12 +592,13 @@ TEST_CASE("exporter surfaces a fatal error when prepare_footer fails", "[exporte
   const temp_dir_guard dirs;
   const auto           log_ptr = make_silent_logger();
   auto                 shared  = std::make_shared<shared_fixture>();
+  shared->target_dir           = dirs.target();
   shared->pending[1]           = {make_txn(1, "a")};
   shared->max_doc_txn[1]       = 10; // NOLINT(readability-magic-numbers)
   shared->fail_prepare_footer  = true;
 
   exporter<test_txn_t, test_qual_t> exp(
-    make_cfg(dirs, {exporter_drain_cfg_t{.id = 1, .name = "BANKA1", .max_doc_txn = 10}}, 1), test_qual_t{}, *log_ptr, "test"); // NOLINT
+    make_cfg({exporter_drain_cfg_t{.id = 1, .name = "BANKA1", .max_doc_txn = 10}}, 1), test_qual_t{}, *log_ptr, "test"); // NOLINT
   demo_cb    cb(shared, *log_ptr);
   const auto res = exp.exec(cb);
   REQUIRE_FALSE(res.has_value());
@@ -592,10 +612,11 @@ TEST_CASE("exporter rejects an empty drain_list before starting any worker", "[e
   const temp_dir_guard dirs;
   const auto           log_ptr = make_silent_logger();
 
-  exporter<test_txn_t, test_qual_t> exp(make_cfg(dirs, {}, 1), test_qual_t{}, *log_ptr, "test");
+  exporter<test_txn_t, test_qual_t> exp(make_cfg({}, 1), test_qual_t{}, *log_ptr, "test");
   auto                              shared = std::make_shared<shared_fixture>();
-  demo_cb                           cb(shared, *log_ptr);
-  const auto                        res = exp.exec(cb);
+  shared->target_dir                       = dirs.target();
+  demo_cb    cb(shared, *log_ptr);
+  const auto res = exp.exec(cb);
   REQUIRE_FALSE(res.has_value());
   CHECK(res.error().code() == exp_error::invalid_config);
 }
@@ -606,8 +627,9 @@ TEST_CASE("exporter rejects zero worker threads before starting any worker", "[e
   const auto           log_ptr = make_silent_logger();
 
   exporter<test_txn_t, test_qual_t> exp(
-    make_cfg(dirs, {exporter_drain_cfg_t{.id = 1, .name = "BANKA1", .max_doc_txn = 10}}, 0), test_qual_t{}, *log_ptr, "test"); // NOLINT
-  auto       shared = std::make_shared<shared_fixture>();
+    make_cfg({exporter_drain_cfg_t{.id = 1, .name = "BANKA1", .max_doc_txn = 10}}, 0), test_qual_t{}, *log_ptr, "test"); // NOLINT
+  auto shared        = std::make_shared<shared_fixture>();
+  shared->target_dir = dirs.target();
   demo_cb    cb(shared, *log_ptr);
   const auto res = exp.exec(cb);
   REQUIRE_FALSE(res.has_value());
@@ -626,11 +648,12 @@ TEST_CASE("exporter with more worker threads than drains still produces every do
   const auto           log_ptr = make_silent_logger();
 
   auto shared            = std::make_shared<shared_fixture>();
+  shared->target_dir     = dirs.target();
   shared->max_doc_txn[1] = 3;                                                                    // NOLINT(readability-magic-numbers)
   for (fsp::txn_id_t i = 0; i < 37; ++i) { shared->pending[1].push_back(make_txn(i + 1, "x")); } // NOLINT(readability-magic-numbers)
 
   exporter<test_txn_t, test_qual_t> exp(
-    make_cfg(dirs, {exporter_drain_cfg_t{.id = 1, .name = "BANKA1", .max_doc_txn = 3}}, 5), test_qual_t{}, *log_ptr, "test"); // NOLINT
+    make_cfg({exporter_drain_cfg_t{.id = 1, .name = "BANKA1", .max_doc_txn = 3}}, 5), test_qual_t{}, *log_ptr, "test"); // NOLINT
   demo_cb    cb(shared, *log_ptr);
   const auto res = exp.exec(cb);
   REQUIRE(res.has_value());
@@ -647,7 +670,8 @@ TEST_CASE("exporter with fewer worker threads than drains work-steals across pha
   const temp_dir_guard dirs;
   const auto           log_ptr = make_silent_logger();
 
-  auto                              shared = std::make_shared<shared_fixture>();
+  auto shared        = std::make_shared<shared_fixture>();
+  shared->target_dir = dirs.target();
   std::vector<exporter_drain_cfg_t> drains;
   for (std::uint8_t drain_id = 1; drain_id <= 5; ++drain_id) // NOLINT(readability-magic-numbers)
   {
@@ -659,7 +683,7 @@ TEST_CASE("exporter with fewer worker threads than drains work-steals across pha
     drains.push_back(exporter_drain_cfg_t{.id = drain_id, .name = fmt::format("BANKA{}", drain_id), .max_doc_txn = 4}); // NOLINT
   }
 
-  exporter<test_txn_t, test_qual_t> exp(make_cfg(dirs, drains, 2), test_qual_t{}, *log_ptr, "test");
+  exporter<test_txn_t, test_qual_t> exp(make_cfg(drains, 2), test_qual_t{}, *log_ptr, "test");
   demo_cb                           cb(shared, *log_ptr);
   const auto                        res = exp.exec(cb);
   REQUIRE(res.has_value());
@@ -678,7 +702,8 @@ TEST_CASE("exporter surfaces a fatal error from compute_drain_stat without hangi
   const temp_dir_guard dirs;
   const auto           log_ptr = make_silent_logger();
 
-  auto                              shared = std::make_shared<shared_fixture>();
+  auto shared        = std::make_shared<shared_fixture>();
+  shared->target_dir = dirs.target();
   std::vector<exporter_drain_cfg_t> drains;
   for (std::uint8_t drain_id = 1; drain_id <= 4; ++drain_id) // NOLINT(readability-magic-numbers)
   {
@@ -688,7 +713,7 @@ TEST_CASE("exporter surfaces a fatal error from compute_drain_stat without hangi
   }
   shared->fail_compute_drain_stat = true; // every compute_drain_stat() call fails -- worst case for the hang scenario
 
-  exporter<test_txn_t, test_qual_t> exp(make_cfg(dirs, drains, 4), test_qual_t{}, *log_ptr, "test");
+  exporter<test_txn_t, test_qual_t> exp(make_cfg(drains, 4), test_qual_t{}, *log_ptr, "test");
   demo_cb                           cb(shared, *log_ptr);
   const auto                        res = exp.exec(cb);
   REQUIRE_FALSE(res.has_value());

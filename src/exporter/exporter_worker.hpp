@@ -314,11 +314,15 @@ namespace fsp
      */
     [[nodiscard]] exp_result<str_t> write_document(drain_t drain_id, doc_id_t doc_id, const txn_block_t<T>& block, std::size_t doc_stat_ndx)
     {
-      auto name_res = resolve_unique_doc_name(drain_id, doc_id);
-      if (! name_res.has_value()) { return std::unexpected(name_res.error()); }
+      auto final_path_res = final_doc_path(drain_id, doc_id);
+      if (! final_path_res.has_value()) { return std::unexpected(final_path_res.error()); }
+      final_path_ = *final_path_res; // remembered here, read back by move_to_final() below
+
+      auto tmp_path_res = resolve_unique_tmp_path(*final_path_res, drain_id, doc_id);
+      if (! tmp_path_res.has_value()) { return std::unexpected(tmp_path_res.error()); }
       // Not const: the final `return tmp_path;` below relies on NRVO/automatic move, which a
       // const local would silently downgrade to a copy.
-      str_t tmp_path = (fs::path(cfg_.tmp_dir) / *name_res).string();
+      str_t tmp_path = *tmp_path_res;
 
       if (auto res = writer_.open(tmp_path.c_str()); ! res)
       {
@@ -360,44 +364,54 @@ namespace fsp
     }
 
     /**
-     * @brief Asks cb_->fetch_doc_name() for a candidate name, retrying with a worker-appended
-     * random suffix (before the extension) on collision, bounded to avoid an infinite loop --
-     * matching doc/opis_exporterja.txt's "a random number is appended to the existing name
-     * before the extension, repeated until it succeeds". cb_exporter itself is never told about
-     * collisions -- the spec's own wording places that responsibility on the exporter/worker
-     * layer, not the callback's semantics.
+     * @brief Asks cb_->fetch_doc_name() for this document's own FINAL path (a full path, not a
+     * bare name any more - the callback alone decides the whole layout, e.g. a per-agent
+     * sub-directory hierarchy; the exporter itself never joins it against any directory of its
+     * own). Nothing here is unique yet - move_to_final() below is what actually places the file at
+     * this exact path; resolve_unique_tmp_path() only derives the tmp file's own, separate name.
      */
-    [[nodiscard]] exp_result<str_t> resolve_unique_doc_name(drain_t drain_id, doc_id_t doc_id)
+    [[nodiscard]] exp_result<str_t> final_doc_path(drain_t drain_id, doc_id_t doc_id)
+    { return cb_->fetch_doc_name(qualifiers_, {}, drain_id, doc_id, 0, cfg_.filename_prefix, cfg_.filename_ext); }
+
+    /**
+     * @brief Derives a tmp path for final_path in the SAME directory (a suffix appended after
+     * final_path's own extension, e.g. "foo.xml" -> "foo.xml.3") - guarantees tmp_path and
+     * final_path always share a filesystem, so move_to_final()'s own fs::rename() is always a true
+     * atomic move, never a cross-filesystem copy+delete, regardless of what directory layout the
+     * callback's own fetch_doc_name() chose. Retries with a worker-appended sequential suffix on
+     * collision, bounded to avoid an infinite loop - matching doc/opis_exporterja.txt's "a random
+     * number is appended to the existing name before the extension, repeated until it succeeds".
+     * cb_exporter itself is never told about collisions - the spec's own wording places that
+     * responsibility on the exporter/worker layer, not the callback's semantics.
+     */
+    [[nodiscard]] exp_result<str_t> resolve_unique_tmp_path(const str_t& final_path, drain_t drain_id, doc_id_t doc_id)
     {
       static constexpr int MAX_ATTEMPTS = 10;
 
-      auto name_res = cb_->fetch_doc_name(qualifiers_, cfg_.tmp_dir, drain_id, doc_id, 0, cfg_.filename_prefix, cfg_.filename_ext);
-      if (! name_res.has_value()) { return std::unexpected(name_res.error()); }
-
-      str_t candidate = *name_res;
+      str_t candidate = final_path + ".tmp";
       for (int attempt = 0; attempt < MAX_ATTEMPTS; ++attempt)
       {
-        if (! fs::exists(fs::path(cfg_.tmp_dir) / candidate)) { return candidate; }
+        if (! fs::exists(candidate)) { return candidate; }
 
         // A sequential counter (rather than a random suffix) keeps this step deterministic and
         // testable, while still matching the spec's "append a number before the extension,
         // retry until it succeeds" -- uniqueness across concurrent workers is guaranteed by the
         // fs::exists() probe itself, not by the suffix's own entropy.
-        const fs::path original(*name_res);
-        candidate = fmt::format("{}_{}{}", original.stem().string(), attempt + 1, original.extension().string());
+        candidate = fmt::format("{}.tmp{}", final_path, attempt + 1);
       }
       return std::unexpected(
         exp_error_info{exp_error::file_rename_collision, "collision retry attempts exhausted", candidate, drain_id, doc_id});
     }
 
-    /// @brief Atomically moves tmp_path to cfg_.target_dir, returning the final path on success.
+    /// @brief Atomically moves tmp_path to final_path_ (see write_document()'s own final_doc_path()
+    /// call - both share the same directory by construction, see resolve_unique_tmp_path()), returning
+    /// the final path on success.
     [[nodiscard]] exp_result<str_t> move_to_final(const str_t& tmp_path, drain_t drain_id, doc_id_t doc_id)
     {
-      const fs::path  final_path = fs::path(cfg_.target_dir) / fs::path(tmp_path).filename();
       std::error_code ec;
-      fs::rename(tmp_path, final_path, ec); // atomic only when tmp_dir/target_dir share a filesystem
+      fs::rename(tmp_path, final_path_, ec); // atomic: tmp_path and final_path_ always share a filesystem
       if (ec) { return std::unexpected(exp_error_info{exp_error::file_move_failed, ec.message(), tmp_path, drain_id, doc_id}); }
-      return final_path.string();
+      return final_path_;
     }
 
     /// @brief Translates a fsp::error_info from xml_writer into this module's own error type.
@@ -438,8 +452,15 @@ namespace fsp
     str_t                              parent_log_name_;
     std::unique_ptr<cb_exporter<T, Q>> cb_;     // this thread's own clone, made once at construction
     xml_writer                         writer_; // reopened fresh per document
-    std::optional<drain_t>             work_drain_id_;
-    exporter_thread_stats_t            stats_{};
-    std::optional<exp_error_info>      fatal_error_;
+    // Set by write_document() (via final_doc_path()), read back by move_to_final() - the document
+    // currently being written's own final path, as cb_->fetch_doc_name() returned it. A member
+    // rather than a local threaded through both calls: move_to_final() only receives tmp_path/
+    // drain_id/doc_id from run_phase2_iteration() today, and adding a fourth parameter there for a
+    // value already computed one call earlier (see write_document()'s own call site) would be a
+    // larger, less local change for the same effect.
+    str_t                         final_path_;
+    std::optional<drain_t>        work_drain_id_;
+    exporter_thread_stats_t       stats_{};
+    std::optional<exp_error_info> fatal_error_;
   };
 } // namespace fsp

@@ -45,11 +45,23 @@ namespace fsp
      * See cb_exporter_crtp for a way to get this for free.
      */
     [[nodiscard]] virtual std::unique_ptr<cb_exporter> clone() const = 0;
-    ///< make filename from the components
+    /**
+     * @brief Returns this document's own FULL final path - the callback alone decides the whole
+     * layout (directory hierarchy included, e.g. one sub-directory per drain/agent); fsp itself
+     * never joins the result against any directory of its own (path is unused by the default
+     * implementation below and exists only so a concrete override can ignore it too, without
+     * dropping the parameter and breaking the signature every override shares).
+     * @details Called exactly once per document, on the worker thread that is about to write it
+     * (exporter_worker::write_document(), via final_doc_path()) - NOT retried on a name collision:
+     * exporter_worker derives its own, separate tmp name in the SAME directory as whatever this
+     * returns (see resolve_unique_tmp_path()), so a colliding final path here would only be
+     * possible if two different (drain_id, doc_id) pairs from cb_exporter's own bookkeeping mapped
+     * to the same path - a caller bug this method itself cannot detect or retry around.
+     */
     [[nodiscard]] virtual exp_result<str_t> fetch_doc_name(
       //
       const Q& q,               ///< readonly block of the run qualifiers
-      cstr_t   path,            ///< path to the output file
+      cstr_t   path,            ///< unused by the default implementation - see this method's own doc comment
       drain_t  drain_id,        ///< receiver of the document
       blk_id_t block_number,    ///< id of the block fetched from the source
       blk_id_t total_blocks,    ///< overall number of the blocks for this drain
@@ -230,9 +242,12 @@ namespace fsp
   }
 
   /**
-   * @brief Builds a new file name for the document at the given position in the run.
+   * @brief Builds this document's own full final path - default implementation, meant to be
+   * overridden by anything that needs a real directory layout (see this method's own class-level
+   * doc comment). Ignores path entirely (unused here - kept only so the signature every override
+   * shares stays the same); the result is CWD-relative, "<prefix>-<run_id>-<drain_id>-<block>-
+   * <total>.<ext>", with no directory component of its own at all.
    * @param qualifiers this run's caller-defined qualifiers
-   * @param path directory the document will be staged/produced under
    * @param drain_id the drain this document belongs to -- NOT part of doc/opis_exporterja.txt's
    * original parameter list, added deliberately: block_number is only unique WITHIN one drain
    * (every drain's document numbering starts at 1), so without drain_id here, two different
@@ -246,16 +261,14 @@ namespace fsp
   inline exp_result<str_t> cb_exporter<T, Q>::fetch_doc_name(
     //
     const Q& q,               ///< readonly block of the run qualifiers
-    cstr_t   path,            ///< path to the output file
+    cstr_t /*path*/,          ///< unused - see this method's own doc comment
     drain_t  drain_id,        ///< receiver of the document
     blk_id_t block_number,    ///< id of the block fetched from the source
     blk_id_t total_blocks,    ///< overall number of the blocks for this drain
     cstr_t   filename_prefix, ///< prefix of the filename
     cstr_t   filename_ext     ///< filename extension
   )
-  {
-    return fmt::format("{}/{}-{}-{}-{:02}-{:02}.{}", path, filename_prefix, q.run_id, drain_id, block_number, total_blocks, filename_ext);
-  };
+  { return fmt::format("{}-{}-{}-{:02}-{:02}.{}", filename_prefix, q.run_id, drain_id, block_number, total_blocks, filename_ext); };
 
   template <transaction_like T, qualifiers_like Q>
   inline exp_result<str_t> cb_exporter<T, Q>::prepare_header(

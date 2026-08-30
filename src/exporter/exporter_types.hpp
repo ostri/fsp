@@ -164,12 +164,11 @@ namespace fsp
    * @details Run qualifiers are deliberately NOT a field here: they are the exporter<T,Q>/
    * exporter_worker<T,Q> template parameter Q itself (see qualifiers_like above), built by the
    * caller and passed separately to exporter's constructor. exporter_config_t only carries the
-   * qualifier-agnostic plumbing (drains, thread count, paths) that exporter itself understands.
-   *
-   * error_dir is used only as a best-effort diagnostic drop location for a tmp file that was
-   * fully written but then failed to move to target_dir (a physical I/O failure) -- it is NOT a
-   * routing destination for cb_exporter::document_prepared() returning false, since that outcome
-   * is treated as a fatal run error (see cb_exporter.hpp), not a per-document soft rejection.
+   * qualifier-agnostic plumbing (drains, thread count, filename shape) that exporter itself
+   * understands - no directory of its own: cb_exporter::fetch_doc_name() alone decides every
+   * document's own full path (directory hierarchy included), and exporter_worker derives its own
+   * tmp path from that same result (see exporter_worker.hpp's own resolve_unique_tmp_path()) -
+   * there is nothing left for exporter_config_t itself to carry a directory for.
    */
   struct exporter_config_t
   {
@@ -177,9 +176,6 @@ namespace fsp
     std::size_t                       number_of_threads = 0;
     str_t                             filename_prefix;
     str_t                             filename_ext = "xml"; ///< passed through to fetch_doc_name(), no leading dot
-    str_t                             tmp_dir;              ///< staging area; must share a filesystem with target_dir/error_dir
-    str_t                             target_dir;           ///< final destination for successfully produced documents
-    str_t                             error_dir;            ///< diagnostic destination for a tmp file that failed to move
   };
 
   /**
