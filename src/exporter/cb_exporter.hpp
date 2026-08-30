@@ -45,20 +45,7 @@ namespace fsp
      * See cb_exporter_crtp for a way to get this for free.
      */
     [[nodiscard]] virtual std::unique_ptr<cb_exporter> clone() const = 0;
-    /**
-     * @brief Makes the document's own name, joined against path (typically
-     * exporter_config_t::tmp_dir) by the worker to build the file it actually writes to (see
-     * exporter_worker::write_document()).
-     * @details The returned string may itself contain sub-directory components (e.g. one
-     * per-recipient sub-directory under path) rather than a bare filename - fsp itself never
-     * interprets it beyond joining it onto path (write_document()) and, on success, re-joining
-     * that same relative structure onto exporter_config_t::target_dir (move_to_final()), so a
-     * concrete cb_exporter that wants one output sub-directory per drain can do so simply by
-     * prefixing its own return value here, with no other fsp-side configuration involved. Any
-     * sub-directory named this way must already exist under both tmp_dir and target_dir - neither
-     * write_document() (xml_writer::open()) nor move_to_final() (fs::rename()) create missing
-     * intermediate directories themselves.
-     */
+    ///< make filename from the components
     [[nodiscard]] virtual exp_result<str_t> fetch_doc_name(
       //
       const Q& q,               ///< readonly block of the run qualifiers

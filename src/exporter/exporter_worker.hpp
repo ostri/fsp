@@ -390,21 +390,10 @@ namespace fsp
         exp_error_info{exp_error::file_rename_collision, "collision retry attempts exhausted", candidate, drain_id, doc_id});
     }
 
-    /// @brief Atomically moves tmp_path to cfg_.target_dir, preserving any sub-directory
-    /// component cb_exporter::fetch_doc_name() placed between cfg_.tmp_dir and the file itself
-    /// (e.g. a per-recipient sub-directory - the caller's own choice, fsp itself never
-    /// interprets fetch_doc_name()'s own return value beyond this), returning the final path on
-    /// success. Falls back to just the filename when tmp_path is not actually under cfg_.tmp_dir
-    /// (should not happen - write_document() always builds tmp_path from cfg_.tmp_dir).
+    /// @brief Atomically moves tmp_path to cfg_.target_dir, returning the final path on success.
     [[nodiscard]] exp_result<str_t> move_to_final(const str_t& tmp_path, drain_t drain_id, doc_id_t doc_id)
     {
-      const fs::path  tmp_root(cfg_.tmp_dir);
-      const fs::path  tmp_file(tmp_path);
-      std::error_code rel_ec;
-      const fs::path  relative   = fs::relative(tmp_file, tmp_root, rel_ec);
-      const fs::path  final_path = (! rel_ec && ! relative.empty() && *relative.begin() != "..")
-                                     ? fs::path(cfg_.target_dir) / relative
-                                     : fs::path(cfg_.target_dir) / tmp_file.filename();
+      const fs::path  final_path = fs::path(cfg_.target_dir) / fs::path(tmp_path).filename();
       std::error_code ec;
       fs::rename(tmp_path, final_path, ec); // atomic only when tmp_dir/target_dir share a filesystem
       if (ec) { return std::unexpected(exp_error_info{exp_error::file_move_failed, ec.message(), tmp_path, drain_id, doc_id}); }
