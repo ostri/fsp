@@ -1067,12 +1067,17 @@ TEST_CASE("pipeline: a failing header segment's on_type() is recorded as error_c
   // error_mask()'s he bit is set here (per-segment, from check_segment_semantics()), independent
   // of doc_status_t::semantic_ itself: that three_state fact is set separately, once, from
   // on_doc_sem_check()'s own document-wide verdict (see maybe_finish_seg_processing()) -- which
-  // stage_test_hooks::on_doc_sem_check() here still defaults to true (no override in THIS test),
-  // so semantic_status()/rejected() reflect that document-wide check, not the individual segment
-  // failure error_mask() already recorded. See docs/importer_usage.md's own "Document errors"
-  // section on the two being orthogonal facts, not one derived from the other.
+  // stage_test_hooks::on_doc_sem_check() here still defaults to true (no override in THIS test).
+  // semantic_status() itself therefore stays valid (the document-wide check the hdr segment's own
+  // failure never routes through), but rejected() is true regardless: pipeline::
+  // report_error_class() now calls mark_rejected() unconditionally, for every error_class
+  // including HE -- a header semantic failure is exactly as fatal to the rest of this document's
+  // own transactions as a header the XSD itself rejected would be, so it rejects the whole
+  // document via error_mask_/rejected_flag_ even though semantic_status() (a DIFFERENT, orthogonal
+  // fact - see docs/importer_usage.md's own "Document errors" section) never itself turns invalid
+  // for this particular scenario.
   CHECK(ds_dscr[0].status().semantic_status() == fsp::three_state::valid);
-  CHECK_FALSE(ds_dscr[0].rejected());
+  CHECK(ds_dscr[0].rejected());
 
   CHECK(state->remove_stored_data_calls.load() == 1);
   CHECK(state->remove_stored_data_out_doc_id.load() == ds_dscr[0].out_doc_id());
@@ -1121,22 +1126,27 @@ TEST_CASE("pipeline: a failing non-header segment's on_type() is recorded as err
   CHECK(res->total_segments_error(ds_dscr) == 1); // the one failed transaction
 }
 
-// --- Scenario 15: a document that accumulates MULTIPLE error classes over its lifetime (here: both
-// the header AND the transaction segment fail their own on_type(), so both HE and TE end up
-// recorded) -- error_mask() must retain BOTH bits, and on_remove_stored_data_safe() must still fire
-// exactly once (mark_error()'s own "first error class only" rule -- see its doc comment): whichever
-// of the two segments P happens to process first wins that single call, the other's mark_error()
-// call still records its own bit but does not fire the hook again. --------------------------------
-TEST_CASE("pipeline: error_mask() accumulates more than one class for the same document, "
-          "on_remove_stored_data_safe() still fires exactly once",
+// --- Scenario 15: a header segment that fails on_type() (HE) now rejects the whole document
+// EARLY (pipeline::report_error_class() calls mark_rejected() unconditionally, including for HE -
+// see its own doc comment) - with num_of_workers=1 (deterministic, sequential C->P: the header
+// segment is always cut/processed before any transaction segment of the same document), the
+// transaction segment's own on_type() (which would otherwise ALSO fail here, txn_verdict=false)
+// is never even reached: xml_worker::process_one() sees doc_dscr::rejected()==true already and
+// skips it outright ("document invalid, segment skipped" - see that method's own doc comment),
+// exactly the "P picks up a segment of an already-invalid document and releases it without
+// running its own semantic check" behavior this change exists for. error_class::te therefore never
+// gets recorded here - HE alone already won mark_error()'s own "first error class" race and fired
+// on_remove_stored_data_safe() once, before the transaction segment could contribute its own bit.
+TEST_CASE("pipeline: a header segment's on_type() failure (HE) rejects the document early enough "
+          "that a later transaction segment is skipped, not itself recorded as TE",
           "[pipeline][stages][error-class]")
 {
   temp_dir_guard dir;
   const auto     doc_path = dir.write("doc.xml", well_formed_valid_doc());
 
-  auto state          = std::make_shared<shared_state>();
-  state->hdr_verdict   = false; // header fails -- HE
-  state->txn_verdict   = false; // transaction fails too -- TE
+  auto state         = std::make_shared<shared_state>();
+  state->hdr_verdict = false; // header fails -- HE
+  state->txn_verdict = false; // would ALSO fail as TE, if ever reached (see this test's own doc comment - it is not)
   stage_test_hooks hooks(state);
 
   auto cfg      = make_cfg("test-error-class-multi", 1); // single worker: deterministic, sequential C->P order
@@ -1145,9 +1155,10 @@ TEST_CASE("pipeline: error_mask() accumulates more than one class for the same d
   REQUIRE(res.has_value());
   const auto& ds_dscr = p->ds_dscr();
   CHECK(ds_dscr[0].has_error(fsp::error_class::he));
-  CHECK(ds_dscr[0].has_error(fsp::error_class::te));
-  // Exactly one on_remove_stored_data_safe() call for the whole document, no matter which of the
-  // two segments' own mark_error() call happened to be the first to see an empty error_mask_.
+  CHECK_FALSE(ds_dscr[0].has_error(fsp::error_class::te));
+  CHECK(ds_dscr[0].rejected());
+  // Exactly one on_remove_stored_data_safe() call - HE's own report_error_class() call fired it,
+  // no second call for the (never-recorded) TE.
   CHECK(state->remove_stored_data_calls.load() == 1);
 }
 // NOLINTEND(readability-magic-numbers)

@@ -1243,8 +1243,10 @@ is what every example in this document uses.
 > verdict, UNCHANGED -- the UA/SE/VE/HE/TE taxonomy below is implemented as an ADDITIONAL,
 > orthogonal `error_class` bitmask alongside those four facts, not a replacement for them, and not
 > the five-way bitmask-as-primary-state design 6.1 originally sketched. The per-document
-> instruction queues (6.3/6.4) and the HE-specific "non-header only" narrowing of in-flight
-> skipping (6.6) remain unimplemented proposals.
+> instruction queues (6.3/6.4) remain an unimplemented proposal. HE now rejects the whole document
+> exactly like UA/SE/VE (`doc_dscr::rejected()` turns `true` the moment `pipeline::
+> report_error_class()` records it, whichever error_class it is) - see 6.0's own "Implemented" list
+> for why a header semantic failure is no longer a narrower case than a syntax/validation one.
 
 ### 6.0. What is implemented vs. what remains a proposal
 
@@ -1284,14 +1286,24 @@ is what every example in this document uses.
   -- same "log and move on" handling as a failed `on_block_store()` call, not a fatal, run-stopping
   error (see [xml_worker.cpp](../src/importer/xml_worker.cpp)'s `flush_ok_block()`).
 - **`doc_dscr::rejected()`'s lock-free fast path** -- `doc_status_t::rejected()` is now a plain
-  `std::atomic<bool>` (relaxed load), set (also relaxed, one-way, never reset) from inside
-  `set_field()` the moment any of `syntax_`/`valid_`/`semantic_` first turns invalid, instead of
-  computing `status() == three_state::invalid` on every call. `status()` itself, and every other
-  reader of the four `three_state` facts, is unchanged -- only this one, per-segment hot-path
-  question moved off `status()`'s own `std::scoped_lock`. See `xml_worker::process_one()`'s own
-  `rejected()` call for where this matters at scale (checked once per segment, so a mutex there
-  would be paid millions of times per run for a question that is "no" the overwhelming majority of
-  the time).
+  `std::atomic<bool>` (relaxed load), instead of computing `status() == three_state::invalid` on
+  every call. Set (also relaxed, one-way, never reset) from TWO independent places, whichever
+  reaches it first: `set_field()`, the moment any of `syntax_`/`valid_`/`semantic_` first turns
+  invalid, AND `pipeline::report_error_class()`'s own `mark_rejected()` call, unconditionally for
+  every `error_class` (UA/SE/VE/HE alike - see `doc_dscr::mark_rejected()`'s own doc comment for
+  why HE joins the other three: a header semantic failure is exactly as fatal to the rest of a
+  document's own transactions as a header the XSD itself rejected would be, so it must reject the
+  document just as early - `report_error_class()` runs BEFORE the corresponding `set_field()` call
+  for HE's own `semantic_`, which only turns invalid later, once `on_doc_sem_check()`'s own
+  document-wide verdict is known). `status()` itself, and every other reader of the four
+  `three_state` facts, is unchanged -- only this one, per-segment hot-path question moved off
+  `status()`'s own `std::scoped_lock`. See `xml_worker::process_one()`'s own `rejected()` call for
+  where this matters at scale (checked once per segment, so a mutex there would be paid millions of
+  times per run for a question that is "no" the overwhelming majority of the time) - and for why HE
+  rejecting early matters in practice: a transaction segment of the SAME document, still in flight
+  on another worker thread, is now skipped outright ("document invalid, segment skipped") instead
+  of being processed and semantically checked despite the header it depends on already being known
+  bad.
 - **Tests** -- direct, pipeline-free coverage of `error_class`/`mark_error()`/`error_mask()`/
   `has_error()`/`rejected()` in `test_doc_status_t.cpp`; end-to-end pipeline coverage (UA, SE, VE,
   HE, TE, and a multi-class-on-one-document case, each asserting both the resulting `error_mask()`
@@ -1312,13 +1324,19 @@ is what every example in this document uses.
   judged worth its added complexity over the existing poll.
 - The **HE-specific "non-header segments only" narrowing** of in-flight skipping (6.6). Today,
   `xml_worker::process_one()`'s `rejected()` check is document-wide: once ANY error class rejects a
-  document (including HE), every remaining segment of that document is skipped uniformly -- there
-  is no code path that still processes a document's remaining HEADER segment(s) while skipping only
-  its non-header ones. (`on_remove_stored_data()`'s own `no_headers=true` for HE only tells a cb
-  what to remove from storage it ALREADY wrote before the rejection was known -- it does not change
-  which in-flight segments C/V/P still process afterward.)
+  document (UA/SE/VE/HE all included, since `report_error_class()` calls `mark_rejected()`
+  unconditionally), every remaining segment of that document is skipped uniformly -- there is no
+  code path that still processes a document's remaining HEADER segment(s) while skipping only its
+  non-header ones (moot in practice: a document only ever has one header segment, and it is always
+  either the one that itself failed as HE, or already processed before HE could even be recorded).
+  (`on_remove_stored_data()`'s own `no_headers=true` for HE only tells a cb what to remove from
+  storage it ALREADY wrote before the rejection was known -- it does not change which in-flight
+  segments C/V/P still process afterward.)
 - **Per-error-class differentiated skip rules for V/C/P** (6.6's `{UA, SE, VE(?), HE}` vs.
-  `{UA, SE, VE}` sets) beyond the single, uniform `rejected()` boolean.
+  `{UA, SE, VE}` sets) beyond the single, uniform `rejected()` boolean - `rejected()` today does
+  not distinguish which error_class caused it, so V/C/P's own skip decision (via `rejected()`
+  alone) cannot be tuned per class the way 6.6 sketches (e.g. a hypothetical "V keeps validating a
+  document already known HE, C does not" policy).
 
 FSP is intended for fast SEPA/XML processing, but errors are part of the real-world workload it has
 to handle. The system is capable of detecting several classes of error; how that's reflected for a
@@ -1386,6 +1404,13 @@ Call the `on_remove_stored_data(doc_id, type)` callback (`type` being `all` or `
 hook is called by the pipeline/thread that detected the error.
 
 ### 6.6. Error cleanup -- ongoing
+
+> As implemented, this is simpler than the differentiated per-class skip rules originally sketched
+> below: `xml_worker::process_one()`'s `rejected()` check is a single, uniform boolean (see 6.0's
+> own "Implemented" list) - P skips ALL remaining segments of a document rejected on ANY class,
+> UA/SE/VE/HE alike, never just its non-header ones. The distinction this subsection originally
+> drew between "skip non-header only" (HE) and "skip everything" (UA/SE/VE) is therefore not
+> something the current code makes.
 
 After the initial cleanup, some segments belonging to erroneous documents may still be in flight --
 threads need to check each segment before processing it and skip it if necessary:
