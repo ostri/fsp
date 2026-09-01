@@ -94,23 +94,33 @@ namespace fsp
      * process_one()'s own doc comment for the full mechanism (including last_cleaned_doc_ndx_,
      * which keeps a later segment of the SAME document from repeating this scan).
      *
-     * Segments of a genuinely diagnostic nak (e.g. a segment whose OWN semantic check failed,
-     * which fsp-core's own on_failed_block_store() dispatch is meant to report regardless of the
-     * owning document's final verdict -- see e.g. ach's own write_failed_segment()) are never at
-     * risk here: such a segment is only ever added to nak_block_indices_/nak_block_errors_ from
-     * WITHIN the same process_one() call that discovers its own failure, strictly before doc_ndx
-     * could possibly already be rejected() for a reason unrelated to THIS segment -- rejected()
-     * only ever turns true earlier for segments belonging to OTHER, already-processed indices of
-     * the same document.
+     * A HEADER segment's own diagnostic nak (error_class::he - check_segment_semantics() already
+     * recorded it, via record_nak(), the moment the header segment itself was found semantically
+     * bad) is the one case this method deliberately does NOT drop from the nak side (errs !=
+     * nullptr), even though its own doc_ndx matches: since pipeline::report_error_class() now calls
+     * mark_rejected() unconditionally for every error_class including HE (not just UA/SE/VE - see
+     * its own doc comment in pipeline.cpp), rejected() can turn true for a document from the header
+     * segment's own failure alone, and a LATER, still-in-flight transaction segment of the SAME
+     * document can then reach process_one()'s own rejected() check (and thus this call) before the
+     * header's own nak has ever been flushed. Dropping it here would silently discard a legitimate,
+     * already-decided diagnostic finding - the exact "genuinely diagnostic nak ... fsp-core's own
+     * on_failed_block_store() dispatch is meant to report regardless of the owning document's final
+     * verdict" case ach's own write_failed_segment() relies on (e.g. an unknown InstgAgt.BICFI) -
+     * not collateral damage from a document that is unusable start to finish the way UA/SE/VE's own
+     * segments are. Every OTHER (non-header) segment of doc_ndx is still dropped as before -
+     * targets_.is_header[] (the same declaration-order lookup check_segment_semantics() itself
+     * already consults) is what tells the two apart.
      *
      * @param indices vector to compact in place (ok_block_indices_ or nak_block_indices_) --
      *                every element whose own pool_.segment_at(idx).doc_ndx() equals doc_ndx is
-     *                removed; the relative order of the remaining elements is preserved.
+     *                removed (except a still-unflushed header nak, see above); the relative order
+     *                of the remaining elements is preserved.
      * @param doc_ndx the document whose segments must be dropped.
      * @param errs    nak_block_errors_ when indices is nak_block_indices_ (kept parallel to it, so
      *                an element removed from indices is removed from the same position in errs
      *                too), or nullptr for the ok side (ok_block_indices_ has no parallel error
-     *                vector).
+     *                vector, and no header-nak exception either - a header segment is never on the
+     *                ok side in the first place, its own on_type() having already returned false).
      */
     void drop_doc(std::vector<std::size_t>& indices, std::size_t doc_ndx, std::vector<error_info>* errs = nullptr);
     /**

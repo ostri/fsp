@@ -27,9 +27,9 @@ namespace fsp
 {
   //   using xml_char = std::unique_ptr<xmlChar, xml_deleter>;
   xml_worker::xml_worker(
-    segment_pool&         pool,          // reference to segment pool
-    const doc_set_dscr&   ds_dscr,       // reference to document set structure
-    const logger::Logger& log,           // reference to logger
+    segment_pool&         pool,    // reference to segment pool
+    const doc_set_dscr&   ds_dscr, // reference to document set structure
+    const logger::Logger& log,     // reference to logger
     const proc_data&      targets, // structure that holds information about cutting points and xpaths of the values we are looking for
     str_t                 parent_log_name, // parent thread log thread name
     pipeline&             pl,
@@ -607,8 +607,33 @@ namespace fsp
     std::size_t hi = indices.size(); // one past the last still-live element
     while (lo < hi)
     {
-      const auto idx = indices[lo];
-      if (static_cast<std::size_t>(pool_.segment_at(idx).doc_ndx()) != doc_ndx)
+      const auto  idx = indices[lo];
+      const auto& seg = pool_.segment_at(idx);
+      if (static_cast<std::size_t>(seg.doc_ndx()) != doc_ndx)
+      {
+        ++lo;
+        continue;
+      }
+      // errs != nullptr means indices is nak_block_indices_ (see this method's own doc comment,
+      // xml_worker.hpp, on the errs/indices pairing convention) - the only side a HEADER segment's
+      // own diagnostic nak (error_class::he - check_segment_semantics() already recorded it, via
+      // record_nak(), before doc_ndx could possibly turn rejected() for a reason unrelated to this
+      // segment - see that same doc comment) could ever be sitting in, still unflushed, at the
+      // moment THIS call runs. Since pipeline::report_error_class() now calls mark_rejected()
+      // unconditionally for every error_class including HE (not just UA/SE/VE, see its own doc
+      // comment in pipeline.cpp), rejected() can now turn true for THIS document from the header
+      // segment's own failure alone, arriving here (via a LATER, still-in-flight transaction
+      // segment's own process_one() call, see that method's own doc comment) before the header's
+      // own nak has ever been flushed - dropping it here would silently discard a legitimate,
+      // already-decided diagnostic finding this class's own header exists to report, not "collateral
+      // damage" from a document that is unusable start to finish the way UA/SE/VE's own segments
+      // are. targets_.is_header[] is the same declaration-order lookup check_segment_semantics()
+      // itself already consults for the identical question.
+      // subtree_type() is always a valid index into is_header, set by doc_cutter at cut time
+      const auto subtree_type = static_cast<std::size_t>(seg.subtree_type());
+      const bool is_header_segment =
+        targets_.is_header[subtree_type]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+      if (errs != nullptr && is_header_segment)
       {
         ++lo;
         continue;
