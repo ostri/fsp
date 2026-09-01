@@ -261,14 +261,25 @@ namespace fsp
 
   e_void pipeline::report_error_class(std::size_t doc_ndx, error_class cls, bool no_headers, pipeline_hooks& hooks)
   {
-    // no_headers==false is exactly "this class is UA/SE/VE" (see every call site in
-    // pipeline_worker.cpp) -- the whole document is unusable, so rejected() must become true here,
-    // BEFORE on_remove_stored_data_safe() below returns, not only later via the corresponding
+    // mark_rejected() unconditionally, for every error_class (UA/SE/VE/HE alike) -- the whole
+    // document is unusable once ANY of them fires, HE included: a header semantic failure (e.g. a
+    // GrpHdr-level field that fails a business rule, not just XSD well-formedness) is exactly as
+    // fatal to the rest of this document's own transactions as a header the XSD itself rejected
+    // (error_class::ve) would be -- there is no meaningful "process the transactions anyway"
+    // outcome once the header they all depend on is known bad. Called BEFORE
+    // on_remove_stored_data_safe() below returns, not only later via the corresponding
     // report_syntax_result()/report_validation_result() call - see doc_dscr::mark_rejected()'s own
-    // doc comment for the race this closes. HE (no_headers==true) deliberately does NOT call this
-    // - a header semantic failure does not reject the whole document the way UA/SE/VE do (see
-    // error_class::he's own doc comment) - so rejected() must stay whatever it already was.
-    if (! no_headers) ds_dscr_[doc_ndx].mark_rejected();
+    // doc comment for the race this closes (equally real for HE as for UA/SE/VE: without this, a
+    // P-role thread's own xml_worker::process_one() rejected() check would not yet skip this
+    // document's still-in-flight transaction segments in the window between mark_error() below and
+    // this store landing).
+    //
+    // no_headers itself is UNCHANGED by this - it still only controls what
+    // on_remove_stored_data_safe() below actually removes (HE keeps the header's own row and
+    // whatever finding was staged against it, UA/SE/VE remove everything including the header) -
+    // that is a storage-cleanup decision, orthogonal to whether the document as a whole counts as
+    // rejected() from here on.
+    ds_dscr_[doc_ndx].mark_rejected();
     if (! ds_dscr_[doc_ndx].mark_error(cls)) return {}; // not the first error class recorded for this document -- already fired below
     return hooks.on_remove_stored_data_safe(ds_dscr_[doc_ndx].out_doc_id(), no_headers);
   }
