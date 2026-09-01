@@ -158,6 +158,24 @@ namespace fsp
       doc_id_t doc_id    ///< internal id of the document
       ) = 0;
     /**
+     * @brief Notifies the callback that a document has been moved to its own final destination
+     * path - unlike document_prepared() (called BEFORE that move, while the document still sits
+     * at a staging/tmp path this interface never exposes), final_path here is the document's own
+     * real, permanent location on disk. Default is a no-op - override only if a concrete callback
+     * needs to act on the document once it is actually readable at its own final path (e.g. a
+     * post-write validation step).
+     * @return {} on success, or the error to log and treat as fatal for the whole run - exporter
+     * signals every worker thread to stop and execute() returns this error, same "false is always
+     * fatal" contract document_prepared() itself already has.
+     */
+    [[nodiscard]] virtual ev_result on_document_finalized(
+      //
+      [[maybe_unused]] const Q&     q,         ///< readonly block of run qualifiers
+      [[maybe_unused]] drain_t      drain_id,  ///< receiver of the document
+      [[maybe_unused]] doc_id_t     doc_id,    ///< internal id of the document
+      [[maybe_unused]] const str_t& final_path ///< the document's own final, on-disk path
+    );
+    /**
      * @brief Called exactly ONCE for the whole run, on the MAIN thread, before exporter<T,Q>::exec()
      * starts any worker thread - NOT a per-worker hook (see on_wrk_start() below for that). Runs on
      * the caller-supplied prototype cb_exporter instance itself (the one exec() goes on to clone()
@@ -293,6 +311,16 @@ namespace fsp
 
   template <transaction_like T, qualifiers_like Q>
   inline ev_result cb_exporter<T, Q>::on_init()
+  { return {}; }
+
+  template <transaction_like T, qualifiers_like Q>
+  inline ev_result cb_exporter<T, Q>::on_document_finalized(
+    //
+    const Q& /*q*/,
+    drain_t /*drain_id*/,
+    doc_id_t /*doc_id*/,
+    const str_t& /*final_path*/
+  )
   { return {}; }
 
   template <transaction_like T, qualifiers_like Q>

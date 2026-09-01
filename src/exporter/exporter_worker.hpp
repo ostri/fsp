@@ -270,6 +270,12 @@ namespace fsp
         return fail(err.code(), str_t(err.message()), false, drain_id, doc_id);
       }
 
+      if (auto finalized_res = cb_->on_document_finalized(qualifiers_, drain_id, doc_id, move_res.value()); ! finalized_res)
+      {
+        const auto& err = finalized_res.error();
+        return fail(err.code(), str_t(err.message()), false, drain_id, doc_id);
+      }
+
       state_.finalize_doc(
         doc_stat_ndx,
         doc_statistics_t{.doc_name       = move_res.value(),
