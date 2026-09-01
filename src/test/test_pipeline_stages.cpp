@@ -494,7 +494,15 @@ TEST_CASE("pipeline: V failing before P finishes discards the document's segment
   const auto& status  = ds_dscr[0].status();
   CHECK(status.syntax_status() == fsp::three_state::invalid); // schema failure drags syntax invalid too (point 14)
   CHECK(status.valid_status() == fsp::three_state::invalid);
-  CHECK(status.semantic_status() == fsp::three_state::valid); // on_doc_sem_check() default verdict (true) still ran
+  // semantic_ is invalid too, NOT because on_doc_sem_check() itself ran and found something (it
+  // does not even get called - already_rejected is true here) but because
+  // maybe_finish_seg_processing() now reports semantic_ok=false whenever already_rejected is true,
+  // for the SAME reason error_class::he needs this (see that method's own doc comment in
+  // pipeline.cpp): set_semantic_result(false) is what drives doc_status_t::done_ to its
+  // k_done_threshold short-circuit for THIS document too, exactly like syntax_/valid_ already did
+  // on their own two lines up - status() (the aggregate verdict) was already invalid before this
+  // change; only semantic_status() specifically (a strictly narrower question) flipped.
+  CHECK(status.semantic_status() == fsp::three_state::invalid);
   // A genuine XSD schema violation (duplicated InstgAgt, see well_formed_schema_invalid_doc()) is
   // error_class::ve, not error_class::se -- the document IS well-formed XML, just schema-invalid.
   CHECK(ds_dscr[0].has_error(fsp::error_class::ve));
@@ -1066,17 +1074,14 @@ TEST_CASE("pipeline: a failing header segment's on_type() is recorded as error_c
   CHECK_FALSE(ds_dscr[0].has_error(fsp::error_class::ve));
   // error_mask()'s he bit is set here (per-segment, from check_segment_semantics()), independent
   // of doc_status_t::semantic_ itself: that three_state fact is set separately, once, from
-  // on_doc_sem_check()'s own document-wide verdict (see maybe_finish_seg_processing()) -- which
-  // stage_test_hooks::on_doc_sem_check() here still defaults to true (no override in THIS test).
-  // semantic_status() itself therefore stays valid (the document-wide check the hdr segment's own
-  // failure never routes through), but rejected() is true regardless: pipeline::
-  // report_error_class() now calls mark_rejected() unconditionally, for every error_class
-  // including HE -- a header semantic failure is exactly as fatal to the rest of this document's
-  // own transactions as a header the XSD itself rejected would be, so it rejects the whole
-  // document via error_mask_/rejected_flag_ even though semantic_status() (a DIFFERENT, orthogonal
-  // fact - see docs/importer_usage.md's own "Document errors" section) never itself turns invalid
-  // for this particular scenario.
-  CHECK(ds_dscr[0].status().semantic_status() == fsp::three_state::valid);
+  // maybe_finish_seg_processing() - which now reports semantic_ok=false (not the hook's own
+  // verdict) whenever the document is already_rejected, exactly the fix that lets done_ reach its
+  // k_done_threshold short-circuit for a document rejected on error_class::he specifically (see
+  // that method's own doc comment in pipeline.cpp for the full "stuck at item_state_id::loading
+  // forever" bug this closes) - stage_test_hooks::on_doc_sem_check() itself is never even called
+  // here (already_rejected is true by the time this runs), so its own default-true verdict plays
+  // no part in why semantic_status() ends up invalid.
+  CHECK(ds_dscr[0].status().semantic_status() == fsp::three_state::invalid);
   CHECK(ds_dscr[0].rejected());
 
   CHECK(state->remove_stored_data_calls.load() == 1);

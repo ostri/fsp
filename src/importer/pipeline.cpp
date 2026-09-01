@@ -164,7 +164,23 @@ namespace fsp
     while (! ds_dscr_[doc_ndx].status().cv_known()) std::this_thread::yield();
 
     const bool already_rejected = ds_dscr_[doc_ndx].rejected();
-    const bool semantic_ok      = already_rejected || hooks.on_doc_safe_sem_check(doc_ndx);
+    // already_rejected short-circuits on_doc_sem_check() itself (see below for why the hook is not
+    // even called then) but must NOT short-circuit semantic_ok to true - "already rejected" means
+    // exactly that, the document IS bad, on some other already-known fact. semantic_ok therefore
+    // mirrors already_rejected's own truth value (false when rejected, otherwise the hook's own
+    // verdict) rather than OR-ing it in: set_semantic_result(semantic_ok) below is what actually
+    // drives doc_status_t::done_ to its k_done_threshold short-circuit (see set_field()'s own doc
+    // comment) for a document that is rejected on a fact OTHER than syntax_/valid_ (which already
+    // short-circuit done_ themselves via report_syntax_result()/report_validation_result()) - e.g.
+    // error_class::he, now (see report_error_class()'s own doc comment) itself calling
+    // mark_rejected() before this ever runs: without this fix, semantic_ result was true (bug: reads
+    // as "semantically fine"), done_ never reached k_done_threshold on its own (stored_ alone was
+    // never going to get there either - a document skipped via xml_worker::process_one()'s own
+    // rejected() poll drops its remaining segments via drop_doc()/drop_rejected(), which release
+    // pool slots WITHOUT ever counting them into stored_ - see xml_worker.cpp's own drop_doc()),
+    // and the document's own is_finished() consequently never became true - it stayed stuck at
+    // item_state_id::loading forever, on_doc_close() never fired for it at all.
+    const bool semantic_ok = ! already_rejected && hooks.on_doc_safe_sem_check(doc_ndx);
     // on_doc_sem_check() returning false is a DOCUMENT-level header semantic finding (e.g. a
     // header-stated transaction count/sum that does not match what was actually read) -- the same
     // error_class::he outcome check_segment_semantics() already reports for a SEGMENT-level header
