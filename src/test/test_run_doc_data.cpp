@@ -429,19 +429,22 @@ TEST_CASE("run_doc_data: every on_* hook fires during processing, using the fact
 }
 // NOLINTEND(readability-function-cognitive-complexity)
 
-// --- Test 2: two independent worker threads racing to lock the SAME run_data() instance --
-// fsp::lock() must genuinely force the second one to wait for the first to finish (measured via
-// wall-clock time: if the delay inside the critical section were NOT serialized, concurrent
-// threads would overlap their sleeps and the whole run would finish much faster than "N holders *
-// delay each"), and the value each successive holder sees must be the FULL, already-applied
+// --- Test 2: on_type(txn)'s own sleep_for() sits inside fsp::lock(doc_data(doc_ndx)) -- a
+// PER-DOCUMENT mutex (see on_type(txn) above), not run_data()'s single shared one -- so the two
+// documents below are free to run their own four on_type(txn) calls fully concurrently with each
+// other; fsp::lock() only has anything to serialize WITHIN one document's own four calls. This
+// checks that within-document serialization genuinely holds (measured via wall-clock time: if the
+// delay inside the critical section were NOT serialized, one document's own four on_type(txn)
+// calls would overlap their sleeps and the whole run would finish much faster than "4 holders *
+// delay each"), and that the value each successive holder sees is the FULL, already-applied
 // result of every earlier holder's write (checked via the exact final count, not just "some
 // count"). ------------------------------------------------------------------------------------
 TEST_CASE("run_doc_data: a second on_type() call must wait for fsp::lock() held by a concurrent one, then sees its result",
           "[pipeline][run_doc_data][locking][mutual-exclusion]")
 {
   // Two documents, each with several transactions, processed by enough worker threads that
-  // multiple on_type(txn) calls (across BOTH documents, all sharing the SAME run_data()) are
-  // provably in flight at once, all contending for run_data()'s own mutex.
+  // multiple on_type(txn) calls (within each document -- see this TEST_CASE's own comment above)
+  // are provably in flight at once, all contending for that one document's own doc_data() mutex.
   constexpr int  per_doc_txns   = 4;
   constexpr int  num_docs       = 2;
   constexpr auto lock_hold_time = std::chrono::milliseconds(20); // delay INSIDE fsp::lock() -- see on_type(txn)'s own comment
@@ -461,16 +464,19 @@ TEST_CASE("run_doc_data: a second on_type() call must wait for fsp::lock() held 
   CHECK(p->ds_dscr()[0].status().ok());
   CHECK(p->ds_dscr()[1].status().ok());
 
-  // per_doc_txns * num_docs on_type(txn) calls each hold run_data()'s own lock for lock_hold_time
-  // -- if fsp::lock() genuinely serializes them (as it must: locked_root's std::lock_guard makes
-  // overlapping critical sections on the SAME mutex impossible), the total time spent INSIDE that
-  // one shared critical section is at least (per_doc_txns * num_docs) * lock_hold_time, no matter
-  // how many worker threads run concurrently otherwise -- a second thread reaching fsp::lock()
-  // while the first still holds it MUST block until the first's guard is destroyed. Using 70% of
-  // the fully-serialized minimum as the threshold (not 100%) absorbs scheduling jitter/measurement
+  // per_doc_txns on_type(txn) calls (NOT per_doc_txns * num_docs -- see this TEST_CASE's own
+  // comment above: the two documents' own doc_data() mutexes are independent, so num_docs of them
+  // run concurrently, not added onto the minimum) each hold that one document's own doc_data()
+  // lock for lock_hold_time -- if fsp::lock() genuinely serializes them (as it must: locked_root's
+  // std::lock_guard makes overlapping critical sections on the SAME mutex impossible), the total
+  // time spent inside any one document's own critical section is at least per_doc_txns *
+  // lock_hold_time, no matter how many worker threads run concurrently otherwise (across
+  // documents, or waiting their turn within one) -- a second thread reaching fsp::lock() on an
+  // already-held doc_data() MUST block until the first's guard is destroyed. Using 70% of the
+  // fully-serialized minimum as the threshold (not 100%) absorbs scheduling jitter/measurement
   // noise while still being far above what any overlapping-critical-sections bug could produce
-  // (which would finish in roughly ONE lock_hold_time, not (per_doc_txns*num_docs) of them).
-  const auto fully_serialized_minimum = lock_hold_time * (per_doc_txns * num_docs);
+  // (which would finish in roughly ONE lock_hold_time, not per_doc_txns of them).
+  const auto fully_serialized_minimum = lock_hold_time * per_doc_txns;
   CHECK(elapsed >= fully_serialized_minimum * 7 / 10);
 
   // And once each successive thread does get in, it sees the FULL, correctly-accumulated result

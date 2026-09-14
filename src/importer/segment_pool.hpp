@@ -4,7 +4,7 @@
 #include "xml_segment.hpp"
 #include "segment_result.hpp"
 #include "lock_queue.hpp"
-#include <atomic>
+#include "blocked_vector.hpp"
 #include <mutex>
 #include <span>
 #include <vector>
@@ -49,10 +49,10 @@ namespace fsp
      * on_failed_block_safe_store() hook has finished reading it. It is the caller's own responsibility
      * to never call these on an ndx it has already released.
      */
-    [[nodiscard]] xml_segment&          segment_at(std::size_t ndx) noexcept { return segments_[ndx]; }
-    [[nodiscard]] const xml_segment&    segment_at(std::size_t ndx) const noexcept { return segments_[ndx]; }
-    [[nodiscard]] segment_result&       result_at(std::size_t ndx) noexcept { return results_[ndx]; }
-    [[nodiscard]] const segment_result& result_at(std::size_t ndx) const noexcept { return results_[ndx]; }
+    [[nodiscard]] xml_segment&          segment_at(std::size_t ndx) noexcept { return segments_[ndx]; }       // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index)
+    [[nodiscard]] const xml_segment&    segment_at(std::size_t ndx) const noexcept { return segments_[ndx]; } // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index)
+    [[nodiscard]] segment_result&       result_at(std::size_t ndx) noexcept { return results_[ndx]; }         // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index)
+    [[nodiscard]] const segment_result& result_at(std::size_t ndx) const noexcept { return results_[ndx]; }   // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index)
     /**
      * @brief Batch counterpart to retrieve_segment()'s own free_queues_ push: returns every
      * index in indices to its shard's free_queues_ entry, grouping by shard first (indices may
@@ -71,13 +71,14 @@ namespace fsp
     // Highest number of distinct slots ever handed out from the unallocated pool (across all
     // shards) -- a shard only reaches for a never-before-used slot when its own free_queues_
     // entry is empty, so this is the peak footprint the pool actually needed this run, as
-    // opposed to capacity_ (the fixed size it was allocated with up front).
-    [[nodiscard]] std::size_t high_water_mark() const noexcept { return next_unallocated_slot_.load(std::memory_order_relaxed); }
+    // opposed to capacity_ (the fixed size it was allocated with up front). segments_.size() (its
+    // own atomic fetch() counter, see blocked_vector::fetch()) IS this count now -- acquire_slot()
+    // below never hands out a never-before-used index any other way.
+    [[nodiscard]] std::size_t high_water_mark() const noexcept { return segments_.size(); }
   private:
     const logger::Logger&    log_;
     std::size_t              capacity_{0};
     std::size_t              num_shards_{1};
-    std::atomic<std::size_t> next_unallocated_slot_{0};
     // Segment id (Handler::counter_) modulo num_shards_ picks the shard -- since a document's
     // segments get consecutive ids as its cutter thread produces them, this round-robins one
     // document's segments evenly across shards. Splitting the single ready/free lock_queue pair
@@ -92,8 +93,13 @@ namespace fsp
     std::vector<lock_queue<std::size_t>> header_ready_queues_;
     std::vector<lock_queue<std::size_t>> free_queues_; // P -> C : reusable slot indices, sharded
     mutable std::mutex                   resize_mtx_;  // whenever we access segments_ or results_ as whole
-    std::unique_ptr<xml_segment[]>       segments_;    // NOLINT(hicpp-avoid-c-arrays)
-    std::unique_ptr<segment_result[]>    results_;     // NOLINT(hicpp-avoid-c-arrays)
+    // blocked_vector<T> (not a raw array): allocates its backing storage lazily, one block at a
+    // time, as acquire_slot() below fetch()es never-before-used slots one at a time -- same
+    // fixed, reused index range as before, just without paying for one huge contiguous
+    // allocation on a pool sized for the worst case (see pipeline.cpp's own 8M-slot
+    // construction) up front, regardless of how many of those slots this run ever actually uses.
+    blocked_vector<xml_segment>    segments_{1}; // re-assigned to the real capacity_ in init()
+    blocked_vector<segment_result> results_{1};  // re-assigned to the real capacity_ in init()
     // Which shard owns each slot -- set once in acquire_slot(), read (never concurrently with
     // the write) in push_ready()/retrieve_segment() via the happens-before edge each queue's
     // mutex already provides, so a plain array is enough, no atomics needed.
@@ -118,14 +124,13 @@ namespace fsp
   {
     std::lock_guard lock(resize_mtx_);
     capacity_ = capacity;
-    next_unallocated_slot_.store(0, std::memory_order_relaxed);
-    // resize structures
-    // segments_.resize(capacity, xml_segment{});
-    // results_.resize(capacity, segment_result{0, -1});
-    segments_      = std::make_unique_for_overwrite<xml_segment[]>(capacity);    // NOLINT(hicpp-avoid-c-arrays)
-    results_       = std::make_unique_for_overwrite<segment_result[]>(capacity); // NOLINT(hicpp-avoid-c-arrays)
-    shard_of_slot_ = std::make_unique_for_overwrite<std::size_t[]>(capacity);    // NOLINT(hicpp-avoid-c-arrays)
-    //    free_queue_.push_range(std::views::iota(0UL, capacity));
+    // Re-assigning a fresh blocked_vector<T>(capacity) resets its own fetch() counter to 0 and
+    // drops any already-allocated blocks from a PRIOR init() call -- acquire_slot() below is
+    // what actually grows segments_/results_ one slot (and, every block_size()-th slot, one new
+    // block) at a time as this run goes on, not this constructor up front.
+    segments_      = blocked_vector<xml_segment>(capacity);
+    results_       = blocked_vector<segment_result>(capacity);
+    shard_of_slot_ = std::make_unique_for_overwrite<std::size_t[]>(capacity); // NOLINT(hicpp-avoid-c-arrays)
     if (log_info_) log_.info(fmt::format("Pool size: {} ({} shard(s))", capacity_, num_shards_));
   }
 
@@ -138,12 +143,19 @@ namespace fsp
     if (opt) slot = *opt;
     else
     {
-      // grab free segment from the list of unallocated ones (shared across all shards)
-      slot = next_unallocated_slot_.fetch_add(1, std::memory_order_relaxed);
-      if (slot < capacity_)
+      // Never-before-used slot -- segments_.fetch()/results_.fetch() are what actually grows
+      // the pool now: each hands back the next never-before-used index (its own atomic size_
+      // counter -- see blocked_vector::fetch()) and default-constructs that slot, allocating a
+      // new backing block only the first time an index in it is touched, not once for every
+      // one of capacity_'s slots up front. Both calls always run in this same order for this
+      // same acquire_slot() invocation, so their two independent size_ counters stay in lock-
+      // step and hand back the same index.
+      auto seg_slot = segments_.fetch();
+      if (seg_slot)
       {
-        segments_[slot] = xml_segment{};
-        results_[slot]  = segment_result{};
+        slot          = seg_slot->first;
+        auto res_slot = results_.fetch();
+        if (! res_slot) throw std::runtime_error("Internal error: segments_/results_ size_ counters diverged.");
       }
       else
       {
@@ -199,9 +211,9 @@ namespace fsp
    */
   inline xml_segment segment_pool::retrieve_segment(std::size_t ndx)
   {
-    results_[ndx] = segment_result{0, -1, -1};  // FIXME ostri check whether we need to have segmetns and results in parallel
+    results_[ndx] = segment_result{0, -1, -1}; // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- FIXME ostri check whether we need to have segmetns and results in parallel
                                                 //    log_.debug(fmt::format("retrieve before: idx: {} {}", ndx, segments_[ndx].dump()));
-    xml_segment seg(std::move(segments_[ndx])); // std::move(segments_.at(idx));
+    xml_segment seg(std::move(segments_[ndx])); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index)
     if (seg.subtree_type() < 0 || seg.length() == 0)
       log_.critical(fmt::format("Retrieved invalid segment from slot {} {})", ndx, seg.dump()));
     //    log_.debug(fmt::format("retrieve after:  idx: {} {}", ndx, seg.dump()));
@@ -212,10 +224,11 @@ namespace fsp
   inline void segment_pool::set_segment(std::size_t ndx, xml_segment seg)
   {
     //    log_.debug(fmt::format("before set segment: ndx: {} {}", ndx, seg.dump()));
-    segments_[ndx] = std::move(seg);
+    segments_[ndx] = std::move(seg); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index)
     //    log_.debug(fmt::format("after set segment:  ndx: {} {}", ndx, segments_[ndx].dump()));
   }
-  inline void           segment_pool::set_result(std::size_t ndx, const segment_result& seg_r) { results_[ndx] = seg_r; }
+  inline void segment_pool::set_result(std::size_t ndx, const segment_result& seg_r)
+  { results_[ndx] = seg_r; } // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index)
   inline std::ptrdiff_t segment_pool::ready_queue_size_approx(std::size_t shard) const noexcept
   { return ready_queues_[shard].size_approx(); }
 

@@ -236,6 +236,7 @@ function(add_fsp_target TARGET_NAME TYPE)
         ${PROJECT_SOURCE_DIR}/src/common/lock_queue
         ${PROJECT_SOURCE_DIR}/src/common/mmap
         ${PROJECT_SOURCE_DIR}/src/common/xercesc_helpers
+        ${PROJECT_SOURCE_DIR}/src/common/util
     )
 
     # Additional include paths provided by the caller via APPEND_INCLUDES
@@ -385,6 +386,7 @@ set(SRC_COMMON
     ${PROJECT_SOURCE_DIR}/src/common/mmap/mmap_file.cpp
     ${PROJECT_SOURCE_DIR}/src/common/common.cpp
     ${PROJECT_SOURCE_DIR}/src/common/exe_path.cpp
+    ${PROJECT_SOURCE_DIR}/src/common/util/blocked_vector.cpp
     ${PROJECT_SOURCE_DIR}/src/ach/utility.cpp
 )
 
