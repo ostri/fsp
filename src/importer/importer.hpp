@@ -42,18 +42,18 @@ namespace fsp
      * would leave those references dangling. Heap allocation is the only way to hand ownership
      * back to the caller without ever relocating the object.
      */
-    [[nodiscard]] static std::pair<std::unique_ptr<importer>, result<doc_set_counter>> exec(const importer_config&    cfg,
-                                                                                            const std::vector<str_t>& xml_paths,
-                                                                                            cstr_t                    xsd_path,
+    [[nodiscard]] static std::pair<std::unique_ptr<importer>, result<doc_set_counter>> exec(const importer_config&       cfg,
+                                                                                            const std::vector<doc_info>& docs,
+                                                                                            cstr_t                       xsd_path,
                                                                                             pipeline_hooks& hooks = default_pipeline_hooks);
   private:
     // Both private: the only caller of either is exec() above, itself a static member of this
     // same class (so it keeps access without needing a friend declaration) -- see exec()'s own
     // doc comment for why this is the class's sole public entry point.
     explicit importer(const importer_config& cfg);
-    [[nodiscard]] result<doc_set_counter> import_docs(const std::vector<str_t>& xml_paths,
-                                                      cstr_t                    xsd_path,
-                                                      pipeline_hooks&           hooks = default_pipeline_hooks);
+    [[nodiscard]] result<doc_set_counter> import_docs(const std::vector<doc_info>& docs,
+                                                      cstr_t                       xsd_path,
+                                                      pipeline_hooks&              hooks = default_pipeline_hooks);
 
     // NOLINTBEGIN(cppcoreguidelines-avoid-const-or-ref-data-members)
     // logger::Logger has no public constructor (only Logger::create(), see make_main_logger()
@@ -100,22 +100,22 @@ namespace fsp
   {
   }
 
-  inline result<doc_set_counter> importer::import_docs(const std::vector<str_t>& xml_paths, cstr_t xsd_path, pipeline_hooks& hooks)
-  { return impl_.process_files(xml_paths, xsd_path, hooks); }
+  inline result<doc_set_counter> importer::import_docs(const std::vector<doc_info>& docs, cstr_t xsd_path, pipeline_hooks& hooks)
+  { return impl_.process_files(docs, xsd_path, hooks); }
   inline std::vector<std::size_t> importer::failed_document_indices() const { return impl_.failed_document_indices(); }
   inline const doc_set_dscr&      importer::ds_dscr() const noexcept { return impl_.ds_dscr(); }
 
-  inline std::pair<std::unique_ptr<importer>, result<doc_set_counter>> importer::exec(const importer_config&    cfg,
-                                                                                      const std::vector<str_t>& xml_paths,
-                                                                                      cstr_t                    xsd_path,
-                                                                                      pipeline_hooks&           hooks)
+  inline std::pair<std::unique_ptr<importer>, result<doc_set_counter>> importer::exec(const importer_config&       cfg,
+                                                                                      const std::vector<doc_info>& docs,
+                                                                                      cstr_t                       xsd_path,
+                                                                                      pipeline_hooks&              hooks)
   {
     // Not std::make_unique<importer>(cfg): make_unique's own "new" expression runs inside
     // <memory>'s implementation, outside importer's class scope, so it can't see the private
     // constructor -- only a "new importer(...)" written HERE, inside a member of importer
     // itself, has access. std::unique_ptr<importer>(...) then takes ownership of that pointer.
     std::unique_ptr<importer> p(new importer(cfg));
-    auto                      res = p->import_docs(xml_paths, xsd_path, hooks);
+    auto                      res = p->import_docs(docs, xsd_path, hooks);
     return {std::move(p), std::move(res)};
   }
 } // namespace fsp

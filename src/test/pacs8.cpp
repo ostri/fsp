@@ -54,6 +54,17 @@ namespace
     cfg.app_name           = program_name;
     return cfg;
   }
+
+  // CLI paths (fsp::param::files) never carry an id of their own - doc_info::id stays 0 for
+  // every one, same as before doc_info existed (pipeline::add_documents() falls back to
+  // hooks.get_doc_id(), see its own doc comment).
+  [[nodiscard]] std::vector<fsp::doc_info> to_doc_infos(const std::vector<str_t>& files)
+  {
+    std::vector<fsp::doc_info> docs;
+    docs.reserve(files.size());
+    for (const auto& file : files) docs.push_back(fsp::doc_info{.path = file});
+    return docs;
+  }
 }; // namespace
 /////////////////////////////////////////////////////////////////////////////////////
 int main(int argc, const char* argv[])
@@ -73,7 +84,7 @@ int main(int argc, const char* argv[])
                                                       .log_config     = load_program_logger_config(args.bare_name),
                                                       .program_name   = args.bare_name};
     agent_id_hooks hooks;
-    auto [p, res] = fsp::importer::exec(cfg, args.files, args.xsd_file, hooks);
+    auto [p, res] = fsp::importer::exec(cfg, to_doc_infos(args.files), args.xsd_file, hooks);
     if (! res)
     {
       fmt::print("Processing failed: '{}'\n", res.error().to_string());

@@ -109,12 +109,14 @@ namespace fsp
     }
 
     /**
-     * @brief Main thread, once per document, right after its doc_dscr is constructed but before
-     * it is added to doc_set_dscr -- the returned id is stored as that document's
-     * doc_dscr::out_doc_id() (see pipeline::add_documents()), for a block-writer hook
-     * (on_block_store()/on_failed_block_store()) to attach to whatever it writes downstream. Called
-     * strictly before any worker thread starts, so the default body below (a plain, non-atomic
-     * counter) needs no locking.
+     * @brief Main thread, once per document whose own doc_info::id was left at 0 (see doc_info's
+     * own doc comment, doc_dscr.hpp) -- called right after that document's doc_dscr is
+     * constructed but before it is added to doc_set_dscr. A document whose doc_info::id is
+     * nonzero never reaches this call at all: pipeline::add_documents() uses that value directly.
+     * Either way, the resulting id is stored as that document's doc_dscr::out_doc_id() (see
+     * pipeline::add_documents()), for a block-writer hook (on_block_store()/on_failed_block_store())
+     * to attach to whatever it writes downstream. Called strictly before any worker thread starts,
+     * so the default body below (a plain, non-atomic counter) needs no locking.
      * @param node_hint doc_ndx modulo some caller-meaningful block size (e.g. a Snowflake
      * implementation's node-id range) -- deterministic per document, not tied to which thread
      * later processes it (pipeline_hooks intentionally never exposes worker/thread identity to a
@@ -293,8 +295,11 @@ namespace fsp
      * ever durably written for it, so there is nothing to clean up (e.g. ach's own
      * remove_stored_data_for_doc() call from inside its own on_doc_close() override).
      */
-    virtual bool on_doc_safe_close(
-      std::size_t doc_ndx, const doc_status_t& verdict, const error_info& err, const doc_dscr& dscr, std::size_t segments_stored) final
+    virtual bool on_doc_safe_close(std::size_t         doc_ndx,
+                                   const doc_status_t& verdict,
+                                   const error_info&   err,
+                                   const doc_dscr&     dscr,
+                                   std::size_t         segments_stored) final
     { return on_doc_close(doc_ndx, verdict, err, dscr, segments_stored); }
 
     /**

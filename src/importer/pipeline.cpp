@@ -71,7 +71,9 @@ namespace fsp
     // a single failed non-header segment does not, by itself, reject the whole document).
     if (! ok)
     {
-      const bool is_header_segment = cfg_.targets.is_header[static_cast<std::size_t>(segment.subtree_type())]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- subtree_type() is always a valid index into is_header, set by doc_cutter at cut time
+      const bool is_header_segment = cfg_.targets.is_header[static_cast<std::size_t>(
+        segment.subtree_type())]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- subtree_type() is always a
+                                  // valid index into is_header, set by doc_cutter at cut time
       // Not propagated as a fatal, run-stopping error (see report_fatal_error()) -- same "log and
       // move on" handling as on_block_safe_store()'s own error (see xml_worker::flush_ok_block()):
       // a rollback failing for one document's storage is that document's own problem, not a reason
@@ -213,7 +215,7 @@ namespace fsp
   {
     const auto& dscr    = ds_dscr_[doc_ndx];
     const auto& verdict = dscr.status();
-    const bool  ok = hooks.on_doc_safe_close(doc_ndx, verdict, dscr.error(), dscr, (*doc_counters_)[doc_ndx].stored_count());
+    const bool  ok      = hooks.on_doc_safe_close(doc_ndx, verdict, dscr.error(), dscr, (*doc_counters_)[doc_ndx].stored_count());
     log_.debug(fmt::format("Doc {}: on_doc_close verdict={} (syntax={} validation={} semantic={}).",
                            doc_ndx,
                            ok,
@@ -344,18 +346,19 @@ namespace fsp
     return out;
   }
 
-  e_void pipeline::add_documents(const std::vector<str_t>& xml_paths, cstr_t xsd_path, pipeline_hooks& hooks)
+  e_void pipeline::add_documents(const std::vector<doc_info>& docs, cstr_t xsd_path, pipeline_hooks& hooks)
   {
     // doc_data_active_/doc_data_pending_readers_ are sized (not reserved) here so
     // assign_doc_data() can index them directly -- every slot starts nullptr/0 (not yet assigned,
     // see doc_data()'s own precondition assert), filled in lazily by assign_doc_data() right
     // before each document is actually cut, not here.
-    doc_data_active_.assign(xml_paths.size(), nullptr);
-    doc_data_pending_readers_.assign(xml_paths.size(), 0);
-    for (std::size_t doc_ndx = 0; doc_ndx < xml_paths.size(); ++doc_ndx)
+    doc_data_active_.assign(docs.size(), nullptr);
+    doc_data_pending_readers_.assign(docs.size(), 0);
+    for (std::size_t doc_ndx = 0; doc_ndx < docs.size(); ++doc_ndx)
     {
-      const auto& file = xml_paths[doc_ndx]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- doc_ndx <
-                                             // xml_paths.size() by the loop condition
+      const auto& info = docs[doc_ndx]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- doc_ndx <
+                                        // docs.size() by the loop condition
+      const auto& file = info.path;
       try
       {
         // Built here, not via doc_set_dscr::add_document(cstr_t), so out_doc_id()/agent_id() can be
@@ -363,7 +366,9 @@ namespace fsp
         // get_doc_agent_id()'s own doc comments on why this must happen strictly before any worker
         // thread starts.
         doc_dscr doc(file);
-        doc.set_out_doc_id(hooks.get_doc_id(doc_ndx % doc_id_node_hint_modulo));
+        // info.id == 0 means the caller did not assign one (doc_info's own doc comment,
+        // doc_dscr.hpp) -- same fallback as before doc_info existed.
+        doc.set_out_doc_id(info.id != 0 ? info.id : hooks.get_doc_id(doc_ndx % doc_id_node_hint_modulo));
         doc.set_agent_id(hooks.get_doc_agent_id(file));
         if (! ds_dscr_.add_document(std::move(doc)))
           return std::unexpected(error_info{processor_error::file_open_failed, fmt::format("Failed to add document: '{}'", file), file, 0});
@@ -519,28 +524,28 @@ namespace fsp
     // never materializes a second copy of every segment's extracted values for the whole run; a
     // caller consumes each segment through its own hooks (on_type()/on_block_store()/...) as it is
     // processed instead (see docs/importer_usage.md).
-    auto       msg           = fmt::format(R"(
+    auto msg = fmt::format(R"(
   Processed {0} docs in {1:.3f} sec (segments ok:{2} err:{3}, docs failed:{4}) seg. peak: {5} / {6} slots ({7:.2f}%))",
-                                           doc_count,
-                                           elapsed_ms / 1000.0, // NOLINT(readability-magic-numbers)
-                                           doc_counters_->total_segments_ok(ds_dscr_),
-                                           doc_counters_->total_segments_error(ds_dscr_),
-                                           failed_count,
-                                           pool_peak,
-                                           pool_capacity,
-                                           pool_pct);
+                           doc_count,
+                           elapsed_ms / 1000.0, // NOLINT(readability-magic-numbers)
+                           doc_counters_->total_segments_ok(ds_dscr_),
+                           doc_counters_->total_segments_error(ds_dscr_),
+                           failed_count,
+                           pool_peak,
+                           pool_capacity,
+                           pool_pct);
     msg += fmt::format("\ndocument statistics:\n{}", doc_counters_->dump(2)); // NOLINT(readability-magic-numbers)
     return msg;
   }
 
-  result<doc_set_counter> pipeline::process_files(const std::vector<str_t>& xml_paths, cstr_t xsd_path, pipeline_hooks& hooks)
+  result<doc_set_counter> pipeline::process_files(const std::vector<doc_info>& docs, cstr_t xsd_path, pipeline_hooks& hooks)
   {
     // run_data_ is constructed here, before on_run_safe_start() in EITHER branch below, and
     // destroyed when process_files() returns (run_data_.reset() at every return point) -- see
     // run_data()'s own doc comment in pipeline.hpp.
     run_data_ = hooks.make_run_data_struct();
     run_data_->timing().start();
-    if (xml_paths.empty())
+    if (docs.empty())
     {
       log_.info("No files to process.");
       if (auto started = hooks.on_run_safe_start(*this, ds_dscr_, log_); ! started)
@@ -556,7 +561,7 @@ namespace fsp
       return doc_set_counter(0);
     }
 
-    if (auto added = add_documents(xml_paths, xsd_path, hooks); ! added)
+    if (auto added = add_documents(docs, xsd_path, hooks); ! added)
     {
       run_data_.reset();
       return std::unexpected(added.error());
@@ -567,7 +572,7 @@ namespace fsp
       return std::unexpected(started.error());
     }
 
-    const auto doc_count = xml_paths.size();
+    const auto doc_count = docs.size();
     const auto plan      = plan_run(doc_count);
     cut_with_validation_ = plan.cut_with_validation; // read (never rewritten) by every worker thread from here on
     run_validation_      = plan.run_validation;      // ditto -- see pipeline.hpp's own doc comment on these two flags

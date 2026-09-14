@@ -343,6 +343,19 @@ namespace
                                 .log_config     = silent_log_cfg(app_name),
                                 .program_name   = std::string(app_name)};
   }
+
+  /// wraps one or more bare paths into fsp::importer::exec()'s own std::vector<fsp::doc_info> -
+  /// every TEST_CASE here hands fsp::importer::exec() paths it generated locally, never a
+  /// pre-assigned docs.id (that is ach's own concern, not fsp-core's), so doc_info::id stays 0
+  /// throughout (pipeline::add_documents() falls back to hooks.get_doc_id(), same as before
+  /// doc_info existed - see its own doc comment, doc_dscr.hpp).
+  [[nodiscard]] std::vector<fsp::doc_info> docs_of(std::initializer_list<std::string> paths)
+  {
+    std::vector<fsp::doc_info> docs;
+    docs.reserve(paths.size());
+    for (const auto& path : paths) docs.push_back(fsp::doc_info{.path = path});
+    return docs;
+  }
 } // namespace
 
 // NOLINTBEGIN(readability-magic-numbers) -- arbitrary test fixture literals (delays, counts)
@@ -363,7 +376,7 @@ TEST_CASE("run_doc_data: every on_* hook fires during processing, using the fact
   auto                    observed = std::make_shared<observed_state>();
   run_doc_data_test_hooks hooks(observed, std::chrono::milliseconds(0));
   auto                    cfg = make_cfg("test-hooks-fire", 2);
-  auto [p, res]               = fsp::importer::exec(cfg, std::vector<std::string>{doc_path}, xsd_path(), hooks);
+  auto [p, res]               = fsp::importer::exec(cfg, docs_of({doc_path}), xsd_path(), hooks);
 
   REQUIRE(res.has_value());
   CHECK(res->total_docs() == 1);
@@ -441,7 +454,7 @@ TEST_CASE("run_doc_data: a second on_type() call must wait for fsp::lock() held 
   auto                    cfg = make_cfg("test-mutual-exclusion", 4); // 4 worker threads -- more than enough to contend
 
   const auto start   = std::chrono::steady_clock::now();
-  auto [p, res]      = fsp::importer::exec(cfg, std::vector<std::string>{doc_path_a, doc_path_b}, xsd_path(), hooks);
+  auto [p, res]      = fsp::importer::exec(cfg, docs_of({doc_path_a, doc_path_b}), xsd_path(), hooks);
   const auto elapsed = std::chrono::steady_clock::now() - start;
 
   REQUIRE(res.has_value());
@@ -489,7 +502,7 @@ TEST_CASE("run_doc_data: fsp::lock() serializes concurrent on_type() writers -- 
   auto                    observed = std::make_shared<observed_state>();
   run_doc_data_test_hooks hooks(observed, std::chrono::milliseconds(15));
   auto                    cfg = make_cfg("test-lock-serializes", 4);
-  auto [p, res]               = fsp::importer::exec(cfg, std::vector<std::string>{doc_path}, xsd_path(), hooks);
+  auto [p, res]               = fsp::importer::exec(cfg, docs_of({doc_path}), xsd_path(), hooks);
 
   REQUIRE(res.has_value());
   const auto& status = p->ds_dscr()[0].status();

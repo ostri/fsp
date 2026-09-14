@@ -6,10 +6,28 @@
 #include <cstdint>
 #include <mutex>
 #include <optional>
+#include <string>
 #include <string_view>
 
 namespace fsp
 {
+  /**
+   * @brief One document to process: its own path, plus an optional caller-assigned id.
+   *
+   * Passed to pipeline::process_files()/importer::exec() instead of a bare path so a caller that
+   * already has its own identity for a document (e.g. ach's importer_cb::get_documents() reading
+   * a docs.id a triage step already wrote) can hand it straight through, rather than fsp minting
+   * a fresh one via pipeline_hooks::get_doc_id() that the caller would then have to reconcile
+   * against its own id afterwards.
+   */
+  struct doc_info
+  {
+    std::string   path;
+    std::uint64_t id = 0; ///< 0 = "not assigned" - pipeline::add_documents() falls back to
+                          ///< hooks.get_doc_id() for this document, same as if doc_info did not
+                          ///< exist at all (see get_doc_id()'s own doc comment, pipeline_hooks.hpp)
+  };
+
   /**
    * @brief Three-way verdict for one of doc_status_t's four tracked facts (syntax/validation/
    * semantic/stored) -- distinct from a plain bool so "nobody has reported on this yet" (unknown)
@@ -329,8 +347,7 @@ namespace fsp
     /// @brief The raw accumulated bitmask -- see error_class's own doc comment for the bit layout.
     [[nodiscard]] std::uint8_t error_mask() const noexcept { return error_mask_.load(std::memory_order_relaxed); }
     /// @brief Convenience over error_mask(): true iff cls's own bit has been recorded via mark_error().
-    [[nodiscard]] bool has_error(error_class cls) const noexcept
-    { return (error_mask() & static_cast<std::uint8_t>(cls)) != 0; }
+    [[nodiscard]] bool has_error(error_class cls) const noexcept { return (error_mask() & static_cast<std::uint8_t>(cls)) != 0; }
 
     /**
      * @brief Cheap, lock-free equivalent of status() == three_state::invalid -- see
@@ -351,14 +368,14 @@ namespace fsp
     // cppcoreguidelines-prefer-member-initializer without ever reading o's fields unlocked.
     struct fields
     {
-      three_state   syntax_;
-      three_state   valid_;
-      three_state   semantic_;
-      three_state   stored_;
-      int           done_;
-      bool          closing_;
-      std::uint8_t  error_mask_;   //< snapshot of the atomic error_mask_ (see its own doc comment)
-      bool          rejected_flag_; //< snapshot of the atomic rejected_flag_ (see its own doc comment)
+      three_state  syntax_;
+      three_state  valid_;
+      three_state  semantic_;
+      three_state  stored_;
+      int          done_;
+      bool         closing_;
+      std::uint8_t error_mask_;    //< snapshot of the atomic error_mask_ (see its own doc comment)
+      bool         rejected_flag_; //< snapshot of the atomic rejected_flag_ (see its own doc comment)
     };
     // Builds a fields snapshot of o under o's own lock -- see the move ctor's own doc comment.
     // error_mask_/rejected_flag_ are their own atomics, not guarded by mtx_ (see their own doc
@@ -367,14 +384,14 @@ namespace fsp
     [[nodiscard]] static fields snapshot(doc_status_t& o) noexcept
     {
       const std::scoped_lock lock(o.mtx_);
-      return {.syntax_         = o.syntax_,
-              .valid_          = o.valid_,
-              .semantic_       = o.semantic_,
-              .stored_         = o.stored_,
-              .done_           = o.done_,
-              .closing_        = o.closing_,
-              .error_mask_     = o.error_mask_.load(std::memory_order_relaxed),
-              .rejected_flag_  = o.rejected_flag_.load(std::memory_order_relaxed)};
+      return {.syntax_        = o.syntax_,
+              .valid_         = o.valid_,
+              .semantic_      = o.semantic_,
+              .stored_        = o.stored_,
+              .done_          = o.done_,
+              .closing_       = o.closing_,
+              .error_mask_    = o.error_mask_.load(std::memory_order_relaxed),
+              .rejected_flag_ = o.rejected_flag_.load(std::memory_order_relaxed)};
     }
     // Private, snapshot-based delegate target for the move ctor -- mtx_ itself is deliberately
     // NOT part of fields (std::mutex isn't copyable/movable), so it default-constructs here as a
@@ -546,10 +563,10 @@ namespace fsp
     // comments on doc_status_t. Kept here too, same "convenience wrapper over status_" pattern as
     // set_semantic_result()/set_stored_result() above, so call sites don't need to spell out
     // .status().mark_error(...) themselves.
-    [[nodiscard]] bool          mark_error(error_class cls) noexcept { return status_.mark_error(cls); }
-    void                        mark_rejected() noexcept { status_.mark_rejected(); }
-    [[nodiscard]] std::uint8_t  error_mask() const noexcept { return status_.error_mask(); }
-    [[nodiscard]] bool          has_error(error_class cls) const noexcept { return status_.has_error(cls); }
+    [[nodiscard]] bool         mark_error(error_class cls) noexcept { return status_.mark_error(cls); }
+    void                       mark_rejected() noexcept { status_.mark_rejected(); }
+    [[nodiscard]] std::uint8_t error_mask() const noexcept { return status_.error_mask(); }
+    [[nodiscard]] bool         has_error(error_class cls) const noexcept { return status_.has_error(cls); }
     // Reported by C (the cutter) once cutting finishes. folded_validation is
     // importer_config::cut_with_validation's effective value for this run (see pipeline_worker.cpp) --
     // when true, C is the SOLE authority for both syntax and validation (success sets both valid,

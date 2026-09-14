@@ -62,8 +62,9 @@ namespace
     temp_dir_guard& operator=(const temp_dir_guard&) = delete;
     temp_dir_guard(temp_dir_guard&&)                 = delete;
     temp_dir_guard& operator=(temp_dir_guard&&)      = delete;
-    // Writes content to <dir>/name, returns the full path (string, as pipeline::process_files()
-    // wants for xml_paths).
+    // Writes content to <dir>/name, returns the full path (string - see docs_of() below for how
+    // this file's own TEST_CASEs turn one or more of these into fsp::importer::exec()'s own
+    // std::vector<fsp::doc_info>).
     [[nodiscard]] std::string write(std::string_view name, std::string_view content) const
     {
       const auto    path = dir_ / name;
@@ -80,6 +81,28 @@ namespace
   logger::logger_config silent_log_cfg(std::string_view app_name)
   {
     return logger::logger_config{.app_name = std::string(app_name), .console_level = logger::level::off, .file_level = logger::level::off};
+  }
+
+  // wraps bare paths into fsp::importer::exec()'s own std::vector<fsp::doc_info> - every
+  // TEST_CASE here hands fsp::importer::exec() paths it generated locally, never a pre-assigned
+  // docs.id (that is ach's own concern, not fsp-core's), so doc_info::id stays 0 throughout
+  // (pipeline::add_documents() falls back to hooks.get_doc_id(), same as before doc_info existed -
+  // see its own doc comment, doc_dscr.hpp). Two overloads: an initializer_list for the common
+  // "one or two literal paths" call sites, a std::vector<std::string> for the one TEST_CASE that
+  // builds its own path list in a loop (see its own doc_paths local below).
+  [[nodiscard]] std::vector<fsp::doc_info> docs_of(std::initializer_list<std::string> paths)
+  {
+    std::vector<fsp::doc_info> docs;
+    docs.reserve(paths.size());
+    for (const auto& path : paths) docs.push_back(fsp::doc_info{.path = path});
+    return docs;
+  }
+  [[nodiscard]] std::vector<fsp::doc_info> docs_of(const std::vector<std::string>& paths)
+  {
+    std::vector<fsp::doc_info> docs;
+    docs.reserve(paths.size());
+    for (const auto& path : paths) docs.push_back(fsp::doc_info{.path = path});
+    return docs;
   }
 
   // Resolves xsd/pacs.008.xsd against the repository root -- CMAKE_SOURCE_DIR is injected via a
@@ -242,12 +265,12 @@ namespace
     std::atomic<bool> txn_verdict{true};
     // on_remove_stored_data_safe()'s own (out_doc_id, no_headers) arguments, captured the same way
     // doc_close_err_message is above -- checked by the error_class-related TEST_CASEs below.
-    std::atomic<int>  remove_stored_data_calls{0};
+    std::atomic<int>           remove_stored_data_calls{0};
     std::atomic<std::uint64_t> remove_stored_data_out_doc_id{0};
     std::atomic<bool>          remove_stored_data_no_headers{false};
-    std::mutex                doc_close_err_mutex;   // guards doc_close_err_message (plain string, not lock-free)
-    fsp::str_t                doc_close_err_message; // last on_doc_close()'s own err.message(), verbatim
-    std::atomic<int>          doc_close_segments_stored{-1}; // last on_doc_close()'s own segments_stored argument
+    std::mutex                 doc_close_err_mutex;           // guards doc_close_err_message (plain string, not lock-free)
+    fsp::str_t                 doc_close_err_message;         // last on_doc_close()'s own err.message(), verbatim
+    std::atomic<int>           doc_close_segments_stored{-1}; // last on_doc_close()'s own segments_stored argument
     // --- on_doc_stored()/on_doc_close() ordering + per-document accounting (see the on_doc_stored
     // TEST_CASEs below) -- a single, monotonically increasing global sequence counter is stamped
     // into per-doc_ndx slots by both hooks, so a test can assert stored's own stamp is strictly
@@ -369,7 +392,7 @@ namespace
                                     const fsp::doc_status_t& verdict,
                                     const fsp::error_info&   err,
                                     const fsp::doc_dscr& /*dscr*/,
-                                    std::size_t              segments_stored) override
+                                    std::size_t segments_stored) override
     {
       state_->doc_close_calls.fetch_add(1, std::memory_order_relaxed);
       state_->doc_close_segments_stored.store(static_cast<int>(segments_stored), std::memory_order_relaxed);
@@ -486,7 +509,7 @@ TEST_CASE("pipeline: V failing before P finishes discards the document's segment
   // per-segment hook to slow it down) reliably reports failure before P's own delayed
   // on_seg_sem_check() calls return.
   auto cfg      = make_cfg("test-v-before-p", 2);
-  auto [p, res] = fsp::importer::exec(cfg, std::vector<std::string>{doc_path}, xsd_path(), hooks);
+  auto [p, res] = fsp::importer::exec(cfg, docs_of({doc_path}), xsd_path(), hooks);
 
   REQUIRE(res.has_value());
   CHECK(res->total_docs() == 1);
@@ -540,7 +563,7 @@ TEST_CASE("pipeline: C failing on ill-formed XML discards segments and still clo
   stage_test_hooks hooks(state);
 
   auto cfg      = make_cfg("test-c-fails", 2);
-  auto [p, res] = fsp::importer::exec(cfg, std::vector<std::string>{doc_path}, xsd_path(), hooks);
+  auto [p, res] = fsp::importer::exec(cfg, docs_of({doc_path}), xsd_path(), hooks);
 
   REQUIRE(res.has_value());
   const auto& ds_dscr = p->ds_dscr();
@@ -589,7 +612,7 @@ TEST_CASE("pipeline: on_doc_sem_check's false verdict survives to on_doc_close e
   // guarantee on_doc_sem_check() (fed into doc_status_t::set_semantic()) completes before V's own
   // set_valid() call, without relying on a timing coincidence.
   auto cfg      = make_cfg("test-sem-then-v", 1);
-  auto [p, res] = fsp::importer::exec(cfg, std::vector<std::string>{doc_path}, xsd_path(), hooks);
+  auto [p, res] = fsp::importer::exec(cfg, docs_of({doc_path}), xsd_path(), hooks);
 
   REQUIRE(res.has_value());
   const auto& ds_dscr = p->ds_dscr();
@@ -618,7 +641,7 @@ TEST_CASE("pipeline: happy path calls on_doc_close exactly once, after syntax+va
   stage_test_hooks hooks(state);
 
   auto cfg      = make_cfg("test-happy-path", 2);
-  auto [p, res] = fsp::importer::exec(cfg, std::vector<std::string>{doc_path}, xsd_path(), hooks);
+  auto [p, res] = fsp::importer::exec(cfg, docs_of({doc_path}), xsd_path(), hooks);
 
   REQUIRE(res.has_value());
   const auto& ds_dscr = p->ds_dscr();
@@ -667,7 +690,7 @@ TEST_CASE("pipeline: get_doc_agent_id()'s truly-unoverridden default (0) rejects
   no_agent_override_hooks hooks;
 
   auto cfg      = make_cfg("test-agent-id-unoverridden-default", 1);
-  auto [p, res] = fsp::importer::exec(cfg, std::vector<std::string>{doc_path}, xsd_path(), hooks);
+  auto [p, res] = fsp::importer::exec(cfg, docs_of({doc_path}), xsd_path(), hooks);
 
   REQUIRE(res.has_value());
   const auto& ds_dscr = p->ds_dscr();
@@ -695,7 +718,7 @@ TEST_CASE("pipeline: get_doc_agent_id() explicitly returning std::nullopt leaves
   stage_test_hooks hooks(state);
 
   auto cfg      = make_cfg("test-agent-id-explicit-nullopt", 1);
-  auto [p, res] = fsp::importer::exec(cfg, std::vector<std::string>{doc_path}, xsd_path(), hooks);
+  auto [p, res] = fsp::importer::exec(cfg, docs_of({doc_path}), xsd_path(), hooks);
 
   REQUIRE(res.has_value());
   const auto& ds_dscr = p->ds_dscr();
@@ -721,7 +744,7 @@ TEST_CASE("pipeline: get_doc_agent_id()'s resolved value reaches doc_dscr::agent
   stage_test_hooks       hooks(state, resolved_id);
 
   auto cfg      = make_cfg("test-agent-id-resolved", 1);
-  auto [p, res] = fsp::importer::exec(cfg, std::vector<std::string>{doc_path}, xsd_path(), hooks);
+  auto [p, res] = fsp::importer::exec(cfg, docs_of({doc_path}), xsd_path(), hooks);
 
   REQUIRE(res.has_value());
   const auto& ds_dscr = p->ds_dscr();
@@ -752,7 +775,7 @@ TEST_CASE("pipeline: get_doc_agent_id()'s resolved 0 rejects the document before
   stage_test_hooks hooks(state, static_cast<std::int16_t>(0));
 
   auto cfg      = make_cfg("test-agent-id-zero", 1);
-  auto [p, res] = fsp::importer::exec(cfg, std::vector<std::string>{doc_path}, xsd_path(), hooks);
+  auto [p, res] = fsp::importer::exec(cfg, docs_of({doc_path}), xsd_path(), hooks);
 
   REQUIRE(res.has_value());
   const auto& ds_dscr = p->ds_dscr();
@@ -807,7 +830,7 @@ TEST_CASE("pipeline: with 2+ documents, every agent_id()==0 document is still re
   stage_test_hooks hooks(state, static_cast<std::int16_t>(0)); // both documents resolve to agent_id 0
 
   auto cfg      = make_cfg("test-agent-id-zero-two-docs", 2);
-  auto [p, res] = fsp::importer::exec(cfg, std::vector<std::string>{doc_path_a, doc_path_b}, xsd_path(), hooks);
+  auto [p, res] = fsp::importer::exec(cfg, docs_of({doc_path_a, doc_path_b}), xsd_path(), hooks);
 
   REQUIRE(res.has_value());
   const auto& ds_dscr = p->ds_dscr();
@@ -838,7 +861,7 @@ TEST_CASE("pipeline: on_type()'s own raw_msg parameter carries the segment's raw
   stage_test_hooks hooks(state);
 
   auto cfg      = make_cfg("test-raw-msg", 1);
-  auto [p, res] = fsp::importer::exec(cfg, std::vector<std::string>{doc_path}, xsd_path(), hooks);
+  auto [p, res] = fsp::importer::exec(cfg, docs_of({doc_path}), xsd_path(), hooks);
 
   REQUIRE(res.has_value());
   const std::scoped_lock lock(state->raw_msg_mutex);
@@ -875,7 +898,7 @@ TEST_CASE("pipeline: on_doc_stored() fires exactly once, strictly before on_doc_
   stage_test_hooks hooks(state);
 
   auto cfg      = make_cfg_ex("test-doc-stored", /*num_of_workers=*/4, shard_count, /*ok_block_flush_size=*/4);
-  auto [p, res] = fsp::importer::exec(cfg, std::vector<std::string>{doc_path}, xsd_path(), hooks);
+  auto [p, res] = fsp::importer::exec(cfg, docs_of({doc_path}), xsd_path(), hooks);
 
   REQUIRE(res.has_value());
   CHECK_FALSE(state->doc_stored_contract_violated.load());
@@ -923,7 +946,7 @@ TEST_CASE("pipeline: on_doc_stored() ordering holds for multiple documents under
   // on why record_segments_stored() must group by doc_ndx), and different worker threads race to
   // be the one whose flush crosses each document's own segment-stored total.
   auto cfg      = make_cfg_ex("test-doc-stored-concurrent", /*num_of_workers=*/6, /*pool_shard_count=*/4, /*ok_block_flush_size=*/5);
-  auto [p, res] = fsp::importer::exec(cfg, doc_paths, xsd_path(), hooks);
+  auto [p, res] = fsp::importer::exec(cfg, docs_of(doc_paths), xsd_path(), hooks);
 
   REQUIRE(res.has_value());
   CHECK_FALSE(state->doc_stored_contract_violated.load());
@@ -965,7 +988,7 @@ TEST_CASE("pipeline: hdr_seg_schema routes the header segment through the priori
   stage_test_hooks hooks(state);
 
   auto cfg      = make_cfg_ex("test-header-priority", /*num_of_workers=*/4, /*pool_shard_count=*/2, /*ok_block_flush_size=*/3);
-  auto [p, res] = fsp::importer::exec(cfg, std::vector<std::string>{doc_path}, xsd_path(), hooks);
+  auto [p, res] = fsp::importer::exec(cfg, docs_of({doc_path}), xsd_path(), hooks);
 
   REQUIRE(res.has_value());
   CHECK(p->ds_dscr()[0].status().ok());
@@ -1063,7 +1086,7 @@ TEST_CASE("pipeline: a failing header segment's on_type() is recorded as error_c
   stage_test_hooks hooks(state);
 
   auto cfg      = make_cfg("test-error-class-he", 2);
-  auto [p, res] = fsp::importer::exec(cfg, std::vector<std::string>{doc_path}, xsd_path(), hooks);
+  auto [p, res] = fsp::importer::exec(cfg, docs_of({doc_path}), xsd_path(), hooks);
 
   REQUIRE(res.has_value());
   const auto& ds_dscr = p->ds_dscr();
@@ -1107,7 +1130,7 @@ TEST_CASE("pipeline: a failing non-header segment's on_type() is recorded as err
   stage_test_hooks hooks(state);
 
   auto cfg      = make_cfg("test-error-class-te", 2);
-  auto [p, res] = fsp::importer::exec(cfg, std::vector<std::string>{doc_path}, xsd_path(), hooks);
+  auto [p, res] = fsp::importer::exec(cfg, docs_of({doc_path}), xsd_path(), hooks);
 
   REQUIRE(res.has_value());
   const auto& ds_dscr = p->ds_dscr();
@@ -1155,7 +1178,7 @@ TEST_CASE("pipeline: a header segment's on_type() failure (HE) rejects the docum
   stage_test_hooks hooks(state);
 
   auto cfg      = make_cfg("test-error-class-multi", 1); // single worker: deterministic, sequential C->P order
-  auto [p, res] = fsp::importer::exec(cfg, std::vector<std::string>{doc_path}, xsd_path(), hooks);
+  auto [p, res] = fsp::importer::exec(cfg, docs_of({doc_path}), xsd_path(), hooks);
 
   REQUIRE(res.has_value());
   const auto& ds_dscr = p->ds_dscr();

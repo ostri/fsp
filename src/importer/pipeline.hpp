@@ -29,9 +29,9 @@ namespace fsp
   {
   public:
     pipeline(const importer_config& cfg, const logger::Logger& log, str_t parent_log_name);
-    [[nodiscard]] result<doc_set_counter> process_files(const std::vector<str_t>& xml_paths,
-                                                        cstr_t                    xsd_path,
-                                                        pipeline_hooks&           hooks = default_pipeline_hooks);
+    [[nodiscard]] result<doc_set_counter>  process_files(const std::vector<doc_info>& docs,
+                                                         cstr_t                       xsd_path,
+                                                         pipeline_hooks&              hooks = default_pipeline_hooks);
     [[nodiscard]] std::vector<std::size_t> failed_document_indices() const;
 
     // --- API for pipeline_worker / toolkits ---
@@ -168,9 +168,11 @@ namespace fsp
 
     // --- process_files() broken into named phases, purely to keep each piece small and
     // separately readable -- none of these are meant to be called from anywhere else. ---
-    // hooks: only get_doc_id() is called here, once per document, on the main thread, before
-    // add_documents() returns -- see pipeline_hooks::get_doc_id()'s own doc comment.
-    [[nodiscard]] e_void add_documents(const std::vector<str_t>& xml_paths, cstr_t xsd_path, pipeline_hooks& hooks);
+    // hooks: get_doc_id() is called here, once per document, on the main thread, before
+    // add_documents() returns -- see pipeline_hooks::get_doc_id()'s own doc comment. Only for a
+    // document whose own doc_info::id is 0 (unassigned) -- see doc_info's own doc comment
+    // (doc_dscr.hpp) for why a caller-supplied id skips get_doc_id() entirely.
+    [[nodiscard]] e_void add_documents(const std::vector<doc_info>& docs, cstr_t xsd_path, pipeline_hooks& hooks);
     // Modulo used to turn a doc_ndx into get_doc_id()'s node_hint parameter -- deliberately
     // generic (not, say, a Snowflake-specific "max node id"): pipeline/importer stay
     // domain-neutral, a hook implementation (e.g. one built on a Snowflake-style id generator) is
