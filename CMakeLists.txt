@@ -520,6 +520,28 @@ disable_ubsan_for_reflection(${PROJECT_SOURCE_DIR}/src/test/pacs8.cpp)
 add_fsp_target(${b_target} EXECUTABLE ${${b_target}_SOURCES})
 add_log_config(${b_target})
 # -----------------------------------------------------------------------------
+# --- target: bench_pipeline_startup (temporary micro-benchmark, see its own file header)
+# -----------------------------------------------------------------------------
+set(b_target bench_pipeline_startup) # name of the target
+set(${b_target}_SOURCES
+    ${PROJECT_SOURCE_DIR}/src/test/bench_pipeline_startup.cpp
+)
+set(FSP_TARGET_${b_target}_INCLUDES
+  ${PROJECT_SOURCE_DIR}/src/importer
+  ${PROJECT_SOURCE_DIR}/src/test
+  )
+set(FSP_TARGET_${b_target}_LIBS
+    fsp_lib
+    fmt::fmt
+    logger::logger
+    magic_enum::magic_enum
+    XercesC::XercesC
+    LibXml2::LibXml2
+)
+disable_ubsan_for_reflection(${PROJECT_SOURCE_DIR}/src/test/bench_pipeline_startup.cpp)
+add_fsp_target(${b_target} EXECUTABLE ${${b_target}_SOURCES})
+add_log_config(${b_target})
+# -----------------------------------------------------------------------------
 # --- target: pacs8-cb (same as pacs8, but wires an explicit custom pipeline_hooks class)
 # -----------------------------------------------------------------------------
 set(b_target pacs8-cb) # name of the target
