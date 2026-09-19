@@ -597,6 +597,7 @@ if(BUILD_TESTING AND FSP_BUILD_TESTS)
         ${PROJECT_SOURCE_DIR}/src/test/test_xerces_mgr.cpp
         ${PROJECT_SOURCE_DIR}/src/test/test_lock_queue.cpp
         ${PROJECT_SOURCE_DIR}/src/test/test_blocked_vector.cpp
+        ${PROJECT_SOURCE_DIR}/src/test/test_segment_pool.cpp
         ${PROJECT_SOURCE_DIR}/src/test/test_mmap_file.cpp
         ${PROJECT_SOURCE_DIR}/src/test/test_xml_writer.cpp
         ${PROJECT_SOURCE_DIR}/src/test/test_exporter_error.cpp
