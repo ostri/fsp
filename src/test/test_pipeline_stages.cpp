@@ -1208,5 +1208,28 @@ TEST_CASE("pipeline: a segment cache smaller than the document's segment count s
   REQUIRE(res.has_value());
   CHECK(res->total_segments_ok(p->ds_dscr()) == static_cast<std::size_t>(num_txns + 1));
   CHECK(res->total_segments_error(p->ds_dscr()) == 0);
+
+  // 1 block was requested; a run cannot work with fewer slots than its workers hold back in their
+  // flush batches, so the pipeline raised it to at least one worker's worth and at most all four
+  const std::size_t per_worker = cfg.min_seg_cache(1);
+  CHECK(p->seg_cache_slots() >= per_worker);
+  CHECK(p->seg_cache_slots() <= 4 * per_worker);
+}
+
+TEST_CASE("pipeline: a segment cache above the lower bound is left as requested", "[pipeline][stages][seg-cache]")
+{
+  temp_dir_guard dir;
+  const auto     doc_path = dir.write("doc.xml", multi_txn_doc(25));
+
+  auto state = std::make_shared<shared_state>();
+  state->size_doc_seqs(1);
+  stage_test_hooks hooks(state);
+
+  auto cfg           = make_cfg_ex("test-seg-cache-large", /*num_of_workers=*/4, /*pool_shard_count=*/2, /*ok_block_flush_size=*/4);
+  cfg.seg_cache_size = 1024 * 1024;
+  auto [p, res]      = fsp::importer::exec(cfg, docs_of({doc_path}), xsd_path(), hooks);
+
+  REQUIRE(res.has_value());
+  CHECK(p->seg_cache_slots() == cfg.seg_cache_size);
 }
 // NOLINTEND(readability-magic-numbers)

@@ -68,6 +68,7 @@ namespace fsp
     str_t                  program_name;                // program name as displayed in the log file
     // NOLINTEND(misc-non-private-member-variables-in-classes)
     [[nodiscard]] str_t dump(int offs) const;
+    [[nodiscard]] std::size_t min_seg_cache(std::size_t num_workers) const noexcept;
   };
 
   inline str_t importer_config::dump(int offs) const
