@@ -1,8 +1,12 @@
 #include "segment_pool.hpp"
+#include "importer_config.hpp"
 #include <catch2/catch_test_macros.hpp>
 #include <logger/logger.hpp>
 #include <logger/logger_config.hpp>
+#include <array>
 #include <atomic>
+#include <chrono>
+#include <future>
 #include <memory>
 #include <thread>
 #include <vector>
@@ -117,6 +121,57 @@ TEST_CASE("segment_pool::acquire_slot() is safe to call concurrently from many t
   }
   CHECK(duplicates == 0);
   CHECK(gaps == 0);
+}
+
+TEST_CASE("segment_pool: capacity is rounded up to a whole number of blocks", "[segment_pool][positive][capacity]")
+{
+  constexpr std::size_t blk = fsp::blocked_vector<fsp::segment_slot>::block_size();
+  const auto            log_ptr = make_silent_logger();
+
+  const std::array<std::pair<std::size_t, std::size_t>, 7> cases{{{0, blk},
+                                                                    {1, blk},
+                                                                    {blk - 1, blk},
+                                                                    {blk, blk},
+                                                                    {blk + 1, 2 * blk},
+                                                                    {3 * blk, 3 * blk},
+                                                                    {3 * blk + 1, 4 * blk}}};
+  for (const auto& [requested, expected] : cases)
+  {
+    CAPTURE(requested, expected);
+    segment_pool pool(*log_ptr, requested);
+    CHECK(pool.size() == expected);
+    CHECK(pool.size() % blk == 0);
+  }
+}
+
+TEST_CASE("segment_pool::acquire_slot() blocks on a full cache until a slot is released", "[segment_pool][positive][capacity]")
+{
+  constexpr std::size_t blk = fsp::blocked_vector<fsp::segment_slot>::block_size();
+  const auto            log_ptr = make_silent_logger();
+  segment_pool          pool(*log_ptr, blk, 1);
+  REQUIRE(pool.size() == blk);
+
+  for (std::size_t i = 0; i < blk; ++i) pool.acquire_slot(i);
+  CHECK(pool.high_water_mark() == blk);
+
+  auto waiter = std::async(std::launch::async, [&pool, blk] { return pool.acquire_slot(blk); });
+  CHECK(waiter.wait_for(std::chrono::milliseconds(200)) == std::future_status::timeout);
+
+  const std::size_t released = 7;
+  const std::array<std::size_t, 1> to_release{released};
+  pool.release_slots(to_release);
+  REQUIRE(waiter.wait_for(std::chrono::seconds(5)) == std::future_status::ready);
+  CHECK(waiter.get() == released);
+  CHECK(pool.high_water_mark() == blk);
+}
+
+TEST_CASE("importer_config: default seg_cache_size is 4M segments, a whole number of blocks", "[importer_config][positive]")
+{
+  constexpr std::size_t blk = fsp::blocked_vector<fsp::segment_slot>::block_size();
+  const fsp::importer_config cfg;
+  CHECK(cfg.seg_cache_size == 4UL * 1024UL * 1024UL);
+  CHECK(cfg.seg_cache_size % blk == 0);
+  CHECK(cfg.dump(0).find("seg_cache_size: 4194304") != std::string::npos);
 }
 
 // NOLINTEND(readability-magic-numbers)
