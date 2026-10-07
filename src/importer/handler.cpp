@@ -177,12 +177,7 @@ namespace fsp
   {
     if (active_mask_stack_.empty()) [[unlikely]]
       logic_error("active_mask_stack_ is empty");
-    // active_mask_stack_ is kept in step with the XML element stack: this call pushes exactly one
-    // mask for the element being opened, and endElement() pops exactly one for it (a segment's own
-    // root element is popped at the end of its capture, every other checked element in the
-    // unconditional branch of endElement()). Hence the push below must also happen when the
-    // enclosing mask is already 0 (nothing can match inside an unmatched subtree) - an early return
-    // without a push would make that element's own endElement() pop a mask it never pushed.
+    // one mask is pushed per checked element (also when the enclosing mask is 0) and popped in endElement()
     RuleMask previous = active_mask_stack_.back();
     if (previous == 0)
     {
@@ -241,9 +236,7 @@ namespace fsp
 
   void Handler::reset_document_state()
   {
-    // Handler is owned by one worker thread and reused for every document it cuts - nothing a
-    // previous document (successfully cut, or aborted half-way by a parser/validity error, see
-    // doc_cutter::cut()) left behind may influence the next one. Back to what the constructor sets up.
+    // the Handler is reused for every document of a worker thread: back to the constructor's state
     doc_depth_  = 0;
     frag_depth_ = -1;
     seg_type_   = -1;
@@ -311,10 +304,7 @@ namespace fsp
     }
     else if (doc_depth_ <= max_xpath_depth_) [[likely]]
     {
-      // Not inside a segment: this element was checked by check_xpath_matches() when it opened
-      // (see its own comment) - without this pop, an element that matched no segment type (e.g.
-      // pacs.002's OrgnlGrpInfAndSts between GrpHdr and TxInfAndSts) left its mask on the stack
-      // for good, and every later element at a checked depth was compared against it.
+      // checked in check_xpath_matches() but not a segment root
       pop_active_mask();
     }
     doc_depth_--;

@@ -1068,14 +1068,8 @@ TEST_CASE("doc_cutter: every hdr_seg_schema segment is routed into the header qu
   CHECK(cutter.segments_found() == header_count + ordinary_count); // nothing lost, nothing double-counted
 }
 
-// --- Scenarios 12a/12b: an element that matches NO segment type, sitting at a depth the cutter
-// checks (<= the deepest xpath step), must not make the cutter lose the segments that follow it.
-//
-// Handler::check_xpath_matches() pushes a rule mask on active_mask_stack_ for every checked
-// element, and used to pop it only when a MATCHED segment ended -- an unmatched sibling left an
-// all-zero mask on top (poisoning every later sibling in the document, and, because the stack was
-// never reset, every later document cut by the same Handler). Found while implementing ict's
-// pacs.002 importer, whose OrgnlGrpInfAndSts sits between GrpHdr and TxInfAndSts. ----------------
+// --- Scenarios 12a/12b: an element matching no segment type must not hide the segments after it,
+// nor the segments of the next documents cut by the same doc_cutter ---
 namespace
 {
   enum class unmatched_at : std::uint8_t
@@ -1089,8 +1083,6 @@ namespace
 
   constexpr auto* k_unmatched_sibling = "<UnmatchedSibling><Child><Leaf>x</Leaf></Child></UnmatchedSibling>";
 
-  // multi_txn_doc() with k_unmatched_sibling inserted where `where` says (no schema validation is
-  // involved in these tests - only the cutter runs - so the extra element does not have to be valid XSD).
   std::string doc_with_unmatched_sibling(int num_txns, unmatched_at where)
   {
     std::string body = multi_txn_hdr(num_txns);
@@ -1117,8 +1109,6 @@ namespace
     std::size_t ordinary_count = 0;
   };
 
-  // Pops (and releases the slots of) every segment cut so far - the pool has no consumer in these
-  // tests, so draining is what keeps the next document's slots available.
   drained drain_and_release(fsp::segment_pool& pool)
   {
     drained                  d;
@@ -1182,9 +1172,6 @@ TEST_CASE("doc_cutter: an unmatched element between segments does not hide the s
 TEST_CASE("doc_cutter: an unmatched element in one document does not carry over to the next document cut by the same cutter",
           "[doc_cutter][unmatched-sibling][carry-over]")
 {
-  // The same doc_cutter (= the same Handler, as one pipeline worker thread owns one) cuts several
-  // documents in a row. Document 0 contains the troublesome element at every position; documents 1+
-  // are clean and must come out complete regardless of what document 0 left behind.
   constexpr int num_txns = 3;
 
   temp_dir_guard dir;
@@ -1195,7 +1182,6 @@ TEST_CASE("doc_cutter: an unmatched element in one document does not carry over 
   paths.push_back(dir.write("doc-3.xml", doc_with_unmatched_sibling(num_txns, unmatched_at::between_txns)));
   paths.push_back(dir.write("doc-4.xml", doc_with_unmatched_sibling(num_txns, unmatched_at::after_last_txn)));
   paths.push_back(dir.write("doc-5.xml", doc_with_unmatched_sibling(num_txns, unmatched_at::none)));
-  // many clean documents afterwards - also shows the mask stack does not make cutting degrade over time
   for (int i = 6; i < 40; ++i) paths.push_back(dir.write(fmt::format("doc-{}.xml", i), doc_with_unmatched_sibling(num_txns, unmatched_at::none)));
 
   static const fsp::xerces_mgr xerces_life;
