@@ -1189,4 +1189,24 @@ TEST_CASE("pipeline: a header segment's on_type() failure (HE) rejects the docum
   // no second call for the (never-recorded) TE.
   CHECK(state->remove_stored_data_calls.load() == 1);
 }
+// --- seg_cache_size far below the document's segment count: the cutter must wait on a full cache
+// and the pipeline must still finish with every segment processed (no deadlock) ------------------
+TEST_CASE("pipeline: a segment cache smaller than the document's segment count still completes", "[pipeline][stages][seg-cache]")
+{
+  temp_dir_guard dir;
+  constexpr int  num_txns = 10000;
+  const auto     doc_path = dir.write("doc.xml", multi_txn_doc(num_txns));
+
+  auto state = std::make_shared<shared_state>();
+  state->size_doc_seqs(1);
+  stage_test_hooks hooks(state);
+
+  auto cfg           = make_cfg_ex("test-seg-cache", /*num_of_workers=*/4, /*pool_shard_count=*/2, /*ok_block_flush_size=*/256);
+  cfg.seg_cache_size = 1; // rounded up to one block, well below num_txns + 1 segments
+  auto [p, res]      = fsp::importer::exec(cfg, docs_of({doc_path}), xsd_path(), hooks);
+
+  REQUIRE(res.has_value());
+  CHECK(res->total_segments_ok(p->ds_dscr()) == static_cast<std::size_t>(num_txns + 1));
+  CHECK(res->total_segments_error(p->ds_dscr()) == 0);
+}
 // NOLINTEND(readability-magic-numbers)

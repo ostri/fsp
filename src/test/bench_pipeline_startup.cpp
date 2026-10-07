@@ -186,7 +186,7 @@ int main()
         fmt::print(stderr, "Failed to load XSD grammar '{}' -- is the working directory fsp's repo root?\n", xsd_path);
         return 1;
       }
-      fsp::segment_pool pool(*log, 1024UL * 1024UL * 8UL, cfg.pool_shard_count); // NOLINT(readability-magic-numbers) -- same sizing as pipeline's own ctor
+      fsp::segment_pool pool(*log, cfg.seg_cache_size, cfg.pool_shard_count);
       samples.push_back(time_validating_cutters_once(validating_cfg, *log, ds_dscr, pool, num_workers));
     }
     const auto s = summarize(samples);

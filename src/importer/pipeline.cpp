@@ -11,7 +11,7 @@ namespace fsp
   , cfg_(std::move(cfg))
   , parent_log_name_(std::move(parent_log_name))
   , ds_dscr_(log_)
-  , seg_pool_(log_, 1024UL * 1024UL * 8UL, std::max<std::size_t>(1, cfg_.pool_shard_count)) // NOLINT(readability-magic-numbers)
+  , seg_pool_(log_, cfg_.seg_cache_size, std::max<std::size_t>(1, cfg_.pool_shard_count))
   {
   }
 
@@ -574,6 +574,18 @@ namespace fsp
 
     const auto doc_count = docs.size();
     const auto plan      = plan_run(doc_count);
+    const std::size_t min_seg_cache = plan.num_parallel * (cfg_.ok_block_flush_size + cfg_.nak_block_flush_size);
+    if (cfg_.seg_cache_size < min_seg_cache)
+    {
+      log_.warn(fmt::format("seg_cache_size {} is below {} workers x ({} ok + {} failed) segments held in flush batches; raised to {} "
+                            "to avoid a cutter/processor deadlock",
+                            cfg_.seg_cache_size,
+                            plan.num_parallel,
+                            cfg_.ok_block_flush_size,
+                            cfg_.nak_block_flush_size,
+                            min_seg_cache));
+      seg_pool_.init(min_seg_cache);
+    }
     cut_with_validation_ = plan.cut_with_validation; // read (never rewritten) by every worker thread from here on
     run_validation_      = plan.run_validation;      // ditto -- see pipeline.hpp's own doc comment on these two flags
 

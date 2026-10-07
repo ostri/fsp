@@ -6,6 +6,7 @@
 #include "segment_slot.hpp"
 #include "lock_queue.hpp"
 #include "blocked_vector.hpp"
+#include <atomic>
 #include <mutex>
 #include <span>
 #include <vector>
@@ -108,6 +109,8 @@ namespace fsp
     // the write) in push_ready()/retrieve_segment() via the happens-before edge each queue's
     // mutex already provides, so a plain array is enough, no atomics needed.
     std::unique_ptr<std::size_t[]> shard_of_slot_; // NOLINT(hicpp-avoid-c-arrays)
+    static constexpr std::size_t   full_wait_log_every = 4096;
+    std::atomic<std::size_t>       full_waits_{0};
     const bool                     log_trace_ = log_.active(logger::level::trace);
     const bool                     log_debug_ = log_.active(logger::level::debug);
     const bool                     log_info_  = log_.active(logger::level::info);
@@ -127,14 +130,22 @@ namespace fsp
   inline void segment_pool::init(std::size_t capacity)
   {
     std::lock_guard lock(resize_mtx_);
-    capacity_ = capacity;
+    constexpr std::size_t blk    = blocked_vector<segment_slot>::block_size();
+    const std::size_t     blocks = std::max<std::size_t>(1, (capacity + blk - 1) / blk);
+    capacity_                    = blocks * blk;
     // Re-assigning a fresh blocked_vector<T>(capacity) resets its own fetch() counter to 0 and
     // drops any already-allocated blocks from a PRIOR init() call -- acquire_slot() below is
     // what actually grows slots_ one slot (and, every block_size()-th slot, one new block) at a
     // time as this run goes on, not this constructor up front.
-    slots_         = blocked_vector<segment_slot>(capacity);
-    shard_of_slot_ = std::make_unique_for_overwrite<std::size_t[]>(capacity); // NOLINT(hicpp-avoid-c-arrays)
-    if (log_info_) log_.info(fmt::format("Pool size: {} ({} shard(s))", capacity_, num_shards_));
+    slots_         = blocked_vector<segment_slot>(capacity_);
+    shard_of_slot_ = std::make_unique_for_overwrite<std::size_t[]>(capacity_); // NOLINT(hicpp-avoid-c-arrays)
+    if (log_info_)
+      log_.info(fmt::format("Segment cache: requested {} segments, allocated {} blocks x {} = {} segments ({} shard(s))",
+                            capacity,
+                            blocks,
+                            blk,
+                            capacity_,
+                            num_shards_));
   }
 
   inline std::size_t segment_pool::acquire_slot(std::size_t segment_id)
@@ -156,7 +167,13 @@ namespace fsp
       else
       {
         // no free slots - let's wait on this shard's own free queue
-        if (log_info_) log_.info(fmt::format("All slots occupied: {}. Waiting...", size()));
+        const std::size_t waits = full_waits_.fetch_add(1, std::memory_order_relaxed);
+        if (log_warn_ && (waits % full_wait_log_every) == 0)
+          log_.warn(fmt::format("Segment cache full: {} blocks, {} segments. Cutter waits for a free slot (wait #{}, logged every {})",
+                                capacity_ / blocked_vector<segment_slot>::block_size(),
+                                capacity_,
+                                waits + 1,
+                                full_wait_log_every));
         if (free_queues_[shard].pop(slot) != queue_status::active)
           throw std::runtime_error("Internal error: wanted to have free slot, but was interrupted.");
       }

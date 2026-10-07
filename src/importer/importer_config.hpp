@@ -46,6 +46,7 @@ namespace fsp
     // lock/condition_variable contention between concurrent C/P threads. Default 2 was found
     // empirically fastest against N=1,3,4 (see pipeline.cpp / segment_pool.hpp).
     std::size_t pool_shard_count = 2; // NOLINT(readability-magic-numbers)
+    std::size_t seg_cache_size   = 4UL * 1024UL * 1024UL; // NOLINT(readability-magic-numbers)
     // Multiplier applied to std::thread::hardware_concurrency() before it caps
     // max_concurrent_cutters_ (see pipeline::plan_run()). Default 1.0 keeps today's behaviour (cap
     // == hw_concurrency exactly). Raising it lets a caller deliberately oversubscribe the C role
@@ -80,15 +81,16 @@ namespace fsp
   {0}cutter_ratio_num: {4}
   {0}cutter_ratio_den: {5}
   {0}pool_shard_count: {6}
-  {0}overcommit: {7}
-  {0}ok_block_flush_size: {8}
-  {0}nak_block_flush_size: {9}
-  {0}log_config.app_name: {10}
-  {0}log_config.run_mode: {11}
-  {0}log_config.console_level: {12}
-  {0}log_config.file_level: {13}
-  {0}log_config.log_folder: {14}
-  {0}program_name: {15})",
+  {0}seg_cache_size: {7}
+  {0}overcommit: {8}
+  {0}ok_block_flush_size: {9}
+  {0}nak_block_flush_size: {10}
+  {0}log_config.app_name: {11}
+  {0}log_config.run_mode: {12}
+  {0}log_config.console_level: {13}
+  {0}log_config.file_level: {14}
+  {0}log_config.log_folder: {15}
+  {0}program_name: {16})",
                        ind,
                        targets.dump(offs),
                        num_of_workers,
@@ -96,6 +98,7 @@ namespace fsp
                        cutter_ratio_num,
                        cutter_ratio_den,
                        pool_shard_count,
+                       seg_cache_size,
                        overcommit,
                        ok_block_flush_size,
                        nak_block_flush_size,
