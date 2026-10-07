@@ -94,6 +94,10 @@ namespace fsp
     /// prepare message to report exception
     str_t prepare_msg(const xercesc::SAXParseException& e);
     void  rebuild_ns_decl_for_current_level();
+    /// pops active_mask_stack_ - see check_xpath_matches()'s own comment for the push/pop pairing
+    void pop_active_mask();
+    /// back to the constructor's own initial parsing state - called by set_doc_ndx() before every document
+    void reset_document_state();
   private:                      /// members
     const logger::Logger& log_; // must be first logger NOLINT(cppcoreguidelines-avoid-const-or-ref-data-members)
     // --- subtree xpaths ---
@@ -163,5 +167,6 @@ namespace fsp
   {
     doc_ndx_ = doc_ndx;
     counter_ = 0;
+    reset_document_state();
   }
 } // namespace fsp

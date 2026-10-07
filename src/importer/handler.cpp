@@ -177,8 +177,13 @@ namespace fsp
   {
     if (active_mask_stack_.empty()) [[unlikely]]
       logic_error("active_mask_stack_ is empty");
+    // one mask is pushed per checked element (also when the enclosing mask is 0) and popped in endElement()
     RuleMask previous = active_mask_stack_.back();
-    if (previous == 0) return;
+    if (previous == 0)
+    {
+      active_mask_stack_.push_back(0);
+      return;
+    }
 
     RuleMask current_match = 0;
     if (doc_depth_ <= 0) [[unlikely]]
@@ -223,6 +228,23 @@ namespace fsp
       }
     }
   }
+  void Handler::pop_active_mask()
+  {
+    if (! active_mask_stack_.empty()) active_mask_stack_.pop_back();
+    else [[unlikely]] logic_error("active_mask_stack_ empty in endElement");
+  }
+
+  void Handler::reset_document_state()
+  {
+    // the Handler is reused for every document of a worker thread: back to the constructor's state
+    doc_depth_  = 0;
+    frag_depth_ = -1;
+    seg_type_   = -1;
+    if (! active_mask_stack_.empty()) active_mask_stack_.resize(1); // keep element 0: the "every rule still possible" mask
+    if (! ns_stack_.empty()) ns_stack_.resize(1);                   // keep element 0: the root level
+    ns_pending_.clear();
+  }
+
   [[noreturn]] void Handler::logic_error(const char* msg) const { throw std::runtime_error(str_t("internal error: ") + msg); }
 
   void Handler::startElement(const XMLCh*                  uri,
@@ -277,9 +299,13 @@ namespace fsp
         frag_depth_ = -1; // we are outside of capturing
         seg_type_   = -1; // undefined segment type
         // restore old active xpath mask
-        if (! active_mask_stack_.empty()) active_mask_stack_.pop_back();
-        else [[unlikely]] logic_error("active_mask_stack_ empty in endElement");
+        pop_active_mask();
       }
+    }
+    else if (doc_depth_ <= max_xpath_depth_) [[likely]]
+    {
+      // checked in check_xpath_matches() but not a segment root
+      pop_active_mask();
     }
     doc_depth_--;
     close_ns_scope();
