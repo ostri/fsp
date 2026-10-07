@@ -106,6 +106,7 @@ namespace fsp
     // still trigger the same cascade as finish_segment() above.
     void                                 record_segment_failed(std::size_t doc_ndx, std::size_t seg_id, pipeline_hooks& hooks);
     [[nodiscard]] segment_pool&          pool() noexcept { return seg_pool_; }
+    [[nodiscard]] const segment_pool&    pool() const noexcept { return seg_pool_; }
     [[nodiscard]] const doc_set_dscr&    ds_dscr() const noexcept { return ds_dscr_; }
     [[nodiscard]] const doc_set_counter& doc_counters() const noexcept { return *doc_counters_; }
     // This run's single run-level shared-data instance (see run_doc_data.hpp) -- constructed via

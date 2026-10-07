@@ -25,6 +25,7 @@ point of view, using it comes down to three steps:
       2. [`ok_block_flush_size` / `nak_block_flush_size`](#122-ok_block_flush_size--nak_block_flush_size)
       3. [`cutter_ratio_num` / `cutter_ratio_den`](#123-cutter_ratio_num--cutter_ratio_den)
       4. [`pool_shard_count`](#124-pool_shard_count)
+      5. [`seg_cache_size`](#125-seg_cache_size)
    3. [Getting your data out](#13-getting-your-data-out)
       1. [Attribute paths and field types](#131-attribute-paths-and-field-types)
       2. [Marking a schema class as a header segment](#132-marking-a-schema-class-as-a-header-segment)
@@ -143,8 +144,9 @@ struct importer_config
                                                       // --- advanced settings ---
   std::optional<bool>    cut_with_validation;         // advanced tuning, leave as std::nullopt
   std::size_t            cutter_ratio_num = 13;       // advanced tuning, leave at default
-  std::size_t            cutter_ratio_den = 6;        // advanced tuning, leave at default
+  std::size_t            cutter_ratio_den = 10;       // advanced tuning, leave at default
   std::size_t            pool_shard_count = 2;        // advanced tuning, leave at default
+  std::size_t            seg_cache_size   = 4194304;  // segment slots between C and P, see 1.2.5
 };
 ```
 
@@ -200,12 +202,15 @@ sooner, at the cost of more, smaller calls.
 
 #### 1.2.3. `cutter_ratio_num` / `cutter_ratio_den`
 
-Advanced tuning knob for the C (cutting) to P (processing) worker-thread ratio -- leave at the
-default (13:6) unless you have your own benchmark showing a different ratio works better for your
-documents. The number of cutter threads is capped by document count (cutting more documents at
-once than you have documents to cut is pointless), and the number of processor threads is then
-derived from that cutter count using this ratio. 13:6 was found empirically fastest on a
-10-document/10M-transaction benchmark, tested against 13:5, 13:7, and 13:8.
+Advanced tuning knob for the C (cutting) to P (processing) worker-thread ratio
+-- leave at the default (13:10) unless you have your own benchmark showing a
+different ratio works better for your documents. The number of cutter threads
+is capped by document count (cutting more documents at once than you have
+documents to cut is pointless), and the number of processor threads is then
+derived from that cutter count using this ratio. 13:10 was found empirically
+fastest on a 10-document/10M-transaction benchmark with 20 hardware threads
+(41.16s at 13:10, against 51.41s at 13:6, the previous default; 13:13 -- one
+processor thread per hardware thread -- was worse, 50.49s).
 
 #### 1.2.4. `pool_shard_count`
 
@@ -214,6 +219,37 @@ ready/free queues into. More shards mean less lock contention between concurrent
 processing threads, at the cost of some memory/bookkeeping overhead per shard. The default (2)
 was found empirically fastest when tested against 1, 3, and 4 shards -- only change this if your
 own measurements show otherwise for your workload.
+
+#### 1.2.5. `seg_cache_size`
+
+Number of segment slots in the cache between C (cutter) and P
+(processor). The cutter takes one slot per segment it cuts; a
+P-role thread gives the slot back once the segment has been
+processed and stored.
+
+- Default: 4194304 (4M) segments.
+- The value is rounded up to a whole number of blocks
+  (`blocked_vector<segment_slot>::block_size()`, 128 slots at
+  present). Blocks are allocated lazily, when their first slot
+  is used.
+- When the cache is full, the cutter waits for a free slot.
+- Lower bound: a value below
+  `workers * (ok_block_flush_size + nak_block_flush_size)` is
+  raised to that number and a warning is logged. P-role threads
+  keep their slots until a batch is flushed (see
+  [1.2.2](#122-ok_block_flush_size--nak_block_flush_size)); with
+  fewer slots than that the cutter waits for a slot while every
+  P-role thread waits for work, and the run does not finish.
+- Log lines:
+  - info, at start: `Segment cache: requested <n> segments,
+    allocated <b> blocks x <size> = <m> segments (<s> shard(s))`
+  - warn, every time the cutter has to wait: `Segment cache
+    full: <b> blocks, <m> segments. Cutter waits for a free
+    slot`
+
+Measured import time (10M transactions, 14 workers, one run
+each, about +-10% noise): 8M 92s, 4M 92s, 2M 95s, 1M 96s,
+512k 101s, 256k 123s, 128k 113s, 32k 124s.
 
 ### 1.3. Getting your data out
 
@@ -1466,7 +1502,7 @@ Proposed queue entry shape:
 | `pipeline::v_queue_`             | `lock_queue<std::size_t>`                               | Document indices waiting to be validated (V), only used in separate-pass mode (see [`cut_with_validation`](#121-cut_with_validation)). One instance, shared by every worker thread; `try_pop_validate()`/`pipeline_worker::do_validate()` drain it. |
 | `segment_pool::ready_queues_`    | `std::vector<lock_queue<std::size_t>>` (one per shard) | Ordinary (non-header) segment slot indices ready for a P-role thread to process, produced by the cutter's `Handler::endElement()` via `push_ready()`. Sharded by `importer_config::pool_shard_count` to cut lock contention between concurrent C/P threads (see [`pool_shard_count`](#124-pool_shard_count)); a thread tries its own shard first, then sweeps the others. |
 | `segment_pool::header_ready_queues_` | `std::vector<lock_queue<std::size_t>>` (one per shard) | Same role as `ready_queues_`, but only for segments whose schema class derives from `hdr_seg_schema` (see [1.3.2](#132-marking-a-schema-class-as-a-header-segment)). Every P-role thread drains this set first, before ever looking at `ready_queues_`, so a header segment can never be starved behind an unbounded pile of ordinary ones (see [2.3.1](#231-header-segments-are-processed-first)). |
-| `segment_pool::free_queues_`     | `std::vector<lock_queue<std::size_t>>` (one per shard) | Pool slot indices no longer in use, ready to be handed back out by `acquire_slot()`. A P-role thread pushes a slot back here (`release_slots()`) once it's fully done with a segment (past any storage hook); the cutter pops from here before ever growing the pool's own high-water mark. |
+| `segment_pool::free_queues_`     | `std::vector<lock_queue<std::size_t>>` (one per shard) | Pool slot indices no longer in use, ready to be handed back out by `acquire_slot()`. A P-role thread pushes a slot back here (`release_slots()`) once it's fully done with a segment (past any storage hook); the cutter pops from here before ever growing the pool's own high-water mark. The pool's total capacity is [`seg_cache_size`](#125-seg_cache_size). |
 
 `segment_pool.hpp` also declares a `using ndx_queue = lock_queue<std::size_t>;` alias and
 `xml_worker.hpp` a `using segment_queue = lock_queue<xml_segment>;` one -- neither backs an actual
