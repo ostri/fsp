@@ -177,8 +177,18 @@ namespace fsp
   {
     if (active_mask_stack_.empty()) [[unlikely]]
       logic_error("active_mask_stack_ is empty");
+    // active_mask_stack_ is kept in step with the XML element stack: this call pushes exactly one
+    // mask for the element being opened, and endElement() pops exactly one for it (a segment's own
+    // root element is popped at the end of its capture, every other checked element in the
+    // unconditional branch of endElement()). Hence the push below must also happen when the
+    // enclosing mask is already 0 (nothing can match inside an unmatched subtree) - an early return
+    // without a push would make that element's own endElement() pop a mask it never pushed.
     RuleMask previous = active_mask_stack_.back();
-    if (previous == 0) return;
+    if (previous == 0)
+    {
+      active_mask_stack_.push_back(0);
+      return;
+    }
 
     RuleMask current_match = 0;
     if (doc_depth_ <= 0) [[unlikely]]
@@ -223,6 +233,25 @@ namespace fsp
       }
     }
   }
+  void Handler::pop_active_mask()
+  {
+    if (! active_mask_stack_.empty()) active_mask_stack_.pop_back();
+    else [[unlikely]] logic_error("active_mask_stack_ empty in endElement");
+  }
+
+  void Handler::reset_document_state()
+  {
+    // Handler is owned by one worker thread and reused for every document it cuts - nothing a
+    // previous document (successfully cut, or aborted half-way by a parser/validity error, see
+    // doc_cutter::cut()) left behind may influence the next one. Back to what the constructor sets up.
+    doc_depth_  = 0;
+    frag_depth_ = -1;
+    seg_type_   = -1;
+    if (! active_mask_stack_.empty()) active_mask_stack_.resize(1); // keep element 0: the "every rule still possible" mask
+    if (! ns_stack_.empty()) ns_stack_.resize(1);                   // keep element 0: the root level
+    ns_pending_.clear();
+  }
+
   [[noreturn]] void Handler::logic_error(const char* msg) const { throw std::runtime_error(str_t("internal error: ") + msg); }
 
   void Handler::startElement(const XMLCh*                  uri,
@@ -277,9 +306,16 @@ namespace fsp
         frag_depth_ = -1; // we are outside of capturing
         seg_type_   = -1; // undefined segment type
         // restore old active xpath mask
-        if (! active_mask_stack_.empty()) active_mask_stack_.pop_back();
-        else [[unlikely]] logic_error("active_mask_stack_ empty in endElement");
+        pop_active_mask();
       }
+    }
+    else if (doc_depth_ <= max_xpath_depth_) [[likely]]
+    {
+      // Not inside a segment: this element was checked by check_xpath_matches() when it opened
+      // (see its own comment) - without this pop, an element that matched no segment type (e.g.
+      // pacs.002's OrgnlGrpInfAndSts between GrpHdr and TxInfAndSts) left its mask on the stack
+      // for good, and every later element at a checked depth was compared against it.
+      pop_active_mask();
     }
     doc_depth_--;
     close_ns_scope();

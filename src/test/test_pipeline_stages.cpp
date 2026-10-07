@@ -1068,6 +1068,165 @@ TEST_CASE("doc_cutter: every hdr_seg_schema segment is routed into the header qu
   CHECK(cutter.segments_found() == header_count + ordinary_count); // nothing lost, nothing double-counted
 }
 
+// --- Scenarios 12a/12b: an element that matches NO segment type, sitting at a depth the cutter
+// checks (<= the deepest xpath step), must not make the cutter lose the segments that follow it.
+//
+// Handler::check_xpath_matches() pushes a rule mask on active_mask_stack_ for every checked
+// element, and used to pop it only when a MATCHED segment ended -- an unmatched sibling left an
+// all-zero mask on top (poisoning every later sibling in the document, and, because the stack was
+// never reset, every later document cut by the same Handler). Found while implementing ict's
+// pacs.002 importer, whose OrgnlGrpInfAndSts sits between GrpHdr and TxInfAndSts. ----------------
+namespace
+{
+  enum class unmatched_at : std::uint8_t
+  {
+    none,                 // control: a clean document
+    before_root_element,  // depth 2: a child of Document, ahead of FIToFICstmrCdtTrf
+    between_hdr_and_txns, // depth 3: between the header segment and the first transaction (the ict/pacs.002 shape)
+    between_txns,         // depth 3: between two transactions
+    after_last_txn,       // depth 3: after the last transaction, nothing follows it
+  };
+
+  constexpr auto* k_unmatched_sibling = "<UnmatchedSibling><Child><Leaf>x</Leaf></Child></UnmatchedSibling>";
+
+  // multi_txn_doc() with k_unmatched_sibling inserted where `where` says (no schema validation is
+  // involved in these tests - only the cutter runs - so the extra element does not have to be valid XSD).
+  std::string doc_with_unmatched_sibling(int num_txns, unmatched_at where)
+  {
+    std::string body = multi_txn_hdr(num_txns);
+    if (where == unmatched_at::between_hdr_and_txns) body += k_unmatched_sibling;
+    for (int i = 0; i < num_txns; ++i)
+    {
+      body += multi_txn_one(i);
+      if (where == unmatched_at::between_txns && i + 1 < num_txns) body += k_unmatched_sibling;
+    }
+    if (where == unmatched_at::after_last_txn) body += k_unmatched_sibling;
+    return fmt::format(R"(<?xml version="1.0" encoding="UTF-8"?>
+<Document xmlns="urn:iso:std:iso:20022:tech:xsd:pacs.008.001.08"
+          xmlns:x="urn:iso:std:iso:20022:tech:xsd:pacs.008.001.08">
+  {}<FIToFICstmrCdtTrf>{}</FIToFICstmrCdtTrf>
+</Document>
+)",
+                       where == unmatched_at::before_root_element ? k_unmatched_sibling : "",
+                       body);
+  }
+
+  struct drained
+  {
+    std::size_t header_count   = 0;
+    std::size_t ordinary_count = 0;
+  };
+
+  // Pops (and releases the slots of) every segment cut so far - the pool has no consumer in these
+  // tests, so draining is what keeps the next document's slots available.
+  drained drain_and_release(fsp::segment_pool& pool)
+  {
+    drained                  d;
+    std::vector<std::size_t> indices;
+    for (std::size_t shard = 0; shard < pool.num_shards(); ++shard)
+    {
+      while (auto idx = pool.try_pop_ready_header(shard))
+      {
+        indices.push_back(*idx);
+        ++d.header_count;
+      }
+      while (auto idx = pool.try_pop_ready(shard))
+      {
+        indices.push_back(*idx);
+        ++d.ordinary_count;
+      }
+    }
+    pool.release_slots(indices);
+    return d;
+  }
+} // namespace
+
+TEST_CASE("doc_cutter: an unmatched element between segments does not hide the segments after it", "[doc_cutter][unmatched-sibling]")
+{
+  const auto where = GENERATE(unmatched_at::none,
+                              unmatched_at::before_root_element,
+                              unmatched_at::between_hdr_and_txns,
+                              unmatched_at::between_txns,
+                              unmatched_at::after_last_txn);
+  constexpr int num_txns = 3;
+  CAPTURE(static_cast<int>(where));
+
+  temp_dir_guard dir;
+  const auto     doc_path = dir.write("doc.xml", doc_with_unmatched_sibling(num_txns, where));
+
+  static const fsp::xerces_mgr xerces_life;
+
+  const auto log_cfg = silent_log_cfg("test-doc-cutter-unmatched-sibling");
+  auto       log_ptr = logger::Logger::create(log_cfg);
+  REQUIRE(log_ptr.has_value());
+
+  fsp::doc_set_dscr ds_dscr(**log_ptr, 1);
+  REQUIRE(ds_dscr.add_document(doc_path));
+
+  const auto cfg = fsp::importer_config{.targets        = fsp::proc_data_of<^^fsp::work>(),
+                                        .num_of_workers = 1,
+                                        .log_config     = log_cfg,
+                                        .program_name   = "test-doc-cutter-unmatched-sibling"};
+
+  fsp::segment_pool pool(**log_ptr, /*no_of_slots=*/static_cast<std::size_t>(num_txns) + 1, /*num_shards=*/2);
+  fsp::doc_cutter   cutter(cfg, **log_ptr, pool, ds_dscr);
+  REQUIRE(cutter.init());
+  REQUIRE(cutter.cut(0));
+
+  const auto d = drain_and_release(pool);
+  CHECK(d.header_count == 1);
+  CHECK(d.ordinary_count == static_cast<std::size_t>(num_txns));
+  CHECK(cutter.segments_found() == 1 + static_cast<std::size_t>(num_txns));
+}
+
+TEST_CASE("doc_cutter: an unmatched element in one document does not carry over to the next document cut by the same cutter",
+          "[doc_cutter][unmatched-sibling][carry-over]")
+{
+  // The same doc_cutter (= the same Handler, as one pipeline worker thread owns one) cuts several
+  // documents in a row. Document 0 contains the troublesome element at every position; documents 1+
+  // are clean and must come out complete regardless of what document 0 left behind.
+  constexpr int num_txns = 3;
+
+  temp_dir_guard dir;
+  std::vector<std::string> paths;
+  paths.push_back(dir.write("doc-0.xml", doc_with_unmatched_sibling(num_txns, unmatched_at::between_hdr_and_txns)));
+  paths.push_back(dir.write("doc-1.xml", doc_with_unmatched_sibling(num_txns, unmatched_at::none)));
+  paths.push_back(dir.write("doc-2.xml", doc_with_unmatched_sibling(num_txns, unmatched_at::before_root_element)));
+  paths.push_back(dir.write("doc-3.xml", doc_with_unmatched_sibling(num_txns, unmatched_at::between_txns)));
+  paths.push_back(dir.write("doc-4.xml", doc_with_unmatched_sibling(num_txns, unmatched_at::after_last_txn)));
+  paths.push_back(dir.write("doc-5.xml", doc_with_unmatched_sibling(num_txns, unmatched_at::none)));
+  // many clean documents afterwards - also shows the mask stack does not make cutting degrade over time
+  for (int i = 6; i < 40; ++i) paths.push_back(dir.write(fmt::format("doc-{}.xml", i), doc_with_unmatched_sibling(num_txns, unmatched_at::none)));
+
+  static const fsp::xerces_mgr xerces_life;
+
+  const auto log_cfg = silent_log_cfg("test-doc-cutter-carry-over");
+  auto       log_ptr = logger::Logger::create(log_cfg);
+  REQUIRE(log_ptr.has_value());
+
+  fsp::doc_set_dscr ds_dscr(**log_ptr, paths.size());
+  for (const auto& path : paths) REQUIRE(ds_dscr.add_document(path));
+
+  const auto cfg = fsp::importer_config{.targets        = fsp::proc_data_of<^^fsp::work>(),
+                                        .num_of_workers = 1,
+                                        .log_config     = log_cfg,
+                                        .program_name   = "test-doc-cutter-carry-over"};
+
+  fsp::segment_pool pool(**log_ptr, /*no_of_slots=*/static_cast<std::size_t>(num_txns) + 1, /*num_shards=*/2);
+  fsp::doc_cutter   cutter(cfg, **log_ptr, pool, ds_dscr);
+  REQUIRE(cutter.init());
+
+  for (std::size_t doc_ndx = 0; doc_ndx < paths.size(); ++doc_ndx)
+  {
+    CAPTURE(doc_ndx);
+    REQUIRE(cutter.cut(doc_ndx));
+    const auto d = drain_and_release(pool);
+    CHECK(d.header_count == 1);
+    CHECK(d.ordinary_count == static_cast<std::size_t>(num_txns));
+    CHECK(cutter.segments_found() == 1 + static_cast<std::size_t>(num_txns));
+  }
+}
+
 // --- Scenario 13: a HEADER segment's own on_type() returning false is error_class::he, not te --
 // pipeline::check_segment_semantics() looks up the FAILING segment's own subtree_type() against
 // cfg_.targets.is_header to tell the two apart (see its own doc comment) -- this proves that
