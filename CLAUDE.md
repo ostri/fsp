@@ -9,6 +9,7 @@
 
 ## Working conventions
 
+- All own notes (findings, design, status) go into `docs/internals.md` only. Do not pile comments into code or notes into other `.md` files.
 - Conversation with the user is in Slovenian; answers are short and to the point.
 - All code, code comments, documentation and instructions written into files are in English.
 - Tech stack: C++23/26, DB2 and PostgreSQL (psql).
