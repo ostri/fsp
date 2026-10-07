@@ -1169,6 +1169,90 @@ TEST_CASE("doc_cutter: an unmatched element between segments does not hide the s
   CHECK(cutter.segments_found() == 1 + static_cast<std::size_t>(num_txns));
 }
 
+// --- compact XML: a segment whose first child follows the opening tag without any whitespace must
+// still be re-wrapped under its own element name (not under the first child's) ---
+namespace
+{
+  // removes every run of whitespace between '>' and '<' - what a machine-written, single-line document looks like
+  std::string compacted(std::string xml)
+  {
+    std::string out;
+    out.reserve(xml.size());
+    bool after_gt = false;
+    for (std::size_t i = 0; i < xml.size(); ++i)
+    {
+      const char c = xml[i];
+      if (after_gt && (c == ' ' || c == '\n' || c == '\r' || c == '\t'))
+      {
+        std::size_t j = i;
+        while (j < xml.size() && (xml[j] == ' ' || xml[j] == '\n' || xml[j] == '\r' || xml[j] == '\t')) ++j;
+        if (j < xml.size() && xml[j] == '<')
+        {
+          i = j - 1;
+          continue;
+        }
+      }
+      after_gt = c == '>';
+      out += c;
+    }
+    return out;
+  }
+} // namespace
+
+TEST_CASE("doc_cutter: a compact document's segments are re-wrapped under their own element name", "[doc_cutter][compact-xml]")
+{
+  const auto compact = GENERATE(false, true);
+  CAPTURE(compact);
+  constexpr int num_txns = 2;
+
+  temp_dir_guard dir;
+  const auto     doc    = multi_txn_doc(num_txns);
+  const auto     doc_path = dir.write("doc.xml", compact ? compacted(doc) : doc);
+  if (compact) REQUIRE(doc.size() > compacted(doc).size());
+
+  static const fsp::xerces_mgr xerces_life;
+
+  const auto log_cfg = silent_log_cfg("test-doc-cutter-compact");
+  auto       log_ptr = logger::Logger::create(log_cfg);
+  REQUIRE(log_ptr.has_value());
+
+  fsp::doc_set_dscr ds_dscr(**log_ptr, 1);
+  REQUIRE(ds_dscr.add_document(doc_path));
+
+  const auto cfg = fsp::importer_config{.targets        = fsp::proc_data_of<^^fsp::work>(),
+                                        .num_of_workers = 1,
+                                        .log_config     = log_cfg,
+                                        .program_name   = "test-doc-cutter-compact"};
+
+  fsp::segment_pool pool(**log_ptr, /*no_of_slots=*/static_cast<std::size_t>(num_txns) + 1, /*num_shards=*/1);
+  fsp::doc_cutter   cutter(cfg, **log_ptr, pool, ds_dscr);
+  REQUIRE(cutter.init());
+  REQUIRE(cutter.cut(0));
+
+  const auto* base = ds_dscr[0].mmf().data();
+  std::size_t checked = 0;
+  std::vector<std::size_t> indices;
+  for (std::size_t shard = 0; shard < pool.num_shards(); ++shard)
+  {
+    while (auto idx = pool.try_pop_ready_header(shard))
+    {
+      indices.push_back(*idx);
+      const auto& seg = pool.segment_at(*idx);
+      CHECK(seg.subtree_str(seg.view(base)).starts_with("<x:GrpHdr"));
+      ++checked;
+    }
+    while (auto idx = pool.try_pop_ready(shard))
+    {
+      indices.push_back(*idx);
+      const auto& seg = pool.segment_at(*idx);
+      CHECK(seg.subtree_str(seg.view(base)).starts_with("<CdtTrfTxInf"));
+      ++checked;
+    }
+  }
+  pool.release_slots(indices);
+  CHECK(checked == 1 + static_cast<std::size_t>(num_txns));
+}
+
 TEST_CASE("doc_cutter: an unmatched element in one document does not carry over to the next document cut by the same cutter",
           "[doc_cutter][unmatched-sibling][carry-over]")
 {

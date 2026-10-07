@@ -53,7 +53,9 @@ namespace fsp
   {
     if (base.empty()) throw std::logic_error("empty base in extract_qname");
     // NOLINTBEGIN(cppcoreguidelines-pro-bounds-pointer-arithmetic)
-    const char* pos = base.data(); // we are starting with first child or next neighbour
+    // base.data() is the first char of the content, i.e. one past the '>' of the opening tag. Start at that '>' (not at the
+    // content): in compact XML the content begins with the '<' of the first child, which would be taken for the tag we look for.
+    const char* pos = base.data() - 1;
 
     // Find fast back character '<' with limitation
     constexpr std::size_t max_scan = 512; // logically we dont need this limit, bu t in case
