@@ -29,6 +29,7 @@ namespace fsp
     // which now take a doc_set_dscr since doc_status_t (see doc_dscr.hpp) lives there, not inside
     // doc_counters (see doc_set_counter.hpp).
     [[nodiscard]] const doc_set_dscr& ds_dscr() const noexcept;
+    [[nodiscard]] std::size_t         seg_cache_slots() const noexcept;
 
     /**
      * @brief The only way to run an import: builds an importer on the heap and runs
@@ -104,6 +105,7 @@ namespace fsp
   { return impl_.process_files(docs, xsd_path, hooks); }
   inline std::vector<std::size_t> importer::failed_document_indices() const { return impl_.failed_document_indices(); }
   inline const doc_set_dscr&      importer::ds_dscr() const noexcept { return impl_.ds_dscr(); }
+  inline std::size_t              importer::seg_cache_slots() const noexcept { return impl_.pool().size(); }
 
   inline std::pair<std::unique_ptr<importer>, result<doc_set_counter>> importer::exec(const importer_config&       cfg,
                                                                                       const std::vector<doc_info>& docs,

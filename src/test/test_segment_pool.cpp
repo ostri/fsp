@@ -174,4 +174,14 @@ TEST_CASE("importer_config: default seg_cache_size is 4M segments, a whole numbe
   CHECK(cfg.dump(0).find("seg_cache_size: 4194304") != std::string::npos);
 }
 
+TEST_CASE("importer_config::min_seg_cache() is workers x (ok + failed flush batch)", "[importer_config][positive]")
+{
+  fsp::importer_config cfg;
+  cfg.ok_block_flush_size  = 256;
+  cfg.nak_block_flush_size = 32;
+  CHECK(cfg.min_seg_cache(0) == 0);
+  CHECK(cfg.min_seg_cache(1) == 288);
+  CHECK(cfg.min_seg_cache(14) == 14 * 288);
+}
+
 // NOLINTEND(readability-magic-numbers)

@@ -574,7 +574,7 @@ namespace fsp
 
     const auto doc_count = docs.size();
     const auto plan      = plan_run(doc_count);
-    const std::size_t min_seg_cache = plan.num_parallel * (cfg_.ok_block_flush_size + cfg_.nak_block_flush_size);
+    const std::size_t min_seg_cache = cfg_.min_seg_cache(plan.num_parallel);
     if (cfg_.seg_cache_size < min_seg_cache)
     {
       log_.warn(fmt::format("seg_cache_size {} is below {} workers x ({} ok + {} failed) segments held in flush batches; raised to {} "
