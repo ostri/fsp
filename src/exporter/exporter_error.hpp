@@ -36,7 +36,7 @@ namespace fsp
   /// already includes this file).
   using drain_t = int;
   /// @brief Document id. 64-bit: in the two-phase model (see cb_exporter::compute_drain_stat())
-  /// this is a concrete callback's own snowflake id (e.g. ach's rtl::unique_id(), uint64_t), not a
+  /// this is a concrete callback's own snowflake id (e.g. os3::util::unique_id(), uint64_t), not a
   /// small sequential counter - see exporter_state::next_doc_id()'s own doc comment for the
   /// single-phase model's own (still supported) sequential-counter allocation, which fits in the
   /// same 64-bit type without truncation either.
